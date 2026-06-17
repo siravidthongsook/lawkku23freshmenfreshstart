@@ -20,6 +20,10 @@ COPY --from=deps /app/web/node_modules ./web/node_modules
 COPY --from=rootdeps /app/node_modules ./node_modules
 COPY src ./src
 COPY web ./web
+# Next bakes rewrites() into the route manifest at BUILD time, so the backend URL
+# must be present here (not just at runtime). Defaults to the compose network address.
+ARG BACKEND_URL=http://api:3000
+ENV BACKEND_URL=$BACKEND_URL
 RUN cd web && pnpm build
 
 # runner: reuse build image, start Next on 33490 (matches `next start -p 33490`)

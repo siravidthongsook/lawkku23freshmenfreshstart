@@ -41,6 +41,9 @@ services:
     build:
       context: . # repo root: web build needs ../src for shared @be/* schemas
       dockerfile: web/Dockerfile
+      args:
+        # baked into Next route manifest at build time (rewrites evaluated then)
+        BACKEND_URL: http://api:3000
     depends_on:
       - api
     environment:
