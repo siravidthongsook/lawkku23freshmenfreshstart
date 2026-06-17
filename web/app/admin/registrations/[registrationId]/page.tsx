@@ -1,0 +1,375 @@
+"use client";
+
+// Registration Detail (L3). GET /admin/registrations/:id → { registration, answers, fileIds, auditHistory }.
+// ALL mutating actions require a reason and emit an audit log; we gate each behind the ReasonDialog.
+import { use, useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { ArrowLeft, Download } from "lucide-react";
+import { toast } from "sonner";
+import { apiGet, apiPatch, apiPost, ApiError } from "@/lib/api";
+import type { RegistrationStatus } from "@/lib/types";
+import { formatBangkok } from "@/lib/time";
+import { RegistrationStatusBadge } from "@/components/badges";
+import { ReasonDialog } from "@/components/admin-events/reason-dialog";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+
+// Reg row as serialized by the backend (registrations service.serializeRegistration).
+type RegistrationDetail = {
+  id: string;
+  eventId: string;
+  userId: string;
+  status: RegistrationStatus;
+  formVersionId: string | null;
+  registeredAt: string | null;
+  waitlistedAt: string | null;
+  checkedInAt: string | null;
+  cancelledAt: string | null;
+  checkinMethod: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+// Audit row (append-only). Shape inferred from audit table — render the common columns defensively.
+type AuditRow = {
+  id: string;
+  action: string;
+  reason: string | null;
+  createdAt: string;
+  actorUserId?: string | null;
+};
+
+type DetailResponse = {
+  registration: RegistrationDetail;
+  answers: Record<string, unknown>;
+  fileIds: string[];
+  auditHistory: AuditRow[];
+};
+
+// Which reason-gated action the dialog is currently driving.
+type Action =
+  | { kind: "cancel" }
+  | { kind: "promote" }
+  | { kind: "demote" }
+  | { kind: "qr_regenerate" }
+  | { kind: "qr_revoke" }
+  | { kind: "edit_answers" };
+
+const ACTION_META: Record<
+  Action["kind"],
+  { title: string; description: string; confirm: string; destructive?: boolean }
+> = {
+  cancel: {
+    title: "Cancel registration",
+    description: "Sets the registration to cancelled and revokes any active QR.",
+    confirm: "Cancel registration",
+    destructive: true,
+  },
+  promote: {
+    title: "Promote from waitlist",
+    description: "Moves a waitlisted registration to registered and issues a QR.",
+    confirm: "Promote",
+  },
+  demote: {
+    title: "Demote to waitlist",
+    description: "Moves a registered registration back to waitlisted and revokes its QR.",
+    confirm: "Demote",
+  },
+  qr_regenerate: {
+    title: "Regenerate QR",
+    description: "Revokes the current QR and issues a new one.",
+    confirm: "Regenerate",
+  },
+  qr_revoke: {
+    title: "Revoke QR",
+    description: "Revokes the active QR token. The student can no longer check in until reissued.",
+    confirm: "Revoke",
+    destructive: true,
+  },
+  edit_answers: {
+    title: "Edit answers",
+    description: "Saves the edited answers against the registration's own form version.",
+    confirm: "Save answers",
+  },
+};
+
+export default function RegistrationDetailPage({
+  params,
+}: {
+  params: Promise<{ registrationId: string }>;
+}) {
+  const { registrationId } = use(params);
+  const [data, setData] = useState<DetailResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [action, setAction] = useState<Action | null>(null);
+
+  // Editable answers buffer (only sent on the "edit_answers" action).
+  const [draftAnswers, setDraftAnswers] = useState<Record<string, unknown>>({});
+
+  const load = useCallback(async () => {
+    try {
+      const res = await apiGet<DetailResponse>(`/admin/registrations/${registrationId}`);
+      setData(res);
+      setDraftAnswers(res.answers ?? {});
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to load registration.");
+    }
+  }, [registrationId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // Single reason-gated mutation dispatcher. Throws on failure to keep the dialog open.
+  async function runAction(reason: string) {
+    const base = `/admin/registrations/${registrationId}`;
+    if (!action) return;
+    switch (action.kind) {
+      case "cancel":
+        await apiPost(`${base}/cancel`, { reason });
+        break;
+      case "promote":
+        await apiPost(`${base}/promote`, { reason });
+        break;
+      case "demote":
+        await apiPost(`${base}/demote`, { reason });
+        break;
+      case "qr_regenerate":
+        await apiPost(`${base}/qr/regenerate`, { reason });
+        break;
+      case "qr_revoke":
+        await apiPost(`${base}/qr/revoke`, { reason });
+        break;
+      case "edit_answers":
+        await apiPatch(`${base}/answers`, { answers: draftAnswers, reason });
+        break;
+    }
+    toast.success("Done. Recorded in the audit log.");
+    await load();
+  }
+
+  if (error) return <p className="text-sm text-destructive">{error}</p>;
+  if (!data) {
+    return (
+      <div className="space-y-3">
+        <Skeleton className="h-10 w-64" />
+        <Skeleton className="h-40 w-full" />
+      </div>
+    );
+  }
+
+  const reg = data.registration;
+  const status = reg.status;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Button asChild variant="ghost" size="sm">
+            <Link href={`/admin/events/${reg.eventId}/registrations`}>
+              <ArrowLeft className="size-4" />
+              Back
+            </Link>
+          </Button>
+          <h1 className="text-xl font-semibold">Registration</h1>
+          <RegistrationStatusBadge status={status} />
+        </div>
+        {/* Status-aware action buttons. Each opens the reason dialog. */}
+        <div className="flex flex-wrap items-center gap-2">
+          {status === "waitlisted" ? (
+            <Button variant="outline" size="sm" onClick={() => setAction({ kind: "promote" })}>
+              Promote
+            </Button>
+          ) : null}
+          {status === "registered" ? (
+            <Button variant="outline" size="sm" onClick={() => setAction({ kind: "demote" })}>
+              Demote
+            </Button>
+          ) : null}
+          {status !== "cancelled" && status !== "waitlisted" ? (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setAction({ kind: "qr_regenerate" })}
+              >
+                Regenerate QR
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setAction({ kind: "qr_revoke" })}>
+                Revoke QR
+              </Button>
+            </>
+          ) : null}
+          {status !== "cancelled" ? (
+            <Button variant="destructive" size="sm" onClick={() => setAction({ kind: "cancel" })}>
+              Cancel
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Profile / status. User profile fields are not in the admin payload yet — show IDs we have. */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Details</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3 text-sm sm:grid-cols-2">
+          <Detail label="User ID" value={reg.userId} mono />
+          <Detail label="Form version ID" value={reg.formVersionId ?? "—"} mono />
+          <Detail label="Registered" value={formatBangkok(reg.registeredAt) || "—"} />
+          <Detail label="Waitlisted" value={formatBangkok(reg.waitlistedAt) || "—"} />
+          <Detail label="Checked in" value={formatBangkok(reg.checkedInAt) || "—"} />
+          <Detail label="Check-in method" value={reg.checkinMethod ?? "—"} />
+          <Detail label="Cancelled" value={formatBangkok(reg.cancelledAt) || "—"} />
+        </CardContent>
+      </Card>
+
+      {/* Files (download via authorized backend endpoint; opens stream). */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Files</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {data.fileIds.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No files.</p>
+          ) : (
+            <ul className="space-y-2">
+              {data.fileIds.map((fid) => (
+                <li key={fid} className="flex items-center justify-between gap-2 text-sm">
+                  <span className="font-mono text-xs">{fid}</span>
+                  <Button asChild variant="outline" size="sm">
+                    {/* Authorized download endpoint streams the file; admin download is audited server-side. */}
+                    <a href={`/api/files/${fid}/download`} target="_blank" rel="noreferrer">
+                      <Download className="size-4" />
+                      Download
+                    </a>
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Form answers — editable. "Save answers" requires a reason + audits. */}
+      <Card>
+        <CardHeader className="flex-row items-center justify-between">
+          <CardTitle className="text-sm">Answers</CardTitle>
+          <Button variant="secondary" size="sm" onClick={() => setAction({ kind: "edit_answers" })}>
+            Save answers
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {Object.keys(draftAnswers).length === 0 ? (
+            <p className="text-sm text-muted-foreground">No answers recorded.</p>
+          ) : (
+            Object.entries(draftAnswers).map(([key, value]) => (
+              <AnswerField
+                key={key}
+                fieldKey={key}
+                value={value}
+                onChange={(v) => setDraftAnswers((prev) => ({ ...prev, [key]: v }))}
+              />
+            ))
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Audit history for this registration (append-only). */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Audit history</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {data.auditHistory.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No history.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>When</TableHead>
+                  <TableHead>Action</TableHead>
+                  <TableHead>Reason</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.auditHistory.map((a) => (
+                  <TableRow key={a.id}>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {formatBangkok(a.createdAt)}
+                    </TableCell>
+                    <TableCell className="text-sm">{a.action}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {a.reason ?? "—"}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <ReasonDialog
+        open={action !== null}
+        onOpenChange={(next) => {
+          if (!next) setAction(null);
+        }}
+        title={action ? ACTION_META[action.kind].title : ""}
+        description={action ? ACTION_META[action.kind].description : undefined}
+        confirmLabel={action ? ACTION_META[action.kind].confirm : "Confirm"}
+        destructive={action ? ACTION_META[action.kind].destructive : false}
+        onConfirm={runAction}
+      />
+    </div>
+  );
+}
+
+function Detail({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className={mono ? "font-mono text-xs" : ""}>{value}</p>
+    </div>
+  );
+}
+
+// Render a single answer as an editable input. Strings/numbers inline; arrays/objects read-only JSON.
+function AnswerField({
+  fieldKey,
+  value,
+  onChange,
+}: {
+  fieldKey: string;
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  const editable = typeof value === "string" || typeof value === "number";
+  return (
+    <div className="space-y-1">
+      <p className="text-xs text-muted-foreground">{fieldKey}</p>
+      {editable ? (
+        <input
+          className="w-full rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+          value={String(value)}
+          onChange={(e) =>
+            onChange(typeof value === "number" ? Number(e.target.value) : e.target.value)
+          }
+        />
+      ) : (
+        <pre className="overflow-x-auto rounded-md bg-muted p-2 text-xs">
+          {JSON.stringify(value, null, 2)}
+        </pre>
+      )}
+    </div>
+  );
+}

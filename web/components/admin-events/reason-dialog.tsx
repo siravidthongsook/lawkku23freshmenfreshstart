@@ -1,0 +1,100 @@
+"use client";
+
+// Reusable reason-prompt dialog for sensitive admin actions (cancel/promote/demote/QR/answers edit).
+// Reason is MANDATORY: submit stays disabled until a non-empty reason is given (matches backend reasonSchema).
+import { useState } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { reasonSchema } from "@/lib/schemas";
+
+export type ReasonDialogProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  description?: string;
+  confirmLabel?: string;
+  destructive?: boolean;
+  // Called with the validated reason; should perform the mutation and may throw (caller toasts).
+  onConfirm: (reason: string) => Promise<void>;
+};
+
+export function ReasonDialog({
+  open,
+  onOpenChange,
+  title,
+  description,
+  confirmLabel = "Confirm",
+  destructive = false,
+  onConfirm,
+}: ReasonDialogProps) {
+  const [reason, setReason] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  // reasonSchema trims + requires min(1) — mirror that to gate the submit button.
+  const reasonValid = reasonSchema.safeParse({ reason }).success;
+
+  async function handleConfirm() {
+    if (!reasonValid || submitting) return;
+    setSubmitting(true);
+    try {
+      await onConfirm(reason.trim());
+      setReason("");
+      onOpenChange(false);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) setReason(""); // reset on close
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          {description ? <DialogDescription>{description}</DialogDescription> : null}
+        </DialogHeader>
+        <div className="space-y-2">
+          <Label htmlFor="reason">
+            Reason <span className="text-destructive">*</span>
+          </Label>
+          <Textarea
+            id="reason"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Required — recorded in the audit log"
+            rows={3}
+          />
+          <p className="text-xs text-muted-foreground">
+            This action is recorded in the audit log and cannot be undone without another action.
+          </p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button
+            variant={destructive ? "destructive" : "default"}
+            onClick={handleConfirm}
+            disabled={!reasonValid || submitting}
+          >
+            {submitting ? "Working…" : confirmLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

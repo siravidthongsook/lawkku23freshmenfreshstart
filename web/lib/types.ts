@@ -1,0 +1,123 @@
+// Frontend-only response shapes inferred from docs/02-api-contract.md + docs/03-page-list.md.
+// Backend does not yet export these response types — ALIGN these when backend exported shapes land.
+// All timestamp fields are ISO-8601 UTC strings over the wire (render via @/lib/time).
+
+import type { FormSchema } from "@/lib/schemas";
+
+export type Role = "student" | "checkin_staff" | "admin";
+export type EventStatus = "draft" | "published" | "cancelled" | "archived";
+export type EventVisibility = "listed" | "unlisted";
+export type RegistrationMode = "public_self_register" | "admin_import_only" | "closed";
+export type RegistrationStatus = "registered" | "waitlisted" | "checked_in" | "cancelled";
+
+// GET /auth/me — current user + forced-change flag.
+export type Me = {
+  id: string;
+  email: string;
+  studentId: string | null;
+  fullName: string;
+  faculty: string | null;
+  department: string | null;
+  phone: string | null;
+  role: Role;
+  status: "active" | "disabled";
+  passwordMustChange: boolean;
+};
+
+// Public event (GET /events, GET /events/:slug). Capacity numbers omitted when capacity disabled.
+export type EventPublic = {
+  id: string;
+  publicId: string;
+  publicSlug: string;
+  title: string;
+  description: string | null;
+  location: string | null;
+  status: EventStatus;
+  visibility: EventVisibility;
+  registrationMode: RegistrationMode;
+  registrationOpenAt: string | null;
+  registrationCloseAt: string | null;
+  checkinOpenAt: string | null;
+  checkinCloseAt: string | null;
+  eventStartAt: string | null;
+  eventEndAt: string | null;
+  capacityEnabled: boolean;
+  capacityLimit: number | null;
+  registeredCount: number;
+  waitlistEnabled: boolean;
+  // OPTIONAL active registration form. Backend MAY include it; tolerant shape (bare schema or {schema}).
+  // When present with fields, the public register flow must collect answers. Absent → formless register.
+  form?: { version?: number; schema: FormSchema } | FormSchema | null;
+};
+
+// Admin event row (GET /admin/events) — superset incl. cancel/edit config + counts.
+export type EventAdmin = EventPublic & {
+  registeredCount: number;
+  checkedInCount: number;
+  cancelledCount: number;
+  waitlistedCount: number;
+  allowStudentCancelRegistration: boolean;
+  cancelRegistrationCloseAt: string | null;
+  allowStudentEditRegistration: boolean;
+  editRegistrationCloseAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+// Row in a registration list (GET /me/registrations, GET /admin/events/:id/registrations).
+export type RegistrationListItem = {
+  id: string;
+  eventId: string;
+  eventTitle: string;
+  eventStartAt: string | null;
+  studentId: string | null;
+  fullName: string;
+  faculty: string | null;
+  department: string | null;
+  status: RegistrationStatus;
+  registeredAt: string | null;
+  checkedInAt: string | null;
+  checkedInBy: string | null;
+  cancelledAt: string | null;
+  waitlistedAt: string | null;
+  formVersion: string | null;
+};
+
+// User row (GET /admin/users).
+export type UserListItem = {
+  id: string;
+  email: string;
+  studentId: string | null;
+  fullName: string;
+  faculty: string | null;
+  department: string | null;
+  phone: string | null;
+  role: Role;
+  status: "active" | "disabled";
+  passwordMustChange: boolean;
+  createdAt: string;
+};
+
+// Scan result codes — see docs/02 §Check-in. UI maps each to a success/deny/error treatment.
+export type ScanResultCode =
+  | "checked_in_success"
+  | "already_checked_in"
+  | "wrong_event"
+  | "registration_cancelled"
+  | "waitlisted_not_allowed"
+  | "checkin_not_open"
+  | "checkin_closed"
+  | "event_not_published"
+  | "event_cancelled"
+  | "qr_revoked"
+  | "qr_invalid"
+  | "network_error";
+
+// Import row status — mirrors backend ROW_STATUSES (kept here for UI without importing server-only code).
+export type ImportRowStatus =
+  | "will_create"
+  | "will_update"
+  | "invalid"
+  | "duplicate_email"
+  | "duplicate_student_id"
+  | "will_register_over_capacity";

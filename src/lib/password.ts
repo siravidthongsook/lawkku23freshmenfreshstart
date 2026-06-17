@@ -1,0 +1,41 @@
+import argon2 from "argon2";
+import { randomInt } from "node:crypto";
+
+// Argon2id hashing. Policy + readable temp-password generation.
+export function hashPassword(plain: string): Promise<string> {
+  return argon2.hash(plain, { type: argon2.argon2id });
+}
+
+export async function verifyPassword(hash: string, plain: string): Promise<boolean> {
+  try {
+    return await argon2.verify(hash, plain);
+  } catch {
+    return false;
+  }
+}
+
+// V1 policy: 10–128 chars, block a small common list. Returns error message or null.
+const COMMON = new Set([
+  "password",
+  "password1",
+  "12345678",
+  "1234567890",
+  "qwertyuiop",
+  "11111111",
+  "iloveyou1",
+]);
+
+export function validatePasswordPolicy(pw: string): string | null {
+  if (pw.length < 10 || pw.length > 128) return "Password must be 10–128 characters";
+  if (COMMON.has(pw.toLowerCase())) return "Password is too common";
+  return null;
+}
+
+// Readable 14–16 char temp password. Avoids ambiguous chars (0/O/1/l/I).
+const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+export function generateTempPassword(): string {
+  const len = 14 + randomInt(0, 3); // 14–16
+  let out = "";
+  for (let i = 0; i < len; i++) out += ALPHABET[randomInt(0, ALPHABET.length)];
+  return out;
+}

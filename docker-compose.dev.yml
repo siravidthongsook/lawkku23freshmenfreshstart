@@ -1,0 +1,22 @@
+# Dev infra: DB only. Backend (pnpm dev) + web (pnpm dev) run locally on host.
+# Usage: docker compose -f docker-compose.dev.yml up -d
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: eticket-db-dev
+    environment:
+      POSTGRES_USER: eticket
+      POSTGRES_PASSWORD: eticket
+      POSTGRES_DB: eticket
+    ports:
+      - "5432:5432" # matches .env.example DATABASE_URL for local pnpm dev
+    volumes:
+      - pgdata-dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eticket"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata-dev:
