@@ -16,15 +16,21 @@ Full spec: `spec.md`. Derived docs: `docs/01-database-schema.md`, `docs/02-api-c
 | DB | PostgreSQL |
 | Validation | Zod (shared req/res schemas) |
 
-Single TS codebase. Zod schemas shared between Hono backend + Next frontend — single source of truth for validation.
+Two packages, one repo:
+- **Backend** — root pkg `eticket-backend`, code in `src/`, Hono on `PORT` (default `3000`). Run `pnpm dev:backend`.
+- **Frontend** — `web/` pkg `eticket-web`, Next.js 16 on port `3001`. Run `pnpm dev:frontend`. Has own `node_modules`.
+- `pnpm dev` runs both via concurrently.
+
+Frontend imports backend Zod schemas directly via path alias `@be/*` → `../src/*` (see `web/tsconfig.json`). Zod = single source of truth for validation across both. `@/*` → web root.
 
 ---
 
 ## Architecture Rules
 
-- **Modules** (backend): `auth, sessions, users, events, registrations, forms, uploads, qr-tokens, checkins, imports, exports, audit-logs, storage`. Keep boundaries clean.
-- **Permissions**: never inline role checks. Use permission fns (`canManageUsers`, `canScanCheckin`, `canViewUploadedFile`, …). See `docs/02-api-contract.md`.
-- **Drizzle**: schema = source of truth. All schema in `db/schema/`. Migrations via `drizzle-kit`. No raw SQL except race-safe capacity (needs `SELECT ... FOR UPDATE` / row lock in tx).
+- **Modules** (`src/modules/`): `auth, users, events, registrations, forms, uploads, qr-tokens, checkins, imports, exports, audit-logs`. Keep boundaries clean.
+- **Shared backend helpers** (`src/lib/`): `permissions, session, storage, audit, auth-middleware, crypto, password, errors, form-schema, time, context`. (Sessions + storage live here as cross-cutting libs, not modules.)
+- **Permissions**: never inline role checks. Use permission fns from `src/lib/permissions.ts` (`canManageUsers`, `canScanCheckin`, `canViewUploadedFile`, …). Roles: `admin`, `checkin_staff`, `student`.
+- **Drizzle**: schema = source of truth. All schema in `src/db/schema/` (`users, events, registrations, forms, files, qr, sessions, imports, audit, enums`). Migrations via `drizzle-kit` (`pnpm db:generate` / `db:migrate`). No raw SQL except race-safe capacity (needs `SELECT ... FOR UPDATE` / row lock in tx).
 - **Zod at every boundary**: parse all req bodies/params/query. Infer TS types from Zod, don't hand-write duplicates.
 - **Validate at edge, authorize in handler**: Zod first → permission fn → business logic.
 
@@ -41,6 +47,8 @@ Single TS codebase. Zod schemas shared between Hono backend + Next frontend — 
 - **QR**: opaque token only, no PII. Store hash, not plaintext. Max 1 active token/registration.
 - **Files**: private storage only (never public path). Download via authorized backend endpoint. Allow-list PDF/JPG/PNG.
 - **Login error**: always generic `Invalid email or password`. No user enumeration.
+- **Passwords**: hash with argon2. Admin-issued temp passwords encrypted at rest (AES-256-GCM, key `TEMP_PW_ENC_KEY`) — see `src/lib/crypto.ts`. Never log either.
+- **Sessions**: server-side, DB table `sessions`. Cookie name from `SESSION_COOKIE_NAME`; `COOKIE_SECURE=true` behind HTTPS in prod.
 
 ---
 
@@ -65,8 +73,12 @@ multi-tenant, email service, magic link/OTP, self-service forgot-password, offli
 
 ---
 
-## Open Decisions (confirm before relying on)
+## Resolved Decisions (were open in scaffold)
 
-1. Sessions + rate-limit store: DB tables vs Redis? (currently spec'd as server-side session — leaning DB table `sessions`)
-2. `user_imports` table for import-result endpoint — inferred, not in spec.
-3. Storage path/config for `local_private_storage` impl of `StorageProvider`.
+1. **Sessions store** → DB table `sessions` (no Redis). Rate-limit store still TBD if/when added.
+2. **Imports** → `src/db/schema/imports.ts` table backs the import-result endpoint.
+3. **Storage** → `LocalPrivateStorage` impl of `StorageProvider` under `STORAGE_DIR` (default `./.storage`), `src/lib/storage.ts`. Path-traversal guarded.
+
+## Key env vars
+
+`PORT`, `DATABASE_URL`, `SESSION_COOKIE_NAME`, `TEMP_PW_ENC_KEY` (base64 32-byte), `STORAGE_DIR`, `COOKIE_SECURE`, `NODE_ENV`. See `.env.example`.
