@@ -19,9 +19,11 @@ export default function EventsPage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await apiGet<EventPublic[]>("/events");
+      // Backend wraps the list in { events: [...] } — unwrap before filtering.
+      const data = await apiGet<{ events: EventPublic[] }>("/events");
+      const list = Array.isArray(data?.events) ? data.events : [];
       // Defensive: backend should already filter, but enforce public-visibility rules client-side too.
-      setEvents((Array.isArray(data) ? data : []).filter(isPubliclyListed));
+      setEvents(list.filter(isPubliclyListed));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "ไม่สามารถโหลดกิจกรรมได้");
       setEvents(null);

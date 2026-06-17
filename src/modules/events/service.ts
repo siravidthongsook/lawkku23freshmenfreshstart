@@ -105,24 +105,31 @@ export async function computeEventStatus(
   };
 }
 
-// Public-safe projection — no internal admin/audit fields, status surfaced for badges.
+// Public-safe projection — no internal admin/audit fields. Shape MUST match the frontend
+// `EventPublic` contract (web/lib/types.ts): the public list/detail pages consume these field
+// names directly. Computed open/full state is derived client-side from windows+capacity, so we
+// expose the raw inputs (windows, capacityLimit, registeredCount) rather than the computed object.
 export function publicEventView(event: Event, computed: EventComputed) {
   return {
+    id: event.id,
     publicId: event.publicId,
-    slug: event.publicSlug,
+    publicSlug: event.publicSlug,
     title: event.title,
     description: event.description,
     location: event.location,
     posterImageUrl: event.posterImageUrl, // null when no poster set
     status: event.status, // published | cancelled | archived (draft never reaches here)
-    cancelled: event.status === "cancelled",
-    archived: event.status === "archived", // read-only when true
+    visibility: event.visibility,
     registrationMode: event.registrationMode,
     registrationOpenAt: event.registrationOpenAt,
     registrationCloseAt: event.registrationCloseAt,
+    checkinOpenAt: event.checkinOpenAt,
+    checkinCloseAt: event.checkinCloseAt,
     eventStartAt: event.eventStartAt,
     eventEndAt: event.eventEndAt,
+    capacityEnabled: event.capacityEnabled,
+    capacityLimit: event.capacityLimit,
+    registeredCount: computed.capacity.used, // active = registered + checked_in
     waitlistEnabled: event.waitlistEnabled,
-    ...computed,
   };
 }

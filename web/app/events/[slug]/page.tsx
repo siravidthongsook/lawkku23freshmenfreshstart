@@ -42,7 +42,8 @@ export default function EventDetailPage() {
   async function load() {
     setStatus("loading");
     try {
-      const data = await apiGet<EventPublic>(`/events/${slug}`);
+      // Backend wraps the detail in { event: {...} } — unwrap it.
+      const { event: data } = await apiGet<{ event: EventPublic }>(`/events/${slug}`);
       // Draft (or otherwise non-public) events must not be viewable here.
       if (data.status === "draft") {
         setStatus("notfound");
