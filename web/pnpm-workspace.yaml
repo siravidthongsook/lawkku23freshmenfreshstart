@@ -1,0 +1,3 @@
+# pnpm v10 moved settings here. Allow sharp's native build (next/image needs it).
+onlyBuiltDependencies:
+  - sharp

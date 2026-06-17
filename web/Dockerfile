@@ -6,7 +6,7 @@ WORKDIR /app
 
 # deps layer cached on web lockfile
 FROM base AS deps
-COPY web/package.json web/pnpm-lock.yaml* ./web/
+COPY web/package.json web/pnpm-lock.yaml* web/pnpm-workspace.yaml ./web/
 RUN cd web && (pnpm install --frozen-lockfile || pnpm install)
 
 # build: needs both web/ and src/ (turbopack root pinned to repo root in next.config.ts)
