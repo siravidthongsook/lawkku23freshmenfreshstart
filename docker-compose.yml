@@ -33,7 +33,7 @@ services:
       STORAGE_DIR: /data/storage
       COOKIE_SECURE: "false" # set true behind HTTPS
     ports:
-      - "3100:3000"
+      - "33491:3000"
     volumes:
       - storage:/data/storage
 
@@ -48,8 +48,8 @@ services:
       # server-side rewrite target inside the compose network (same-origin /api proxy)
       BACKEND_URL: http://api:3000
     ports:
-      # host 3001 taken on deploy box; expose web on 3101 instead
-      - "3101:3001"
+      # deploy box host ports: web 33490, api 33491
+      - "33490:3001"
 
 volumes:
   pgdata:
