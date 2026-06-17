@@ -48,7 +48,8 @@ services:
       # server-side rewrite target inside the compose network (same-origin /api proxy)
       BACKEND_URL: http://api:3000
     ports:
-      - "3001:3001"
+      # host 3001 taken on deploy box; expose web on 3101 instead
+      - "3101:3001"
 
 volumes:
   pgdata:
