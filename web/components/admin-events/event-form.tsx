@@ -37,8 +37,8 @@ type Props = {
 };
 
 const REG_MODE_LABEL: Record<string, string> = {
-  public_self_register: "เปิดให้ลงทะเบียนเองสาธารณะ",
-  admin_import_only: "ผู้ดูแลระบบ / นำเข้าเท่านั้น",
+  public_self_register: "เปิดให้ลงทะเบียนเองแบบสาธารณะ",
+  admin_import_only: "นำเข้าโดยผู้ดูแลเท่านั้น",
   closed: "ปิด",
 };
 
@@ -109,7 +109,7 @@ export function EventForm({ mode, eventId, initial }: Props) {
 
     // Client-side guard: capacity limit required when capacity enabled (mirrors backend invariant).
     if (capacityEnabled && (capacityLimit === "" || Number(capacityLimit) <= 0)) {
-      toast.error("จำนวนที่รับต้องเป็นจำนวนบวกเมื่อเปิดใช้งานการจำกัดจำนวน");
+      toast.error("จำนวนที่รับต้องมากกว่า 0 เมื่อเปิดการจำกัดจำนวน");
       return;
     }
 
@@ -117,7 +117,7 @@ export function EventForm({ mode, eventId, initial }: Props) {
     const schema = mode === "create" ? createEventSchema : updateEventSchema;
     const parsed = schema.safeParse(payload);
     if (!parsed.success) {
-      toast.error(parsed.error.issues[0]?.message ?? "กรุณาตรวจสอบฟิลด์ในฟอร์ม");
+      toast.error(parsed.error.issues[0]?.message ?? "กรุณาตรวจสอบข้อมูลในฟอร์ม");
       return;
     }
 
@@ -147,10 +147,10 @@ export function EventForm({ mode, eventId, initial }: Props) {
           <CardTitle>ข้อมูลพื้นฐาน</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Field label="หัวข้อ" required>
+          <Field label="ชื่อกิจกรรม" required>
             <Input value={title} onChange={(e) => setTitle(e.target.value)} required />
           </Field>
-          <Field label="Slug" hint="เว้นว่างไว้เพื่อสร้างอัตโนมัติจากหัวข้อ">
+          <Field label="Slug" hint="เว้นว่างไว้เพื่อสร้างอัตโนมัติจากชื่อ">
             <Input
               value={publicSlug}
               onChange={(e) => setPublicSlug(e.target.value)}
@@ -193,14 +193,14 @@ export function EventForm({ mode, eventId, initial }: Props) {
             </Select>
           </Field>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="เปิดลงทะเบียน (กรุงเทพฯ)">
+            <Field label="เปิดลงทะเบียน (เวลาไทย)">
               <Input
                 type="datetime-local"
                 value={registrationOpenAt}
                 onChange={(e) => setRegistrationOpenAt(e.target.value)}
               />
             </Field>
-            <Field label="ปิดลงทะเบียน (กรุงเทพฯ)">
+            <Field label="ปิดลงทะเบียน (เวลาไทย)">
               <Input
                 type="datetime-local"
                 value={registrationCloseAt}
@@ -217,28 +217,28 @@ export function EventForm({ mode, eventId, initial }: Props) {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="กิจกรรมเริ่ม (กรุงเทพฯ)">
+            <Field label="เริ่มกิจกรรม (เวลาไทย)">
               <Input
                 type="datetime-local"
                 value={eventStartAt}
                 onChange={(e) => setEventStartAt(e.target.value)}
               />
             </Field>
-            <Field label="กิจกรรมสิ้นสุด (กรุงเทพฯ)">
+            <Field label="สิ้นสุดกิจกรรม (เวลาไทย)">
               <Input
                 type="datetime-local"
                 value={eventEndAt}
                 onChange={(e) => setEventEndAt(e.target.value)}
               />
             </Field>
-            <Field label="เปิดเช็คอิน (กรุงเทพฯ)">
+            <Field label="เปิดเช็คอิน (เวลาไทย)">
               <Input
                 type="datetime-local"
                 value={checkinOpenAt}
                 onChange={(e) => setCheckinOpenAt(e.target.value)}
               />
             </Field>
-            <Field label="ปิดเช็คอิน (กรุงเทพฯ)">
+            <Field label="ปิดเช็คอิน (เวลาไทย)">
               <Input
                 type="datetime-local"
                 value={checkinCloseAt}
@@ -279,7 +279,7 @@ export function EventForm({ mode, eventId, initial }: Props) {
 
       <Card>
         <CardHeader>
-          <CardTitle>บริการตนเองของนักศึกษา</CardTitle>
+          <CardTitle>สิทธิ์ของนักศึกษา</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <Checkbox
@@ -288,7 +288,7 @@ export function EventForm({ mode, eventId, initial }: Props) {
             onChange={setAllowStudentCancel}
           />
           {allowStudentCancel && (
-            <Field label="ปิดการยกเลิก (กรุงเทพฯ)" hint="เว้นว่าง = ไม่มีกำหนดเวลา">
+            <Field label="ปิดการยกเลิก (เวลาไทย)" hint="เว้นว่าง = ไม่มีกำหนดเวลา">
               <Input
                 type="datetime-local"
                 value={cancelCloseAt}
@@ -303,7 +303,7 @@ export function EventForm({ mode, eventId, initial }: Props) {
             onChange={setAllowStudentEdit}
           />
           {allowStudentEdit && (
-            <Field label="ปิดการแก้ไข (กรุงเทพฯ)" hint="เว้นว่าง = ไม่มีกำหนดเวลา">
+            <Field label="ปิดการแก้ไข (เวลาไทย)" hint="เว้นว่าง = ไม่มีกำหนดเวลา">
               <Input
                 type="datetime-local"
                 value={editCloseAt}
