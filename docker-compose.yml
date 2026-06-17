@@ -48,8 +48,8 @@ services:
       # server-side rewrite target inside the compose network (same-origin /api proxy)
       BACKEND_URL: http://api:3000
     ports:
-      # deploy box host ports: web 33490, api 33491
-      - "33490:3001"
+      # deploy box host ports: web 33490, api 33491. web listens on 33490 in-container (next start -p 33490)
+      - "33490:33490"
 
 volumes:
   pgdata:

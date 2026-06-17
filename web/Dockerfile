@@ -16,9 +16,9 @@ COPY src ./src
 COPY web ./web
 RUN cd web && pnpm build
 
-# runner: reuse build image, start Next on 3001 (matches `next start -p 3001`)
+# runner: reuse build image, start Next on 33490 (matches `next start -p 33490`)
 FROM build AS runner
 ENV NODE_ENV=production
 WORKDIR /app/web
-EXPOSE 3001
+EXPOSE 33490
 CMD ["pnpm", "start"]
