@@ -39,7 +39,7 @@ function ScannerContent({ eventId }: { eventId: string }) {
       setCtx(res);
       setCtxError(null);
     } catch (err) {
-      setCtxError(err instanceof ApiError ? err.message : "Could not load event.");
+      setCtxError(err instanceof ApiError ? err.message : "ไม่สามารถโหลดกิจกรรมได้");
     }
   }, [eventId]);
 
@@ -79,7 +79,7 @@ function ScannerContent({ eventId }: { eventId: string }) {
     <div className="space-y-4">
       <Button asChild variant="ghost" size="sm" className="-ml-2">
         <Link href="/staff/events">
-          <ArrowLeft className="size-4" /> All events
+          <ArrowLeft className="size-4" /> กิจกรรมทั้งหมด
         </Link>
       </Button>
 
@@ -91,7 +91,7 @@ function ScannerContent({ eventId }: { eventId: string }) {
               <div>
                 <CardTitle className="text-lg">{ctx.event.title}</CardTitle>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Check-in: {formatBangkok(ctx.event.checkinOpenAt) || "—"} →{" "}
+                  เช็คอิน: {formatBangkok(ctx.event.checkinOpenAt) || "—"} →{" "}
                   {formatBangkok(ctx.event.checkinCloseAt) || "—"}
                 </p>
               </div>
@@ -102,7 +102,7 @@ function ScannerContent({ eventId }: { eventId: string }) {
                     : "bg-slate-200 text-slate-700 border-transparent"
                 }
               >
-                {ctx.event.checkinOpen ? "Check-in open" : "Check-in closed"}
+                {ctx.event.checkinOpen ? "เปิดเช็คอิน" : "ปิดเช็คอิน"}
               </Badge>
             </div>
           ) : ctxError ? (
@@ -116,12 +116,12 @@ function ScannerContent({ eventId }: { eventId: string }) {
             <div className="flex gap-6 text-sm">
               <span>
                 <span className="text-2xl font-semibold">{ctx.counts.checkedIn}</span>
-                <span className="text-muted-foreground"> checked in</span>
+                <span className="text-muted-foreground"> เช็คอินแล้ว</span>
               </span>
               <Separator orientation="vertical" className="h-9" />
               <span>
                 <span className="text-2xl font-semibold">{ctx.counts.registered}</span>
-                <span className="text-muted-foreground"> registered</span>
+                <span className="text-muted-foreground"> ลงทะเบียนแล้ว</span>
               </span>
             </div>
           </CardContent>
@@ -134,10 +134,10 @@ function ScannerContent({ eventId }: { eventId: string }) {
       <Tabs defaultValue="scan">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="scan" className="h-11 text-base">
-            QR scan
+            สแกน QR
           </TabsTrigger>
           <TabsTrigger value="manual" className="h-11 text-base">
-            Manual search
+            ค้นหาด้วยตนเอง
           </TabsTrigger>
         </TabsList>
 

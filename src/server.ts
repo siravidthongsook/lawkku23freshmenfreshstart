@@ -4,5 +4,5 @@ import { env } from "./env";
 
 const app = createApp();
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
-  console.log(`eticket api listening on :${info.port}`);
+  console.log(`lawkku-freshstart23 api listening on :${info.port}`);
 });

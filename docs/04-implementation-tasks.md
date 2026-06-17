@@ -1,4 +1,4 @@
-# E-Ticket System — Implementation Tasks (V1)
+# LawKKUFreshmenFreshStart23 — Implementation Tasks (V1)
 
 > Derived from `spec.md` §21–24. Phased build order. Each task is checkbox-trackable. Backend modules: `auth, sessions, users, events, registrations, forms, uploads, qr-tokens, checkins, imports, exports, audit-logs, storage`.
 

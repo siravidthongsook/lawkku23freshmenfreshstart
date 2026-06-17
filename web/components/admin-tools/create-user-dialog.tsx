@@ -75,7 +75,7 @@ export function CreateUserDialog({
 
     const parsed = createUserSchema.safeParse(payload);
     if (!parsed.success) {
-      setFieldError(parsed.error.issues[0]?.message ?? "Invalid input");
+      setFieldError(parsed.error.issues[0]?.message ?? "ข้อมูลไม่ถูกต้อง");
       return;
     }
 
@@ -90,12 +90,12 @@ export function CreateUserDialog({
         setCreatedEmail(res.user?.email ?? form.email);
         setTempPw(res.temp_password);
       } else {
-        toast.message("Temp password not shown", {
-          description: "Export it from the Temp Passwords page (pending users only).",
+        toast.message("ไม่ได้แสดงรหัสผ่านชั่วคราว", {
+          description: "ส่งออกได้จากหน้ารหัสผ่านชั่วคราว (เฉพาะผู้ใช้ที่รอดำเนินการ)",
         });
       }
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : "Could not create user";
+      const msg = e instanceof ApiError ? e.message : "ไม่สามารถสร้างผู้ใช้ได้";
       toast.error(msg);
     } finally {
       setPending(false);
@@ -107,15 +107,15 @@ export function CreateUserDialog({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create user</DialogTitle>
+            <DialogTitle>สร้างผู้ใช้</DialogTitle>
             <DialogDescription>
-              A temporary password is generated automatically. Student ID is required for students.
+              ระบบจะสร้างรหัสผ่านชั่วคราวโดยอัตโนมัติ ต้องระบุรหัสนักศึกษาสำหรับนักศึกษา
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="cu-email">Email</Label>
+              <Label htmlFor="cu-email">อีเมล</Label>
               <Input
                 id="cu-email"
                 type="email"
@@ -124,21 +124,21 @@ export function CreateUserDialog({
               />
             </div>
             <div className="space-y-1.5">
-              <Label>Role</Label>
+              <Label>บทบาท</Label>
               <Select value={form.role} onValueChange={(v) => set("role", v as Role)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="student">Student</SelectItem>
-                  <SelectItem value="checkin_staff">Check-in staff</SelectItem>
-                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="student">นักศึกษา</SelectItem>
+                  <SelectItem value="checkin_staff">เจ้าหน้าที่เช็คอิน</SelectItem>
+                  <SelectItem value="admin">ผู้ดูแลระบบ</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="cu-sid">
-                Student ID{form.role === "student" ? "" : " (optional)"}
+                รหัสนักศึกษา{form.role === "student" ? "" : " (ไม่บังคับ)"}
               </Label>
               <Input
                 id="cu-sid"
@@ -147,7 +147,7 @@ export function CreateUserDialog({
               />
             </div>
             <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="cu-name">Full name</Label>
+              <Label htmlFor="cu-name">ชื่อ-นามสกุล</Label>
               <Input
                 id="cu-name"
                 value={form.full_name}
@@ -155,7 +155,7 @@ export function CreateUserDialog({
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="cu-faculty">Faculty (optional)</Label>
+              <Label htmlFor="cu-faculty">คณะ (ไม่บังคับ)</Label>
               <Input
                 id="cu-faculty"
                 value={form.faculty}
@@ -163,7 +163,7 @@ export function CreateUserDialog({
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="cu-dept">Department (optional)</Label>
+              <Label htmlFor="cu-dept">สาขา (ไม่บังคับ)</Label>
               <Input
                 id="cu-dept"
                 value={form.department}
@@ -171,7 +171,7 @@ export function CreateUserDialog({
               />
             </div>
             <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="cu-phone">Phone (optional)</Label>
+              <Label htmlFor="cu-phone">โทรศัพท์ (ไม่บังคับ)</Label>
               <Input
                 id="cu-phone"
                 value={form.phone}
@@ -184,10 +184,10 @@ export function CreateUserDialog({
 
           <DialogFooter>
             <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
-              Cancel
+              ยกเลิก
             </Button>
             <Button onClick={submit} disabled={pending}>
-              {pending ? "Creating…" : "Create"}
+              {pending ? "กำลังสร้าง…" : "สร้าง"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -9,6 +9,10 @@ export const events = pgTable("events", {
   title: text("title").notNull(),
   description: text("description"),
   location: text("location"),
+  // Poster: posterImageUrl = render URL for cards (static path OR serve endpoint).
+  // posterObjectKey = private storage key when uploaded; null when external/static (e.g. seed).
+  posterImageUrl: text("poster_image_url"),
+  posterObjectKey: text("poster_object_key"),
   status: eventStatus("status").notNull().default("draft"),
   visibility: eventVisibility("visibility").notNull().default("listed"),
   registrationMode: registrationMode("registration_mode").notNull().default("closed"),

@@ -21,9 +21,9 @@ export default function TempPasswordsPage() {
         "/admin/users/temp-passwords/export",
         "temp-passwords.csv",
       );
-      toast.success("Temp password export started");
+      toast.success("เริ่มส่งออกรหัสผ่านชั่วคราวแล้ว");
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Could not export temp passwords");
+      toast.error(e instanceof ApiError ? e.message : "ไม่สามารถส่งออกรหัสผ่านชั่วคราวได้");
     } finally {
       setPending(false);
     }
@@ -32,27 +32,27 @@ export default function TempPasswordsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Temp Password Export</h1>
+        <h1 className="text-2xl font-semibold">ส่งออกรหัสผ่านชั่วคราว</h1>
         <Button variant="outline" size="sm" asChild>
-          <Link href="/admin/users">Back to users</Link>
+          <Link href="/admin/users">กลับไปที่ผู้ใช้</Link>
         </Button>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Export pending temp passwords</CardTitle>
+          <CardTitle className="text-base">ส่งออกรหัสผ่านชั่วคราวที่รอดำเนินการ</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-            <p className="font-medium">Sensitive export</p>
+            <p className="font-medium">การส่งออกข้อมูลละเอียดอ่อน</p>
             <p className="mt-1">
-              This downloads plaintext temporary passwords for users who have not yet changed
-              them. Handle the file securely, deliver passwords only to the right people, and
-              delete the file when done. The export is recorded in the audit log (count only).
+              การดำเนินการนี้จะดาวน์โหลดรหัสผ่านชั่วคราวแบบข้อความธรรมดาสำหรับผู้ใช้ที่ยังไม่ได้เปลี่ยน
+              รหัสผ่าน โปรดจัดการไฟล์อย่างปลอดภัย ส่งรหัสผ่านให้เฉพาะผู้ที่เกี่ยวข้องเท่านั้น และ
+              ลบไฟล์เมื่อเสร็จสิ้น การส่งออกนี้ถูกบันทึกไว้ในบันทึกการตรวจสอบ (เฉพาะจำนวน)
             </p>
           </div>
           <Button onClick={exportTempPasswords} disabled={pending}>
-            {pending ? "Preparing…" : "Download temp passwords (CSV)"}
+            {pending ? "กำลังเตรียม…" : "ดาวน์โหลดรหัสผ่านชั่วคราว (CSV)"}
           </Button>
         </CardContent>
       </Card>

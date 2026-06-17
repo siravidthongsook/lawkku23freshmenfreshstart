@@ -1,4 +1,4 @@
-# E-Ticket System — Database Schema (V1)
+# LawKKUFreshmenFreshStart23 — Database Schema (V1)
 
 > Derived from `spec.md`. Postgres dialect. All timestamps `timestamptz` stored in **UTC**; UI/export render `Asia/Bangkok`.
 

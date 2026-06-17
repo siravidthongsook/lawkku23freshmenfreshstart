@@ -67,4 +67,4 @@ Tables: `users, temporaryPasswords, sessions, loginAttempts, events, eventFormVe
 Run `pnpm typecheck` — MUST be clean. Add short intention comments per house style.
 
 ## Live DB for optional runtime testing
-`DATABASE_URL=postgres://eticket:eticket@localhost:5433/eticket TEMP_PW_ENC_KEY='0000000000000000000000000000000000000000000==' STORAGE_DIR=./.storage PORT=<pick-free> pnpm start`
+`DATABASE_URL=postgres://lawkku_freshstart23:lawkku_freshstart23@localhost:5433/lawkku_freshstart23 TEMP_PW_ENC_KEY='0000000000000000000000000000000000000000000==' STORAGE_DIR=./.storage PORT=<pick-free> pnpm start`

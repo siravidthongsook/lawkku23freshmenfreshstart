@@ -14,12 +14,12 @@ const STYLE: Record<ImportRowStatus, string> = {
 };
 
 const LABEL: Record<ImportRowStatus, string> = {
-  will_create: "Will create",
-  will_update: "Will update",
-  will_register_over_capacity: "Over capacity",
-  invalid: "Invalid",
-  duplicate_email: "Duplicate email",
-  duplicate_student_id: "Duplicate student ID",
+  will_create: "จะสร้างใหม่",
+  will_update: "จะอัปเดต",
+  will_register_over_capacity: "เกินจำนวนที่รับ",
+  invalid: "ไม่ถูกต้อง",
+  duplicate_email: "อีเมลซ้ำ",
+  duplicate_student_id: "รหัสนักศึกษาซ้ำ",
 };
 
 export function RowStatusBadge({ status }: { status: ImportRowStatus }) {

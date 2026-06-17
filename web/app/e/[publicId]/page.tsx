@@ -71,17 +71,17 @@ export default function PublicIdRedirectPage() {
         <FallbackEvent event={event} />
       ) : state === "notfound" ? (
         <div className="rounded-lg border border-dashed py-20 text-center">
-          <h1 className="text-lg font-semibold">Event not found</h1>
-          <p className="mt-1 text-sm text-muted-foreground">This link doesn’t point to a valid event.</p>
+          <h1 className="text-lg font-semibold">ไม่พบกิจกรรม</h1>
+          <p className="mt-1 text-sm text-muted-foreground">ลิงก์นี้ไม่ได้ชี้ไปยังกิจกรรมที่ถูกต้อง</p>
           <Button variant="outline" size="sm" className="mt-4" asChild>
-            <Link href="/events">Back to events</Link>
+            <Link href="/events">กลับไปหน้ากิจกรรม</Link>
           </Button>
         </div>
       ) : (
         <div className="rounded-lg border border-dashed py-20 text-center">
-          <p className="text-sm text-muted-foreground">Couldn’t open this event link. Please try again.</p>
+          <p className="text-sm text-muted-foreground">ไม่สามารถเปิดลิงก์กิจกรรมนี้ได้ กรุณาลองใหม่อีกครั้ง</p>
           <Button variant="outline" size="sm" className="mt-4" asChild>
-            <Link href="/events">Back to events</Link>
+            <Link href="/events">กลับไปหน้ากิจกรรม</Link>
           </Button>
         </div>
       )}
@@ -112,7 +112,7 @@ function FallbackEvent({ event }: { event: EventPublic }) {
           {event.location ? <p className="text-sm">{event.location}</p> : null}
           {event.publicSlug ? (
             <Button className="mt-2" asChild>
-              <Link href={`/events/${event.publicSlug}`}>Open event page</Link>
+              <Link href={`/events/${event.publicSlug}`}>เปิดหน้ากิจกรรม</Link>
             </Button>
           ) : null}
         </CardContent>

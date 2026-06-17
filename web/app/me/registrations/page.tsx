@@ -30,13 +30,13 @@ function EmptyState() {
       <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
         <CalendarX className="size-8 text-muted-foreground" />
         <div>
-          <p className="font-medium">No registrations yet</p>
+          <p className="font-medium">ยังไม่มีการลงทะเบียน</p>
           <p className="text-sm text-muted-foreground">
-            When you register for an event it will show up here.
+            เมื่อคุณลงทะเบียนกิจกรรม รายการจะแสดงที่นี่
           </p>
         </div>
         <Button asChild variant="outline" size="sm">
-          <Link href="/events">Browse events</Link>
+          <Link href="/events">ดูกิจกรรม</Link>
         </Button>
       </CardContent>
     </Card>
@@ -45,7 +45,7 @@ function EmptyState() {
 
 // One registration row. Title falls back to a generic label when backend sends no enrichment.
 function RegistrationRow({ reg }: { reg: StudentRegistration }) {
-  const title = reg.eventTitle ?? "Event registration";
+  const title = reg.eventTitle ?? "การลงทะเบียนกิจกรรม";
   const when = reg.eventStartAt ? formatBangkok(reg.eventStartAt) : null;
 
   return (
@@ -58,13 +58,13 @@ function RegistrationRow({ reg }: { reg: StudentRegistration }) {
               <RegistrationStatusBadge status={reg.status} />
             </div>
             <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
-              {when && <span>Event: {when}</span>}
-              {reg.checkedInAt && <span>Checked in: {formatBangkok(reg.checkedInAt)}</span>}
+              {when && <span>กิจกรรม: {when}</span>}
+              {reg.checkedInAt && <span>เช็คอินแล้ว: {formatBangkok(reg.checkedInAt)}</span>}
               {reg.waitlistedAt && reg.status === "waitlisted" && (
-                <span>Waitlisted: {formatBangkok(reg.waitlistedAt)}</span>
+                <span>รายชื่อสำรอง: {formatBangkok(reg.waitlistedAt)}</span>
               )}
-              {reg.cancelledAt && <span>Cancelled: {formatBangkok(reg.cancelledAt)}</span>}
-              {!when && reg.registeredAt && <span>Registered: {formatBangkok(reg.registeredAt)}</span>}
+              {reg.cancelledAt && <span>ยกเลิกแล้ว: {formatBangkok(reg.cancelledAt)}</span>}
+              {!when && reg.registeredAt && <span>ลงทะเบียนเมื่อ: {formatBangkok(reg.registeredAt)}</span>}
             </div>
           </div>
           <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
@@ -85,7 +85,7 @@ function MyRegistrationsInner() {
         if (active) setRegs(res.registrations ?? []);
       })
       .catch((e) => {
-        if (active) setError(e instanceof ApiError ? e.message : "Could not load registrations");
+        if (active) setError(e instanceof ApiError ? e.message : "ไม่สามารถโหลดการลงทะเบียนได้");
       });
     return () => {
       active = false;
@@ -94,7 +94,7 @@ function MyRegistrationsInner() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">My Events</h1>
+      <h1 className="text-xl font-semibold">กิจกรรมของฉัน</h1>
 
       {error ? (
         <Card>

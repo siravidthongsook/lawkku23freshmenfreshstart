@@ -15,14 +15,14 @@ type NavLink = { href: string; label: string };
 // Nav per role. Add links here as page-workers ship routes.
 const NAV_BY_ROLE: Record<Role, NavLink[]> = {
   student: [
-    { href: "/events", label: "Events" },
-    { href: "/me/registrations", label: "My Events" },
+    { href: "/events", label: "กิจกรรม" },
+    { href: "/me/registrations", label: "กิจกรรมของฉัน" },
   ],
-  checkin_staff: [{ href: "/staff/events", label: "Check-in" }],
+  checkin_staff: [{ href: "/staff/events", label: "เช็คอิน" }],
   admin: [
-    { href: "/admin/events", label: "Events" },
-    { href: "/admin/users", label: "Users" },
-    { href: "/admin/audit-logs", label: "Audit Logs" },
+    { href: "/admin/events", label: "กิจกรรม" },
+    { href: "/admin/users", label: "ผู้ใช้" },
+    { href: "/admin/audit-logs", label: "บันทึกการตรวจสอบ" },
   ],
 };
 
@@ -44,7 +44,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4">
           <div className="flex items-center gap-6">
             <Link href="/events" className="font-semibold">
-              E-Ticket
+              LawKKUFreshmenFreshStart23
             </Link>
             <nav className="flex items-center gap-1">
               {links.map((l) => (
@@ -70,7 +70,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <RoleBadge role={user.role} />
               <Button variant="ghost" size="sm" onClick={handleLogout}>
                 <LogOut className="size-4" />
-                <span className="hidden sm:inline">Logout</span>
+                <span className="hidden sm:inline">ออกจากระบบ</span>
               </Button>
             </div>
           )}

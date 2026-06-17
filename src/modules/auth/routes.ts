@@ -27,6 +27,8 @@ const invalidCredentials = () =>
 router.post("/auth/login", zValidator("json", loginSchema), async (c) => {
   const { identifier, password } = c.req.valid("json");
   const meta = requestMeta(c);
+  const log = c.get("log");
+  log.set("identifier", identifier); // who is trying (not a secret); password never logged
 
   // Resolve by email OR student_id. Lookup is cheap; password work still gated behind rate-limit below.
   const [user] = await db
@@ -38,6 +40,7 @@ router.post("/auth/login", zValidator("json", loginSchema), async (c) => {
   // Canonical rate-limit key = the user's email when resolved, else the raw identifier typed.
   // Keeps lockout + admin unlock-by-email consistent regardless of which identifier was used.
   const rlKey = user?.email ?? identifier.toLowerCase();
+  log.event("user_lookup", { found: !!user, status: user?.status ?? null });
 
   // Rate-limit / lockout gate runs before any password work.
   const rl = await checkRateLimit(rlKey, meta.ipAddress);
@@ -53,6 +56,7 @@ router.post("/auth/login", zValidator("json", loginSchema), async (c) => {
 
   // Same generic path whether user is missing, disabled, or password wrong.
   const ok = user && user.status === "active" && (await verifyPassword(user.passwordHash, password));
+  log.event("credential_check", { ok: !!ok });
   if (!ok) {
     const { justLocked } = await recordAttempt(rlKey, meta.ipAddress, false);
     if (justLocked) {
@@ -69,6 +73,7 @@ router.post("/auth/login", zValidator("json", loginSchema), async (c) => {
 
   await recordAttempt(rlKey, meta.ipAddress, true);
   await createSession(c, user);
+  log.set("userId", user.id).set("role", user.role);
   return c.json({
     user: publicUser(user),
     password_must_change: user.passwordMustChange,

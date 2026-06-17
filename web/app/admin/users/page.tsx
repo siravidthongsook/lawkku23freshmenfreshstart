@@ -36,15 +36,15 @@ import type { Role } from "@/lib/types";
 
 // "all" is a UI-only sentinel; we omit the param from the query when selected.
 const ROLE_OPTIONS: { value: Role | "all"; label: string }[] = [
-  { value: "all", label: "All roles" },
-  { value: "student", label: "Student" },
-  { value: "checkin_staff", label: "Check-in staff" },
-  { value: "admin", label: "Admin" },
+  { value: "all", label: "ทุกบทบาท" },
+  { value: "student", label: "นักศึกษา" },
+  { value: "checkin_staff", label: "เจ้าหน้าที่เช็คอิน" },
+  { value: "admin", label: "ผู้ดูแลระบบ" },
 ];
 const STATUS_OPTIONS: { value: "all" | "active" | "disabled"; label: string }[] = [
-  { value: "all", label: "All statuses" },
-  { value: "active", label: "Active" },
-  { value: "disabled", label: "Disabled" },
+  { value: "all", label: "ทุกสถานะ" },
+  { value: "active", label: "ใช้งานอยู่" },
+  { value: "disabled", label: "ปิดใช้งาน" },
 ];
 
 export default function UsersPage() {
@@ -69,7 +69,7 @@ export default function UsersPage() {
       const res = await apiGet<UserListResponse>(`/admin/users${qs ? `?${qs}` : ""}`);
       setUsers(res.users ?? []);
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : "Could not load users";
+      const msg = e instanceof ApiError ? e.message : "ไม่สามารถโหลดผู้ใช้ได้";
       setError(msg);
       setUsers([]);
     } finally {
@@ -86,35 +86,35 @@ export default function UsersPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Users</h1>
+        <h1 className="text-2xl font-semibold">ผู้ใช้</h1>
         <div className="flex gap-2">
           <Button variant="outline" asChild>
-            <Link href="/admin/imports/users">Import users</Link>
+            <Link href="/admin/imports/users">นำเข้าผู้ใช้</Link>
           </Button>
           <Button variant="outline" asChild>
-            <Link href="/admin/users/temp-passwords">Temp passwords</Link>
+            <Link href="/admin/users/temp-passwords">รหัสผ่านชั่วคราว</Link>
           </Button>
-          <Button onClick={() => setCreateOpen(true)}>Create user</Button>
+          <Button onClick={() => setCreateOpen(true)}>สร้างผู้ใช้</Button>
         </div>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Filters</CardTitle>
+          <CardTitle className="text-base">ตัวกรอง</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">
-              <Label htmlFor="q">Search</Label>
+              <Label htmlFor="q">ค้นหา</Label>
               <Input
                 id="q"
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Email, student ID, or name"
+                placeholder="อีเมล รหัสนักศึกษา หรือชื่อ"
               />
             </div>
             <div className="space-y-1.5">
-              <Label>Role</Label>
+              <Label>บทบาท</Label>
               <Select value={role} onValueChange={(v) => setRole(v as Role | "all")}>
                 <SelectTrigger>
                   <SelectValue />
@@ -129,7 +129,7 @@ export default function UsersPage() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Status</Label>
+              <Label>สถานะ</Label>
               <Select
                 value={status}
                 onValueChange={(v) => setStatus(v as "all" | "active" | "disabled")}
@@ -162,21 +162,21 @@ export default function UsersPage() {
             <div className="py-10 text-center">
               <p className="text-sm text-muted-foreground">{error}</p>
               <Button variant="outline" size="sm" className="mt-3" onClick={load}>
-                Retry
+                ลองใหม่
               </Button>
             </div>
           ) : users.length === 0 ? (
-            <p className="py-10 text-center text-sm text-muted-foreground">No users found.</p>
+            <p className="py-10 text-center text-sm text-muted-foreground">ไม่พบผู้ใช้</p>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Student ID</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Created</TableHead>
+                  <TableHead>รหัสนักศึกษา</TableHead>
+                  <TableHead>ชื่อ</TableHead>
+                  <TableHead>อีเมล</TableHead>
+                  <TableHead>บทบาท</TableHead>
+                  <TableHead>สถานะ</TableHead>
+                  <TableHead>สร้างเมื่อ</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -199,11 +199,11 @@ export default function UsersPage() {
                     <TableCell>
                       {u.status === "active" ? (
                         <Badge className="border-transparent bg-green-100 text-green-800">
-                          Active
+                          ใช้งานอยู่
                         </Badge>
                       ) : (
                         <Badge className="border-transparent bg-zinc-200 text-zinc-700">
-                          Disabled
+                          ปิดใช้งาน
                         </Badge>
                       )}
                     </TableCell>
@@ -222,7 +222,7 @@ export default function UsersPage() {
         open={createOpen}
         onOpenChange={setCreateOpen}
         onCreated={() => {
-          toast.success("User created");
+          toast.success("สร้างผู้ใช้แล้ว");
           load();
         }}
       />

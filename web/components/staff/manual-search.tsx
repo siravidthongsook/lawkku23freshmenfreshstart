@@ -53,7 +53,7 @@ export function ManualSearch({
       );
       setResults(res.results ?? []);
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Search failed";
+      const msg = err instanceof ApiError ? err.message : "ค้นหาไม่สำเร็จ";
       toast.error(msg);
       setResults([]);
     } finally {
@@ -65,7 +65,7 @@ export function ManualSearch({
     setBusyId(r.registrationId);
     try {
       await apiPost(`/registrations/${r.registrationId}/manual-checkin`);
-      toast.success(`Checked in ${r.fullName}`);
+      toast.success(`เช็คอิน ${r.fullName} แล้ว`);
       // Reflect new status locally without a re-search.
       setResults((prev) =>
         prev?.map((x) =>
@@ -76,7 +76,7 @@ export function ManualSearch({
       );
       onCheckedIn?.();
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Check-in failed";
+      const msg = err instanceof ApiError ? err.message : "เช็คอินไม่สำเร็จ";
       toast.error(msg);
     } finally {
       setBusyId(null);
@@ -87,7 +87,7 @@ export function ManualSearch({
     if (!undoTarget) return;
     const parsed = reasonSchema.safeParse({ reason: undoReason.trim() });
     if (!parsed.success) {
-      toast.error("A reason is required to undo a check-in.");
+      toast.error("ต้องระบุเหตุผลในการยกเลิกการเช็คอิน");
       return;
     }
     setUndoBusy(true);
@@ -95,7 +95,7 @@ export function ManualSearch({
       await apiPost(`/registrations/${undoTarget.registrationId}/undo-checkin`, {
         reason: parsed.data.reason,
       });
-      toast.success(`Undid check-in for ${undoTarget.fullName}`);
+      toast.success(`ยกเลิกการเช็คอินของ ${undoTarget.fullName} แล้ว`);
       setResults((prev) =>
         prev?.map((x) =>
           x.registrationId === undoTarget.registrationId
@@ -107,7 +107,7 @@ export function ManualSearch({
       setUndoTarget(null);
       setUndoReason("");
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Undo failed";
+      const msg = err instanceof ApiError ? err.message : "ยกเลิกไม่สำเร็จ";
       toast.error(msg);
     } finally {
       setUndoBusy(false);
@@ -120,18 +120,18 @@ export function ManualSearch({
         <Input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Search by student ID, name, faculty, department"
+          placeholder="ค้นหาด้วยรหัสนักศึกษา ชื่อ คณะ หรือสาขา"
           className="h-12 text-base"
           autoComplete="off"
         />
         <Button type="submit" disabled={searching || !q.trim()} className="h-12">
-          <Search className="size-5" /> Search
+          <Search className="size-5" /> ค้นหา
         </Button>
       </form>
 
       {results !== null && results.length === 0 && (
         <p className="py-4 text-center text-sm text-muted-foreground">
-          {searching ? "Searching…" : "No matching registrations in this event."}
+          {searching ? "กำลังค้นหา…" : "ไม่พบการลงทะเบียนที่ตรงกันในกิจกรรมนี้"}
         </p>
       )}
 
@@ -151,7 +151,7 @@ export function ManualSearch({
                 </p>
                 {r.status === "checked_in" && r.checkedInAt && (
                   <p className="text-xs text-muted-foreground">
-                    Checked in {formatBangkok(r.checkedInAt)}
+                    เช็คอินแล้ว {formatBangkok(r.checkedInAt)}
                   </p>
                 )}
               </div>
@@ -167,7 +167,7 @@ export function ManualSearch({
                       setUndoReason("");
                     }}
                   >
-                    <Undo2 className="size-4" /> Undo
+                    <Undo2 className="size-4" /> ยกเลิก
                   </Button>
                 ) : (
                   <Button
@@ -181,7 +181,7 @@ export function ManualSearch({
                     onClick={() => manualCheckin(r)}
                   >
                     <UserCheck className="size-4" />
-                    {busyId === r.registrationId ? "Checking in…" : "Check in"}
+                    {busyId === r.registrationId ? "กำลังเช็คอิน…" : "เช็คอิน"}
                   </Button>
                 )}
               </div>
@@ -194,28 +194,28 @@ export function ManualSearch({
       <Dialog open={undoTarget !== null} onOpenChange={(open) => !open && setUndoTarget(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Undo check-in</DialogTitle>
+            <DialogTitle>ยกเลิกการเช็คอิน</DialogTitle>
             <DialogDescription>
-              {undoTarget ? `Revert ${undoTarget.fullName} to registered.` : ""} A reason is
-              required and will be recorded in the audit log.
+              {undoTarget ? `เปลี่ยนสถานะ ${undoTarget.fullName} กลับเป็นลงทะเบียนแล้ว` : ""} ต้องระบุเหตุผล
+              และจะถูกบันทึกไว้ในบันทึกการตรวจสอบ
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="undo-reason">Reason</Label>
+            <Label htmlFor="undo-reason">เหตุผล</Label>
             <Textarea
               id="undo-reason"
               value={undoReason}
               onChange={(e) => setUndoReason(e.target.value)}
-              placeholder="Why are you undoing this check-in?"
+              placeholder="เหตุใดจึงยกเลิกการเช็คอินนี้?"
               rows={3}
             />
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setUndoTarget(null)} disabled={undoBusy}>
-              Cancel
+              ยกเลิก
             </Button>
             <Button onClick={submitUndo} disabled={undoBusy || !undoReason.trim()}>
-              {undoBusy ? "Undoing…" : "Undo check-in"}
+              {undoBusy ? "กำลังยกเลิก…" : "ยกเลิกการเช็คอิน"}
             </Button>
           </DialogFooter>
         </DialogContent>

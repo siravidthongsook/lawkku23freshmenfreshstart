@@ -111,6 +111,8 @@ router.post(
     const body = scanBody.parse(await c.req.json());
     const staff = c.get("user");
     const meta = requestMeta(c);
+    const log = c.get("log");
+    log.set("eventId", eventId);
     const tokenHash = hashToken(body.qr_token);
 
     const result = await db.transaction(async (tx): Promise<{ result: ScanResult; registrationId?: string }> => {
@@ -184,6 +186,8 @@ router.post(
       return { result: "checked_in_success", registrationId: reg.id };
     });
 
+    // Every scan outcome lands in the log (success + all reject codes) — 200 either way.
+    log.event("scan_result", { result: result.result, registrationId: result.registrationId ?? null });
     return c.json(result);
   },
 );

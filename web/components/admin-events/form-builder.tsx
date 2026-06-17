@@ -32,16 +32,16 @@ const CHOICE_TYPES = new Set<FormField["type"]>([
 ]);
 
 const TYPE_LABEL: Record<string, string> = {
-  short_text: "Short text",
-  paragraph: "Paragraph",
-  number: "Number",
-  single_choice: "Single choice",
-  multiple_choice: "Multiple choice",
-  dropdown: "Dropdown",
-  checkbox: "Checkbox",
-  date: "Date",
-  time: "Time",
-  file_upload: "File upload",
+  short_text: "ข้อความสั้น",
+  paragraph: "ย่อหน้า",
+  number: "ตัวเลข",
+  single_choice: "เลือกได้หนึ่งข้อ",
+  multiple_choice: "เลือกได้หลายข้อ",
+  dropdown: "เมนูแบบเลื่อนลง",
+  checkbox: "ช่องทำเครื่องหมาย",
+  date: "วันที่",
+  time: "เวลา",
+  file_upload: "อัปโหลดไฟล์",
 };
 
 type Props = {
@@ -96,7 +96,7 @@ export function FormBuilder({ eventId, initialFields, versionNumber, onSaved }: 
       {
         key: freshKey(),
         type: "short_text",
-        label: "Untitled question",
+        label: "คำถามไม่มีชื่อ",
         required: false,
         sort: prev.length,
       },
@@ -122,13 +122,13 @@ export function FormBuilder({ eventId, initialFields, versionNumber, onSaved }: 
     const candidate: FormSchema = { fields: fields.map((f, i) => ({ ...f, sort: i })) };
     const parsed = formSchema.safeParse(candidate);
     if (!parsed.success) {
-      toast.error(parsed.error.issues[0]?.message ?? "Form has invalid fields.");
+      toast.error(parsed.error.issues[0]?.message ?? "ฟอร์มมีฟิลด์ที่ไม่ถูกต้อง");
       return null;
     }
     // Choice fields must carry at least one option.
     for (const f of parsed.data.fields) {
       if (CHOICE_TYPES.has(f.type) && (!f.options || f.options.length === 0)) {
-        toast.error(`"${f.label}" needs at least one option.`);
+        toast.error(`"${f.label}" ต้องมีตัวเลือกอย่างน้อยหนึ่งข้อ`);
         return null;
       }
     }
@@ -145,10 +145,10 @@ export function FormBuilder({ eventId, initialFields, versionNumber, onSaved }: 
         `/admin/events/${eventId}/form`,
         { schema },
       );
-      toast.success(res.versioned ? "Saved as a new form version." : "Form saved.");
+      toast.success(res.versioned ? "บันทึกเป็นฟอร์มเวอร์ชันใหม่แล้ว" : "บันทึกฟอร์มแล้ว");
       onSaved();
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Failed to save form.");
+      toast.error(err instanceof ApiError ? err.message : "ไม่สามารถบันทึกฟอร์มได้");
     } finally {
       setSaving(false);
     }
@@ -160,10 +160,10 @@ export function FormBuilder({ eventId, initialFields, versionNumber, onSaved }: 
     if (!schema) return;
     try {
       await apiPost(`/admin/events/${eventId}/form/version`, { schema, reason });
-      toast.success("New form version created.");
+      toast.success("สร้างฟอร์มเวอร์ชันใหม่แล้ว");
       onSaved();
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Failed to create version.");
+      toast.error(err instanceof ApiError ? err.message : "ไม่สามารถสร้างเวอร์ชันได้");
       throw err; // keep dialog open on failure
     }
   }
@@ -172,19 +172,19 @@ export function FormBuilder({ eventId, initialFields, versionNumber, onSaved }: 
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          {versionNumber != null ? <Badge variant="outline">Version {versionNumber}</Badge> : null}
-          <span>{fields.length} field(s)</span>
+          {versionNumber != null ? <Badge variant="outline">เวอร์ชัน {versionNumber}</Badge> : null}
+          <span>{fields.length} ฟิลด์</span>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={addField}>
             <Plus className="size-4" />
-            Add field
+            เพิ่มฟิลด์
           </Button>
           <Button onClick={handleSave} disabled={saving}>
-            {saving ? "Saving…" : "Save"}
+            {saving ? "กำลังบันทึก…" : "บันทึก"}
           </Button>
           <Button variant="secondary" onClick={() => setReasonOpen(true)}>
-            Save as new version
+            บันทึกเป็นเวอร์ชันใหม่
           </Button>
         </div>
       </div>
@@ -192,15 +192,15 @@ export function FormBuilder({ eventId, initialFields, versionNumber, onSaved }: 
       {/* Structural-change warning: existing submissions keep their old version; saving may fork a version. */}
       {structural ? (
         <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          Structural change detected (field added/removed, or type/required/options changed). If this
-          event already has submissions, saving will create a new form version so existing
-          registrations keep their original form.
+          ตรวจพบการเปลี่ยนแปลงเชิงโครงสร้าง (เพิ่ม/ลบฟิลด์ หรือเปลี่ยนประเภท/ความจำเป็น/ตัวเลือก) หาก
+          กิจกรรมนี้มีการส่งแบบฟอร์มอยู่แล้ว การบันทึกจะสร้างฟอร์มเวอร์ชันใหม่เพื่อให้การลงทะเบียน
+          ที่มีอยู่ยังคงใช้ฟอร์มเดิม
         </div>
       ) : null}
 
       {fields.length === 0 ? (
         <div className="rounded-md border py-16 text-center text-sm text-muted-foreground">
-          No fields yet. Add your first question.
+          ยังไม่มีฟิลด์ เพิ่มคำถามแรกของคุณ
         </div>
       ) : (
         <div className="space-y-3">
@@ -221,9 +221,9 @@ export function FormBuilder({ eventId, initialFields, versionNumber, onSaved }: 
       <ReasonDialog
         open={reasonOpen}
         onOpenChange={setReasonOpen}
-        title="Create new form version"
-        description="Records a reason in the audit log. Existing registrations keep their current version."
-        confirmLabel="Create version"
+        title="สร้างฟอร์มเวอร์ชันใหม่"
+        description="บันทึกเหตุผลไว้ในบันทึกการตรวจสอบ การลงทะเบียนที่มีอยู่จะยังคงใช้เวอร์ชันปัจจุบัน"
+        confirmLabel="สร้างเวอร์ชัน"
         onConfirm={handleNewVersion}
       />
     </div>
@@ -255,15 +255,15 @@ function FieldEditor({
           <GripVertical className="mt-2 size-4 shrink-0 text-muted-foreground" />
           <div className="grid flex-1 gap-3 sm:grid-cols-[1fr_200px]">
             <div className="space-y-1.5">
-              <Label>Question label</Label>
+              <Label>ป้ายกำกับคำถาม</Label>
               <Input
                 value={field.label}
                 onChange={(e) => onChange({ label: e.target.value })}
-                placeholder="Question"
+                placeholder="คำถาม"
               />
             </div>
             <div className="space-y-1.5">
-              <Label>Type</Label>
+              <Label>ประเภท</Label>
               <Select
                 value={field.type}
                 onValueChange={(v) =>
@@ -292,17 +292,17 @@ function FieldEditor({
         </div>
 
         <div className="space-y-1.5 pl-6">
-          <Label>Help text (optional)</Label>
+          <Label>ข้อความช่วยเหลือ (ไม่บังคับ)</Label>
           <Input
             value={field.help ?? ""}
             onChange={(e) => onChange({ help: e.target.value === "" ? undefined : e.target.value })}
-            placeholder="Shown under the question"
+            placeholder="แสดงใต้คำถาม"
           />
         </div>
 
         {isChoice ? (
           <div className="space-y-1.5 pl-6">
-            <Label>Options (one per line)</Label>
+            <Label>ตัวเลือก (หนึ่งบรรทัดต่อหนึ่งตัวเลือก)</Label>
             <Textarea
               value={optionsText}
               onChange={(e) =>
@@ -314,7 +314,7 @@ function FieldEditor({
                 })
               }
               rows={3}
-              placeholder={"Option 1\nOption 2"}
+              placeholder={"ตัวเลือก 1\nตัวเลือก 2"}
             />
           </div>
         ) : null}
@@ -329,7 +329,7 @@ function FieldEditor({
               onChange={(e) => onChange({ required: e.target.checked })}
               className="size-4 rounded border-input"
             />
-            Required
+            จำเป็น
           </label>
           <div className="flex items-center gap-1">
             <Button
@@ -337,7 +337,7 @@ function FieldEditor({
               size="icon"
               onClick={() => onMove(-1)}
               disabled={index === 0}
-              aria-label="Move up"
+              aria-label="เลื่อนขึ้น"
             >
               <ArrowUp className="size-4" />
             </Button>
@@ -346,7 +346,7 @@ function FieldEditor({
               size="icon"
               onClick={() => onMove(1)}
               disabled={index === total - 1}
-              aria-label="Move down"
+              aria-label="เลื่อนลง"
             >
               <ArrowDown className="size-4" />
             </Button>
@@ -354,7 +354,7 @@ function FieldEditor({
               variant="ghost"
               size="icon"
               onClick={onRemove}
-              aria-label="Remove field"
+              aria-label="ลบฟิลด์"
               className="text-destructive"
             >
               <Trash2 className="size-4" />

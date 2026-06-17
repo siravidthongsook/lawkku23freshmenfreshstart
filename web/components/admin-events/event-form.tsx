@@ -37,9 +37,9 @@ type Props = {
 };
 
 const REG_MODE_LABEL: Record<string, string> = {
-  public_self_register: "Public self-register",
-  admin_import_only: "Admin / import only",
-  closed: "Closed",
+  public_self_register: "เปิดให้ลงทะเบียนเองสาธารณะ",
+  admin_import_only: "ผู้ดูแลระบบ / นำเข้าเท่านั้น",
+  closed: "ปิด",
 };
 
 export function EventForm({ mode, eventId, initial }: Props) {
@@ -109,7 +109,7 @@ export function EventForm({ mode, eventId, initial }: Props) {
 
     // Client-side guard: capacity limit required when capacity enabled (mirrors backend invariant).
     if (capacityEnabled && (capacityLimit === "" || Number(capacityLimit) <= 0)) {
-      toast.error("Capacity limit must be a positive number when capacity is enabled.");
+      toast.error("จำนวนที่รับต้องเป็นจำนวนบวกเมื่อเปิดใช้งานการจำกัดจำนวน");
       return;
     }
 
@@ -117,7 +117,7 @@ export function EventForm({ mode, eventId, initial }: Props) {
     const schema = mode === "create" ? createEventSchema : updateEventSchema;
     const parsed = schema.safeParse(payload);
     if (!parsed.success) {
-      toast.error(parsed.error.issues[0]?.message ?? "Please check the form fields.");
+      toast.error(parsed.error.issues[0]?.message ?? "กรุณาตรวจสอบฟิลด์ในฟอร์ม");
       return;
     }
 
@@ -125,15 +125,15 @@ export function EventForm({ mode, eventId, initial }: Props) {
     try {
       if (mode === "create") {
         const res = await apiPost<{ event: { id: string } }>("/admin/events", payload);
-        toast.success("Event created as draft.");
+        toast.success("สร้างกิจกรรมเป็นฉบับร่างแล้ว");
         router.push(`/admin/events/${res.event.id}`);
       } else {
         await apiPatch(`/admin/events/${eventId}`, payload);
-        toast.success("Event updated.");
+        toast.success("อัปเดตกิจกรรมแล้ว");
         router.push(`/admin/events/${eventId}`);
       }
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Failed to save event.";
+      const msg = err instanceof ApiError ? err.message : "ไม่สามารถบันทึกกิจกรรมได้";
       toast.error(msg);
     } finally {
       setSaving(false);
@@ -144,27 +144,27 @@ export function EventForm({ mode, eventId, initial }: Props) {
     <form onSubmit={handleSubmit} className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Basics</CardTitle>
+          <CardTitle>ข้อมูลพื้นฐาน</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Field label="Title" required>
+          <Field label="หัวข้อ" required>
             <Input value={title} onChange={(e) => setTitle(e.target.value)} required />
           </Field>
-          <Field label="Slug" hint="Leave blank to auto-generate from the title.">
+          <Field label="Slug" hint="เว้นว่างไว้เพื่อสร้างอัตโนมัติจากหัวข้อ">
             <Input
               value={publicSlug}
               onChange={(e) => setPublicSlug(e.target.value)}
               placeholder="my-event"
             />
           </Field>
-          <Field label="Description">
+          <Field label="รายละเอียด">
             <Textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={4}
             />
           </Field>
-          <Field label="Location">
+          <Field label="สถานที่">
             <Input value={location} onChange={(e) => setLocation(e.target.value)} />
           </Field>
         </CardContent>
@@ -172,10 +172,10 @@ export function EventForm({ mode, eventId, initial }: Props) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Registration</CardTitle>
+          <CardTitle>การลงทะเบียน</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Field label="Registration mode">
+          <Field label="รูปแบบการลงทะเบียน">
             <Select
               value={registrationMode}
               onValueChange={(v) => setRegistrationMode(v as typeof registrationMode)}
@@ -193,14 +193,14 @@ export function EventForm({ mode, eventId, initial }: Props) {
             </Select>
           </Field>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Registration opens (Bangkok)">
+            <Field label="เปิดลงทะเบียน (กรุงเทพฯ)">
               <Input
                 type="datetime-local"
                 value={registrationOpenAt}
                 onChange={(e) => setRegistrationOpenAt(e.target.value)}
               />
             </Field>
-            <Field label="Registration closes (Bangkok)">
+            <Field label="ปิดลงทะเบียน (กรุงเทพฯ)">
               <Input
                 type="datetime-local"
                 value={registrationCloseAt}
@@ -213,32 +213,32 @@ export function EventForm({ mode, eventId, initial }: Props) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Event & check-in times</CardTitle>
+          <CardTitle>เวลากิจกรรมและเช็คอิน</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Event starts (Bangkok)">
+            <Field label="กิจกรรมเริ่ม (กรุงเทพฯ)">
               <Input
                 type="datetime-local"
                 value={eventStartAt}
                 onChange={(e) => setEventStartAt(e.target.value)}
               />
             </Field>
-            <Field label="Event ends (Bangkok)">
+            <Field label="กิจกรรมสิ้นสุด (กรุงเทพฯ)">
               <Input
                 type="datetime-local"
                 value={eventEndAt}
                 onChange={(e) => setEventEndAt(e.target.value)}
               />
             </Field>
-            <Field label="Check-in opens (Bangkok)">
+            <Field label="เปิดเช็คอิน (กรุงเทพฯ)">
               <Input
                 type="datetime-local"
                 value={checkinOpenAt}
                 onChange={(e) => setCheckinOpenAt(e.target.value)}
               />
             </Field>
-            <Field label="Check-in closes (Bangkok)">
+            <Field label="ปิดเช็คอิน (กรุงเทพฯ)">
               <Input
                 type="datetime-local"
                 value={checkinCloseAt}
@@ -251,16 +251,16 @@ export function EventForm({ mode, eventId, initial }: Props) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Capacity & waitlist</CardTitle>
+          <CardTitle>จำนวนที่รับและรายชื่อสำรอง</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <Checkbox
-            label="Enable capacity limit"
+            label="เปิดใช้งานการจำกัดจำนวนที่รับ"
             checked={capacityEnabled}
             onChange={setCapacityEnabled}
           />
           {capacityEnabled && (
-            <Field label="Capacity limit" required>
+            <Field label="จำนวนที่รับ" required>
               <Input
                 type="number"
                 min={1}
@@ -270,7 +270,7 @@ export function EventForm({ mode, eventId, initial }: Props) {
             </Field>
           )}
           <Checkbox
-            label="Enable waitlist when full"
+            label="เปิดใช้งานรายชื่อสำรองเมื่อเต็ม"
             checked={waitlistEnabled}
             onChange={setWaitlistEnabled}
           />
@@ -279,16 +279,16 @@ export function EventForm({ mode, eventId, initial }: Props) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Student self-service</CardTitle>
+          <CardTitle>บริการตนเองของนักศึกษา</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <Checkbox
-            label="Allow students to cancel their registration"
+            label="อนุญาตให้นักศึกษายกเลิกการลงทะเบียนของตนเอง"
             checked={allowStudentCancel}
             onChange={setAllowStudentCancel}
           />
           {allowStudentCancel && (
-            <Field label="Cancellation closes (Bangkok)" hint="Blank = no deadline.">
+            <Field label="ปิดการยกเลิก (กรุงเทพฯ)" hint="เว้นว่าง = ไม่มีกำหนดเวลา">
               <Input
                 type="datetime-local"
                 value={cancelCloseAt}
@@ -298,12 +298,12 @@ export function EventForm({ mode, eventId, initial }: Props) {
           )}
           <Separator />
           <Checkbox
-            label="Allow students to edit their answers"
+            label="อนุญาตให้นักศึกษาแก้ไขคำตอบของตนเอง"
             checked={allowStudentEdit}
             onChange={setAllowStudentEdit}
           />
           {allowStudentEdit && (
-            <Field label="Editing closes (Bangkok)" hint="Blank = no deadline.">
+            <Field label="ปิดการแก้ไข (กรุงเทพฯ)" hint="เว้นว่าง = ไม่มีกำหนดเวลา">
               <Input
                 type="datetime-local"
                 value={editCloseAt}
@@ -316,10 +316,10 @@ export function EventForm({ mode, eventId, initial }: Props) {
 
       <div className="flex items-center justify-end gap-2">
         <Button type="button" variant="outline" onClick={() => router.back()} disabled={saving}>
-          Cancel
+          ยกเลิก
         </Button>
         <Button type="submit" disabled={saving}>
-          {saving ? "Saving…" : mode === "create" ? "Create event" : "Save changes"}
+          {saving ? "กำลังบันทึก…" : mode === "create" ? "สร้างกิจกรรม" : "บันทึกการเปลี่ยนแปลง"}
         </Button>
       </div>
     </form>

@@ -66,15 +66,15 @@ export function RegisterFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Register for {eventTitle}</DialogTitle>
-          <DialogDescription>Please fill in the registration form below.</DialogDescription>
+          <DialogTitle>ลงทะเบียนกิจกรรม {eventTitle}</DialogTitle>
+          <DialogDescription>กรุณากรอกแบบฟอร์มการลงทะเบียนด้านล่าง</DialogDescription>
         </DialogHeader>
 
         {/* Backend gap: file uploads require a registration to exist first. */}
         {blockedByFile ? (
           <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            This form requires a file upload, which isn&apos;t supported during registration yet.
-            Please contact the organizers.
+            แบบฟอร์มนี้ต้องการอัปโหลดไฟล์ ซึ่งยังไม่รองรับในระหว่างการลงทะเบียน
+            กรุณาติดต่อผู้จัดกิจกรรม
           </p>
         ) : null}
 
@@ -85,7 +85,7 @@ export function RegisterFormDialog({
               <div key={field.key} className="space-y-1">
                 <p className="text-sm font-medium">{field.label}</p>
                 <p className="text-xs text-muted-foreground">
-                  You can attach this file after registering, from your registration page.
+                  คุณสามารถแนบไฟล์นี้ได้หลังจากลงทะเบียน ผ่านหน้าการลงทะเบียนของคุณ
                 </p>
               </div>
             ) : (
@@ -100,17 +100,17 @@ export function RegisterFormDialog({
           )}
           {hasFileField && !blockedByFile ? (
             <p className="text-xs text-muted-foreground">
-              File uploads can be added after you register.
+              สามารถเพิ่มไฟล์อัปโหลดได้หลังจากลงทะเบียน
             </p>
           ) : null}
         </div>
 
         <DialogFooter>
           <Button variant="outline" disabled={submitting} onClick={() => onOpenChange(false)}>
-            Cancel
+            ยกเลิก
           </Button>
           <Button disabled={submitting || blockedByFile} onClick={handleSubmit}>
-            {submitting ? "Registering…" : "Submit & register"}
+            {submitting ? "กำลังลงทะเบียน…" : "ส่งและลงทะเบียน"}
           </Button>
         </DialogFooter>
       </DialogContent>

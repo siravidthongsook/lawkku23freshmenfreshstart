@@ -34,7 +34,7 @@ export function EventCard({ event }: { event: EventPublic }) {
           {cap ? (
             <p className="text-xs font-medium text-muted-foreground">
               {cap}
-              {full ? <span className="ml-1 text-amber-600">· Full</span> : null}
+              {full ? <span className="ml-1 text-amber-600">· เต็มแล้ว</span> : null}
             </p>
           ) : null}
         </CardContent>

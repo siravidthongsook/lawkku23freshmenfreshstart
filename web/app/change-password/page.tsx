@@ -37,9 +37,9 @@ export default function ChangePasswordPage() {
   const forced = user?.passwordMustChange ?? false;
 
   function validate(): string | null {
-    if (next.length < MIN || next.length > MAX) return `New password must be ${MIN}–${MAX} characters.`;
-    if (next === current) return "New password must be different from your current password.";
-    if (next !== confirm) return "New passwords do not match.";
+    if (next.length < MIN || next.length > MAX) return `รหัสผ่านใหม่ต้องมี ${MIN}–${MAX} ตัวอักษร`;
+    if (next === current) return "รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสผ่านปัจจุบัน";
+    if (next !== confirm) return "รหัสผ่านใหม่ไม่ตรงกัน";
     return null;
   }
 
@@ -54,11 +54,11 @@ export default function ChangePasswordPage() {
     setSubmitting(true);
     try {
       await apiPost("/auth/change-password", { current_password: current, new_password: next });
-      toast.success("Password updated.");
+      toast.success("เปลี่ยนรหัสผ่านเรียบร้อยแล้ว");
       await refetch(); // clears passwordMustChange in context
       router.replace(user ? roleHome(user.role) : "/events");
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Could not update password. Please try again.";
+      const msg = err instanceof ApiError ? err.message : "ไม่สามารถเปลี่ยนรหัสผ่านได้ กรุณาลองใหม่อีกครั้ง";
       setError(msg);
       toast.error(msg);
       setSubmitting(false);
@@ -77,15 +77,15 @@ export default function ChangePasswordPage() {
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center bg-muted/30 px-4 py-12">
       <div className="mb-6 flex flex-col items-center gap-3">
-        <Link href="/events" aria-label="E-Ticket home">
-          <Image src="/brand/logo-blue.jpeg" alt="E-Ticket" width={56} height={56} className="rounded-xl" priority />
+        <Link href="/events" aria-label="หน้าแรก LawKKUFreshmenFreshStart23">
+          <Image src="/brand/platformlogo.png" alt="LawKKUFreshmenFreshStart23" width={56} height={56} className="rounded-xl" priority />
         </Link>
         <h1 className="text-xl font-bold tracking-tight">
-          {forced ? "Set a new password" : "Change password"}
+          {forced ? "ตั้งรหัสผ่านใหม่" : "เปลี่ยนรหัสผ่าน"}
         </h1>
         {forced ? (
           <p className="max-w-sm text-center text-sm text-muted-foreground">
-            For your security, please set a new password before continuing.
+            เพื่อความปลอดภัยของคุณ กรุณาตั้งรหัสผ่านใหม่ก่อนดำเนินการต่อ
           </p>
         ) : null}
       </div>
@@ -94,7 +94,7 @@ export default function ChangePasswordPage() {
         <CardContent className="p-6">
           <form onSubmit={onSubmit} className="space-y-4" noValidate>
             <div className="space-y-1.5">
-              <Label htmlFor="current">Current password</Label>
+              <Label htmlFor="current">รหัสผ่านปัจจุบัน</Label>
               <Input
                 id="current"
                 type="password"
@@ -106,7 +106,7 @@ export default function ChangePasswordPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="next">New password</Label>
+              <Label htmlFor="next">รหัสผ่านใหม่</Label>
               <Input
                 id="next"
                 type="password"
@@ -115,10 +115,10 @@ export default function ChangePasswordPage() {
                 onChange={(e) => setNext(e.target.value)}
                 required
               />
-              <p className="text-xs text-muted-foreground">{MIN}–{MAX} characters.</p>
+              <p className="text-xs text-muted-foreground">{MIN}–{MAX} ตัวอักษร</p>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="confirm">Confirm new password</Label>
+              <Label htmlFor="confirm">ยืนยันรหัสผ่านใหม่</Label>
               <Input
                 id="confirm"
                 type="password"
@@ -136,7 +136,7 @@ export default function ChangePasswordPage() {
             ) : null}
 
             <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? "Updating…" : "Update password"}
+              {submitting ? "กำลังบันทึก…" : "เปลี่ยนรหัสผ่าน"}
             </Button>
           </form>
 
@@ -144,7 +144,7 @@ export default function ChangePasswordPage() {
           {!forced ? (
             <div className="mt-4 text-center text-sm text-muted-foreground">
               <Link href={roleHome(user.role)} className="underline-offset-4 hover:underline">
-                Cancel
+                ยกเลิก
               </Link>
             </div>
           ) : null}

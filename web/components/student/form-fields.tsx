@@ -76,7 +76,7 @@ export function FormFieldInput({ field, value, error, onChange }: Props) {
       {(field.type === "single_choice" || field.type === "dropdown") && (
         <Select value={typeof value === "string" ? value : ""} onValueChange={set}>
           <SelectTrigger id={field.key}>
-            <SelectValue placeholder="Select an option" />
+            <SelectValue placeholder="เลือกตัวเลือก" />
           </SelectTrigger>
           <SelectContent>
             {opts.map((o) => (
@@ -155,7 +155,7 @@ export function FileField({
       {pendingFile ? (
         <p className="flex items-center gap-1 text-xs text-muted-foreground">
           <Paperclip className="size-3" />
-          New file selected: {pendingFile.name}
+          เลือกไฟล์ใหม่แล้ว: {pendingFile.name}
         </p>
       ) : currentFileId ? (
         <Button
@@ -165,12 +165,12 @@ export function FileField({
           onClick={() => window.open(`/api/files/${currentFileId}/download`, "_blank")}
         >
           <Paperclip className="mr-1 size-3" />
-          View current file
+          ดูไฟล์ปัจจุบัน
         </Button>
       ) : (
-        <p className="text-xs text-muted-foreground">No file uploaded yet.</p>
+        <p className="text-xs text-muted-foreground">ยังไม่มีไฟล์ที่อัปโหลด</p>
       )}
-      <p className="text-[11px] text-muted-foreground">Allowed: PDF, JPG, PNG (max 5MB).</p>
+      <p className="text-[11px] text-muted-foreground">อนุญาต: PDF, JPG, PNG (สูงสุด 5MB)</p>
     </div>
   );
 }

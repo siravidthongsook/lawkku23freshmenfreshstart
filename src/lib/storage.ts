@@ -49,3 +49,9 @@ export function buildObjectKey(registrationId: string, fieldKey: string, filenam
   const safe = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
   return join(registrationId, fieldKey, `${Date.now()}_${safe}`);
 }
+
+// Per-event poster key, namespaced under events/. Private storage; served via authorized endpoint.
+export function buildEventPosterKey(eventId: string, filename: string): string {
+  const safe = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+  return join("events", eventId, "poster", `${Date.now()}_${safe}`);
+}

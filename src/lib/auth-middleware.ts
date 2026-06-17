@@ -14,6 +14,7 @@ export const requireAuth: MiddlewareHandler<{ Variables: AppVariables }> = async
   if (!user || user.status === "disabled") throw unauthorized();
   c.set("session", session);
   c.set("user", user);
+  c.get("log")?.set("userId", user.id).set("role", user.role); // every authed request carries who
   await next();
 };
 

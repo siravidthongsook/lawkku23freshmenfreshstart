@@ -5,6 +5,6 @@ export default defineConfig({
   out: "./drizzle",
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? "postgres://eticket:eticket@localhost:5432/eticket",
+    url: process.env.DATABASE_URL ?? "postgres://lawkku_freshstart23:lawkku_freshstart23@localhost:5432/lawkku_freshstart23",
   },
 });

@@ -14,31 +14,31 @@ export function PublicHeader() {
   return (
     <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4">
-        <Link href="/events" className="flex items-center gap-2.5" aria-label="E-Ticket home">
+        <Link href="/events" className="flex items-center gap-2.5" aria-label="หน้าแรก LawKKUFreshmenFreshStart23">
           <Image
-            src="/brand/logo-blue.jpeg"
-            alt="E-Ticket"
+            src="/brand/platformlogo.png"
+            alt="LawKKUFreshmenFreshStart23"
             width={32}
             height={32}
             className="rounded-md"
             priority
           />
-          <span className="text-base font-semibold tracking-tight">E-Ticket</span>
+          <span className="text-base font-semibold tracking-tight">LawKKUFreshmenFreshStart23</span>
         </Link>
 
         <nav className="flex items-center gap-2">
           <Button variant="ghost" size="sm" asChild>
-            <Link href="/events">Events</Link>
+            <Link href="/events">กิจกรรม</Link>
           </Button>
           {/* Auth-aware action: avoid flicker while loading by rendering nothing. */}
           {!loading &&
             (user ? (
               <Button size="sm" asChild>
-                <Link href={roleHome(user.role)}>My account</Link>
+                <Link href={roleHome(user.role)}>บัญชีของฉัน</Link>
               </Button>
             ) : (
               <Button size="sm" asChild>
-                <Link href="/login">Login</Link>
+                <Link href="/login">เข้าสู่ระบบ</Link>
               </Button>
             ))}
         </nav>

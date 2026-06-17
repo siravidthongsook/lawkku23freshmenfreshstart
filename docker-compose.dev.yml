@@ -3,17 +3,17 @@
 services:
   db:
     image: postgres:16-alpine
-    container_name: eticket-db-dev
+    container_name: lawkku-freshstart23-db-dev
     environment:
-      POSTGRES_USER: eticket
-      POSTGRES_PASSWORD: eticket
-      POSTGRES_DB: eticket
+      POSTGRES_USER: lawkku_freshstart23
+      POSTGRES_PASSWORD: lawkku_freshstart23
+      POSTGRES_DB: lawkku_freshstart23
     ports:
       - "5432:5432" # matches .env.example DATABASE_URL for local pnpm dev
     volumes:
       - pgdata-dev:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U eticket"]
+      test: ["CMD-SHELL", "pg_isready -U lawkku_freshstart23"]
       interval: 5s
       timeout: 5s
       retries: 10

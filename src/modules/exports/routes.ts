@@ -58,6 +58,8 @@ type AppCtx = Context<{ Variables: AppVariables }>;
 function auditExport(c: AppCtx, eventId: string, kind: string, count: number) {
   const user = c.get("user");
   const meta = requestMeta(c);
+  // Central span for all three export kinds — captures kind + row count + which event.
+  c.get("log")?.event("export", { kind, eventId, rowCount: count });
   return writeAudit({
     actorUserId: user.id,
     actorRole: user.role,

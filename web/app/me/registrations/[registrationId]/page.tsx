@@ -31,7 +31,7 @@ import type { RegistrationDetailResponse } from "@/components/student/types";
 function renderAnswerValue(value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
   if (Array.isArray(value)) return value.length ? value.join(", ") : "—";
-  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "boolean") return value ? "ใช่" : "ไม่ใช่";
   return String(value);
 }
 
@@ -45,7 +45,7 @@ function DetailInner({ registrationId }: { registrationId: string }) {
     setError(null);
     apiGet<RegistrationDetailResponse>(`/me/registrations/${registrationId}`)
       .then(setDetail)
-      .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load registration"));
+      .catch((e) => setError(e instanceof ApiError ? e.message : "ไม่สามารถโหลดการลงทะเบียนได้"));
   }
 
   useEffect(() => {
@@ -57,11 +57,11 @@ function DetailInner({ registrationId }: { registrationId: string }) {
     setCancelling(true);
     try {
       await apiPost(`/registrations/${registrationId}/cancel`);
-      toast.success("Registration cancelled");
+      toast.success("ยกเลิกการลงทะเบียนแล้ว");
       setCancelOpen(false);
       load();
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Could not cancel registration");
+      toast.error(e instanceof ApiError ? e.message : "ไม่สามารถยกเลิกการลงทะเบียนได้");
     } finally {
       setCancelling(false);
     }
@@ -95,7 +95,7 @@ function DetailInner({ registrationId }: { registrationId: string }) {
         <Button asChild variant="ghost" size="sm">
           <Link href="/me/registrations">
             <ArrowLeft className="size-4" />
-            Back
+            ย้อนกลับ
           </Link>
         </Button>
       </div>
@@ -110,14 +110,14 @@ function DetailInner({ registrationId }: { registrationId: string }) {
             <Button asChild variant="outline" size="sm">
               <Link href={`/me/registrations/${registrationId}/edit`}>
                 <Pencil className="size-4" />
-                Edit answers
+                แก้ไขคำตอบ
               </Link>
             </Button>
           )}
           {showCancel && (
             <Button variant="destructive" size="sm" onClick={() => setCancelOpen(true)}>
               <XCircle className="size-4" />
-              Cancel
+              ยกเลิก
             </Button>
           )}
         </div>
@@ -128,7 +128,7 @@ function DetailInner({ registrationId }: { registrationId: string }) {
       {/* Event + registration info */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Event details</CardTitle>
+          <CardTitle className="text-base">รายละเอียดกิจกรรม</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
           {detail.event?.description && (
@@ -136,30 +136,30 @@ function DetailInner({ registrationId }: { registrationId: string }) {
           )}
           <dl className="grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2">
             {detail.event?.location && (
-              <Info label="Location" value={detail.event.location} />
+              <Info label="สถานที่" value={detail.event.location} />
             )}
             {detail.event?.eventStartAt && (
-              <Info label="Starts" value={formatBangkok(detail.event.eventStartAt)} />
+              <Info label="เริ่ม" value={formatBangkok(detail.event.eventStartAt)} />
             )}
             {detail.event?.eventEndAt && (
-              <Info label="Ends" value={formatBangkok(detail.event.eventEndAt)} />
+              <Info label="สิ้นสุด" value={formatBangkok(detail.event.eventEndAt)} />
             )}
             {registration.registeredAt && (
-              <Info label="Registered" value={formatBangkok(registration.registeredAt)} />
+              <Info label="ลงทะเบียนเมื่อ" value={formatBangkok(registration.registeredAt)} />
             )}
             {registration.waitlistedAt && registration.status === "waitlisted" && (
-              <Info label="Waitlisted" value={formatBangkok(registration.waitlistedAt)} />
+              <Info label="รายชื่อสำรองเมื่อ" value={formatBangkok(registration.waitlistedAt)} />
             )}
             {registration.checkedInAt && (
-              <Info label="Checked in" value={formatBangkok(registration.checkedInAt)} />
+              <Info label="เช็คอินแล้ว" value={formatBangkok(registration.checkedInAt)} />
             )}
             {registration.cancelledAt && (
-              <Info label="Cancelled" value={formatBangkok(registration.cancelledAt)} />
+              <Info label="ยกเลิกเมื่อ" value={formatBangkok(registration.cancelledAt)} />
             )}
           </dl>
           {detail.event?.publicSlug && (
             <Button asChild variant="link" className="h-auto p-0 text-sm">
-              <Link href={`/events/${detail.event.publicSlug}`}>View event page</Link>
+              <Link href={`/events/${detail.event.publicSlug}`}>ดูหน้ากิจกรรม</Link>
             </Button>
           )}
         </CardContent>
@@ -168,11 +168,11 @@ function DetailInner({ registrationId }: { registrationId: string }) {
       {/* Form answers */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Your answers</CardTitle>
+          <CardTitle className="text-base">คำตอบของคุณ</CardTitle>
         </CardHeader>
         <CardContent>
           {answerEntries.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No answers submitted.</p>
+            <p className="text-sm text-muted-foreground">ไม่มีคำตอบที่ส่ง</p>
           ) : (
             <dl className="space-y-3 text-sm">
               {answerEntries.map(([key, value]) => (
@@ -190,7 +190,7 @@ function DetailInner({ registrationId }: { registrationId: string }) {
       {fileIds.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Uploaded files</CardTitle>
+            <CardTitle className="text-base">ไฟล์ที่อัปโหลด</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             {fileIds.map((id, i) => (
@@ -202,7 +202,7 @@ function DetailInner({ registrationId }: { registrationId: string }) {
                   onClick={() => window.open(`/api/files/${id}/download`, "_blank")}
                 >
                   <Download className="size-4" />
-                  Download file {fileIds.length > 1 ? i + 1 : ""}
+                  ดาวน์โหลดไฟล์ {fileIds.length > 1 ? i + 1 : ""}
                 </Button>
               </div>
             ))}
@@ -213,17 +213,17 @@ function DetailInner({ registrationId }: { registrationId: string }) {
       <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Cancel registration?</DialogTitle>
+            <DialogTitle>ยกเลิกการลงทะเบียน?</DialogTitle>
             <DialogDescription>
-              This will release your spot. You may be able to register again while the window is open.
+              การดำเนินการนี้จะคืนสิทธิ์ที่นั่งของคุณ คุณอาจลงทะเบียนใหม่ได้หากยังอยู่ในช่วงเวลาที่เปิดรับ
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCancelOpen(false)} disabled={cancelling}>
-              Keep registration
+              เก็บการลงทะเบียนไว้
             </Button>
             <Button variant="destructive" onClick={handleCancel} disabled={cancelling}>
-              {cancelling ? "Cancelling..." : "Cancel registration"}
+              {cancelling ? "กำลังยกเลิก..." : "ยกเลิกการลงทะเบียน"}
             </Button>
           </DialogFooter>
         </DialogContent>

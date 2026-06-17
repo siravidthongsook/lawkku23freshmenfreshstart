@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { stream } from "hono/streaming";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../../db/client";
 import { events } from "../../db/schema/events";
@@ -7,6 +8,7 @@ import type { AppVariables } from "../../lib/context";
 import { badRequest, notFound } from "../../lib/errors";
 import { canManageEvents } from "../../lib/permissions";
 import { writeAudit } from "../../lib/audit";
+import { storage, buildEventPosterKey } from "../../lib/storage";
 import { computeEventStatus, ensureUniqueSlug, publicEventView } from "./service";
 import {
   createEventSchema,
@@ -60,6 +62,24 @@ router.get("/e/:publicId", async (c) => {
   return c.redirect(`/events/${event.publicSlug}`, 302);
 });
 
+// GET /events/:publicId/poster — public stream of an uploaded poster from private storage.
+// Keyed by stable publicId (survives slug edits). draft → 404 (not public). Static-URL posters
+// (posterObjectKey null) are served by the web layer directly, not here.
+router.get("/events/:publicId/poster", async (c) => {
+  const { publicId } = publicIdParam.parse(c.req.param());
+  const [event] = await db.select().from(events).where(eq(events.publicId, publicId)).limit(1);
+  if (!event || event.status === "draft") throw notFound("Event not found");
+  if (!event.posterObjectKey) throw notFound("Poster not found");
+
+  const nodeStream = storage.getStream(event.posterObjectKey);
+  c.header("Content-Type", event.posterObjectKey.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg");
+  return stream(c, async (s) => {
+    for await (const chunk of nodeStream) {
+      await s.write(chunk as Uint8Array);
+    }
+  });
+});
+
 // ---------- Admin ---------- (all guarded by canManageEvents)
 
 router.use("/admin/events", requireAuth, requirePermission(canManageEvents));
@@ -89,6 +109,7 @@ router.post("/admin/events", async (c) => {
       title: body.title,
       description: body.description ?? null,
       location: body.location ?? null,
+      posterImageUrl: body.posterImageUrl ?? null,
       publicSlug: slug,
       status: "draft", // always created as draft
       registrationMode: body.registrationMode ?? "closed",
@@ -156,6 +177,7 @@ router.patch("/admin/events/:eventId", async (c) => {
       "title",
       "description",
       "location",
+      "posterImageUrl",
       "registrationMode",
       "registrationOpenAt",
       "registrationCloseAt",
@@ -191,6 +213,65 @@ router.patch("/admin/events/:eventId", async (c) => {
   }
 
   return c.json({ event: updated });
+});
+
+// POST /admin/events/:eventId/poster — multipart upload of an event poster (admin only).
+// Image-only (JPG/PNG, posters aren't documents). Stores private; sets posterObjectKey +
+// posterImageUrl → the public serve endpoint. Replacing leaves the old object as orphan (storage GC separate).
+const POSTER_ALLOWED: Record<string, string[]> = {
+  "image/jpeg": [".jpg", ".jpeg"],
+  "image/png": [".png"],
+};
+const POSTER_MAX_BYTES = 5 * 1024 * 1024; // 5MB
+
+router.post("/admin/events/:eventId/poster", async (c) => {
+  const { eventId } = eventIdParam.parse(c.req.param());
+  const user = c.get("user");
+  const meta = requestMeta(c);
+
+  const [event] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);
+  if (!event) throw notFound("Event not found");
+
+  const body = await c.req.parseBody();
+  const file = body.file;
+  if (!(file instanceof File)) throw badRequest("missing_file", "file is required");
+
+  const filename = file.name || "poster";
+  const i = filename.lastIndexOf(".");
+  const ext = i >= 0 ? filename.slice(i).toLowerCase() : "";
+  const mime = file.type || "";
+  const allowedExts = POSTER_ALLOWED[mime];
+  if (!allowedExts || !allowedExts.includes(ext)) {
+    throw badRequest("unsupported_file_type", "Only JPG or PNG posters are allowed");
+  }
+
+  const buffer = Buffer.from(await file.arrayBuffer());
+  if (buffer.byteLength === 0) throw badRequest("empty_file", "File is empty");
+  if (buffer.byteLength > POSTER_MAX_BYTES) throw badRequest("file_too_large", "File exceeds 5MB limit");
+
+  const objectKey = buildEventPosterKey(eventId, filename);
+  await storage.put(objectKey, buffer);
+
+  // posterImageUrl points at the stable public serve endpoint (by publicId).
+  const posterUrl = `/events/${event.publicId}/poster`;
+  const [updated] = await db
+    .update(events)
+    .set({ posterObjectKey: objectKey, posterImageUrl: posterUrl, updatedAt: new Date() })
+    .where(eq(events.id, eventId))
+    .returning();
+
+  await writeAudit({
+    actorUserId: user.id,
+    actorRole: user.role,
+    action: "event_poster_uploaded",
+    entityType: "event",
+    entityId: eventId,
+    eventId,
+    metadata: { file_size_bytes: buffer.byteLength, mime_type: mime },
+    ...meta,
+  });
+
+  return c.json({ event: updated }, 201);
 });
 
 // POST /admin/events/:eventId/status — non-destructive status move; audit event_status_changed.

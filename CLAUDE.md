@@ -1,6 +1,6 @@
-# CLAUDE.md — E-Ticket & Event Registration System (V1)
+# CLAUDE.md — LawKKUFreshmenFreshStart23 & Event Registration System (V1)
 
-Internal single-site e-ticket system for student events. Not multi-tenant SaaS.
+Internal single-site LawKKUFreshmenFreshStart23 system for student events. Not multi-tenant SaaS.
 Full spec: `spec.md`. Derived docs: `docs/01-database-schema.md`, `docs/02-api-contract.md`, `docs/03-page-list.md`, `docs/04-implementation-tasks.md`.
 
 ---
@@ -17,8 +17,8 @@ Full spec: `spec.md`. Derived docs: `docs/01-database-schema.md`, `docs/02-api-c
 | Validation | Zod (shared req/res schemas) |
 
 Two packages, one repo:
-- **Backend** — root pkg `eticket-backend`, code in `src/`, Hono on `PORT` (default `3000`). Run `pnpm dev:backend`.
-- **Frontend** — `web/` pkg `eticket-web`, Next.js 16 on port `3001`. Run `pnpm dev:frontend`. Has own `node_modules`.
+- **Backend** — root pkg `lawkku-freshstart23-backend`, code in `src/`, Hono on `PORT` (default `3000`). Run `pnpm dev:backend`.
+- **Frontend** — `web/` pkg `lawkku-freshstart23-web`, Next.js 16 on port `3001`. Run `pnpm dev:frontend`. Has own `node_modules`.
 - `pnpm dev` runs both via concurrently.
 
 Frontend imports backend Zod schemas directly via path alias `@be/*` → `../src/*` (see `web/tsconfig.json`). Zod = single source of truth for validation across both. `@/*` → web root.

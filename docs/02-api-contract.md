@@ -1,4 +1,4 @@
-# E-Ticket System — API Contract (V1)
+# LawKKUFreshmenFreshStart23 — API Contract (V1)
 
 > Derived from `spec.md` §22. REST, JSON, server-side session cookie (HttpOnly, Secure, SameSite=Lax). All mutating sensitive actions require `reason` + emit audit log.
 

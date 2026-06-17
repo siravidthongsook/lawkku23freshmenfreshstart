@@ -11,11 +11,49 @@ type AuthState = {
   user: Me | null;
   loading: boolean;
   refetch: () => Promise<void>;
-  login: (email: string, password: string) => Promise<Me>;
+  login: (identifier: string, password: string) => Promise<Me>;
   logout: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
+
+// Raw GET /auth/me shape: wrapped + snake_case (see src/modules/auth/routes.ts publicUser).
+type MeResponse = {
+  user: {
+    id: string;
+    email: string;
+    student_id: string | null;
+    role: Me["role"];
+    full_name: string;
+    faculty: string | null;
+    department: string | null;
+    phone: string | null;
+    status: Me["status"];
+  };
+  password_must_change: boolean;
+};
+
+// Adapt wire shape → flat camelCase Me used across the frontend.
+function toMe(res: MeResponse): Me {
+  const u = res.user;
+  return {
+    id: u.id,
+    email: u.email,
+    studentId: u.student_id,
+    fullName: u.full_name,
+    faculty: u.faculty,
+    department: u.department,
+    phone: u.phone,
+    role: u.role,
+    status: u.status,
+    passwordMustChange: res.password_must_change,
+  };
+}
+
+// Single fetch+adapt for /auth/me so refetch() and login() stay in sync.
+async function fetchMe(): Promise<Me> {
+  return toMe(await apiGet<MeResponse>("/auth/me"));
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<Me | null>(null);
@@ -24,7 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refetch = useCallback(async () => {
     setLoading(true);
     try {
-      const me = await apiGet<Me>("/auth/me");
+      const me = await fetchMe();
       setUser(me);
     } catch (err) {
       // 401 (not logged in) is expected; clear silently. Other errors also leave user null.
@@ -35,10 +73,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (identifier: string, password: string) => {
     // Returns the user; caller decides where to redirect (e.g. /change-password if must-change).
-    await apiPost("/auth/login", { email, password });
-    const me = await apiGet<Me>("/auth/me");
+    // identifier = email OR student_id; backend looks up by either.
+    await apiPost("/auth/login", { identifier, password });
+    const me = await fetchMe();
     setUser(me);
     return me;
   }, []);

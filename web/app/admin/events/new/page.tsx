@@ -13,10 +13,10 @@ export default function NewEventPage() {
         <Button asChild variant="ghost" size="sm">
           <Link href="/admin/events">
             <ArrowLeft className="size-4" />
-            Back
+            ย้อนกลับ
           </Link>
         </Button>
-        <h1 className="text-xl font-semibold">New event</h1>
+        <h1 className="text-xl font-semibold">สร้างกิจกรรมใหม่</h1>
       </div>
       <EventForm mode="create" />
     </div>

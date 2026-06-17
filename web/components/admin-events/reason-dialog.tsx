@@ -32,7 +32,7 @@ export function ReasonDialog({
   onOpenChange,
   title,
   description,
-  confirmLabel = "Confirm",
+  confirmLabel = "ยืนยัน",
   destructive = false,
   onConfirm,
 }: ReasonDialogProps) {
@@ -69,29 +69,29 @@ export function ReasonDialog({
         </DialogHeader>
         <div className="space-y-2">
           <Label htmlFor="reason">
-            Reason <span className="text-destructive">*</span>
+            เหตุผล <span className="text-destructive">*</span>
           </Label>
           <Textarea
             id="reason"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder="Required — recorded in the audit log"
+            placeholder="จำเป็น — บันทึกไว้ในบันทึกการตรวจสอบ"
             rows={3}
           />
           <p className="text-xs text-muted-foreground">
-            This action is recorded in the audit log and cannot be undone without another action.
+            การกระทำนี้ถูกบันทึกไว้ในบันทึกการตรวจสอบและไม่สามารถยกเลิกได้หากไม่มีการกระทำอื่น
           </p>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
-            Cancel
+            ยกเลิก
           </Button>
           <Button
             variant={destructive ? "destructive" : "default"}
             onClick={handleConfirm}
             disabled={!reasonValid || submitting}
           >
-            {submitting ? "Working…" : confirmLabel}
+            {submitting ? "กำลังดำเนินการ…" : confirmLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

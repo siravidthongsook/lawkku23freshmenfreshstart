@@ -23,7 +23,7 @@ export default function EventsPage() {
       // Defensive: backend should already filter, but enforce public-visibility rules client-side too.
       setEvents((Array.isArray(data) ? data : []).filter(isPubliclyListed));
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not load events");
+      setError(err instanceof ApiError ? err.message : "ไม่สามารถโหลดกิจกรรมได้");
       setEvents(null);
     } finally {
       setLoading(false);
@@ -37,8 +37,8 @@ export default function EventsPage() {
   return (
     <PublicShell>
       <div className="mb-6 space-y-1">
-        <h1 className="text-2xl font-bold tracking-tight">Upcoming events</h1>
-        <p className="text-sm text-muted-foreground">Browse and register for student events.</p>
+        <h1 className="text-2xl font-bold tracking-tight">กิจกรรมที่กำลังจะมาถึง</h1>
+        <p className="text-sm text-muted-foreground">เลือกชมและลงทะเบียนกิจกรรมนักศึกษา</p>
       </div>
 
       {loading ? (
@@ -55,7 +55,7 @@ export default function EventsPage() {
         <div className="rounded-lg border border-dashed py-16 text-center">
           <p className="text-sm text-muted-foreground">{error}</p>
           <Button variant="outline" size="sm" className="mt-4" onClick={() => void load()}>
-            Try again
+            ลองใหม่อีกครั้ง
           </Button>
         </div>
       ) : events && events.length > 0 ? (
@@ -66,7 +66,7 @@ export default function EventsPage() {
         </div>
       ) : (
         <div className="rounded-lg border border-dashed py-16 text-center">
-          <p className="text-sm text-muted-foreground">No events are open right now. Check back soon.</p>
+          <p className="text-sm text-muted-foreground">ขณะนี้ยังไม่มีกิจกรรมที่เปิดรับ กรุณากลับมาตรวจสอบอีกครั้งเร็ว ๆ นี้</p>
         </div>
       )}
     </PublicShell>

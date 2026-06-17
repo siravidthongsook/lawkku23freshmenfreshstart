@@ -55,10 +55,14 @@ router.post("/events/:eventId/register", requireAuth, async (c) => {
   const body = answersBody.parse(await c.req.json().catch(() => ({})));
   const user = c.get("user");
   const meta = requestMeta(c);
+  const log = c.get("log");
+  log.set("eventId", eventId);
 
   const result = await db.transaction(async (tx) => {
-    // Row-lock the event so concurrent submits serialize on capacity.
+    // Row-lock the event so concurrent submits serialize on capacity. Span the lock wait.
+    const endLock = log.span("event_row_lock");
     const [event] = await tx.select().from(events).where(eq(events.id, eventId)).for("update").limit(1);
+    endLock();
     if (!event) throw notFound("Event not found");
 
     if (event.status !== "published")
@@ -86,6 +90,7 @@ router.post("/events/:eventId/register", requireAuth, async (c) => {
     const count = await countActiveRegistrations(tx, eventId);
     const capFull =
       event.capacityEnabled && event.capacityLimit != null && count >= event.capacityLimit;
+    log.event("capacity_check", { enabled: event.capacityEnabled, limit: event.capacityLimit, used: count, full: capFull });
     let status: "registered" | "waitlisted";
     if (!capFull) status = "registered";
     else if (event.waitlistEnabled) status = "waitlisted";
@@ -119,6 +124,11 @@ router.post("/events/:eventId/register", requireAuth, async (c) => {
     return { reg, qrToken, alreadyExisted: false };
   });
 
+  log.event("register_result", {
+    status: result.reg.status,
+    alreadyExisted: result.alreadyExisted,
+    qrIssued: !!result.qrToken,
+  });
   return c.json(
     {
       registration: serializeRegistration(result.reg),

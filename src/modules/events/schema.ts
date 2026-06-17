@@ -19,6 +19,8 @@ const eventConfigShape = {
   title: z.string().min(1).max(300),
   description: z.string().max(10_000).nullable().optional(),
   location: z.string().max(500).nullable().optional(),
+  // Poster render URL (static path or serve endpoint). Upload endpoint sets it from the stored file.
+  posterImageUrl: z.string().max(1000).nullable().optional(),
   registrationMode: registrationModeEnum.optional(),
   registrationOpenAt: isoDateTimeNullable.optional(),
   registrationCloseAt: isoDateTimeNullable.optional(),

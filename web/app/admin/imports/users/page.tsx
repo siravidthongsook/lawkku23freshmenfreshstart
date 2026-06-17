@@ -63,11 +63,11 @@ export default function ImportUsersPage() {
 
   async function runPreview() {
     if (!file) {
-      toast.error("Choose a CSV file first");
+      toast.error("กรุณาเลือกไฟล์ CSV ก่อน");
       return;
     }
     if (registerToEvent && !targetEventId.trim()) {
-      toast.error("Target event ID is required for register-to-event imports");
+      toast.error("ต้องระบุรหัสกิจกรรมเป้าหมายสำหรับการนำเข้าแบบลงทะเบียนเข้ากิจกรรม");
       return;
     }
     setPreviewing(true);
@@ -84,9 +84,9 @@ export default function ImportUsersPage() {
         form,
       );
       setPreview(res);
-      toast.success("Preview ready");
+      toast.success("ตัวอย่างพร้อมแล้ว");
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Could not preview import");
+      toast.error(e instanceof ApiError ? e.message : "ไม่สามารถแสดงตัวอย่างการนำเข้าได้");
       setPreview(null);
     } finally {
       setPreviewing(false);
@@ -98,11 +98,11 @@ export default function ImportUsersPage() {
     // Over-capacity register requires acknowledgement + reason (UI gate; backend auto-audits).
     if (registerToEvent && overCapCount > 0) {
       if (!overCapAck) {
-        toast.error("Acknowledge the over-capacity registrations to continue");
+        toast.error("กรุณายอมรับการลงทะเบียนเกินจำนวนที่รับเพื่อดำเนินการต่อ");
         return;
       }
       if (reason.trim().length === 0) {
-        toast.error("A reason is required to register over capacity");
+        toast.error("ต้องระบุเหตุผลในการลงทะเบียนเกินจำนวนที่รับ");
         return;
       }
     }
@@ -114,7 +114,7 @@ export default function ImportUsersPage() {
     };
     const parsed = confirmImportSchema.safeParse(payload);
     if (!parsed.success) {
-      toast.error(parsed.error.issues[0]?.message ?? "Invalid import options");
+      toast.error(parsed.error.issues[0]?.message ?? "ตัวเลือกการนำเข้าไม่ถูกต้อง");
       return;
     }
 
@@ -126,9 +126,9 @@ export default function ImportUsersPage() {
         parsed.data,
       );
       setResult(res);
-      toast.success("Import confirmed");
+      toast.success("ยืนยันการนำเข้าแล้ว");
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Could not confirm import");
+      toast.error(e instanceof ApiError ? e.message : "ไม่สามารถยืนยันการนำเข้าได้");
     } finally {
       setConfirming(false);
     }
@@ -143,28 +143,28 @@ export default function ImportUsersPage() {
         `import-${importId}-result.csv`,
       );
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Could not download result");
+      toast.error(e instanceof ApiError ? e.message : "ไม่สามารถดาวน์โหลดผลลัพธ์ได้");
     }
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Import Users</h1>
+        <h1 className="text-2xl font-semibold">นำเข้าผู้ใช้</h1>
         <Button variant="outline" size="sm" asChild>
-          <Link href="/admin/users">Back to users</Link>
+          <Link href="/admin/users">กลับไปที่ผู้ใช้</Link>
         </Button>
       </div>
 
       {/* Step 1 — upload + options */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">1. Upload &amp; options</CardTitle>
+          <CardTitle className="text-base">1. อัปโหลดและตัวเลือก</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="file">CSV file</Label>
+              <Label htmlFor="file">ไฟล์ CSV</Label>
               <Input
                 id="file"
                 type="file"
@@ -173,33 +173,33 @@ export default function ImportUsersPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label>Scope</Label>
+              <Label>ขอบเขต</Label>
               <Select value={scope} onValueChange={(v) => setScope(v as Scope)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="user_pool_only">User pool only</SelectItem>
+                  <SelectItem value="user_pool_only">เฉพาะกลุ่มผู้ใช้</SelectItem>
                   <SelectItem value="user_pool_and_register_to_event">
-                    User pool + register to event
+                    กลุ่มผู้ใช้ + ลงทะเบียนเข้ากิจกรรม
                   </SelectItem>
                 </SelectContent>
               </Select>
             </div>
             {registerToEvent ? (
               <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="eventId">Target event ID</Label>
+                <Label htmlFor="eventId">รหัสกิจกรรมเป้าหมาย</Label>
                 <Input
                   id="eventId"
                   value={targetEventId}
                   onChange={(e) => setTargetEventId(e.target.value)}
-                  placeholder="Event UUID"
+                  placeholder="UUID ของกิจกรรม"
                 />
               </div>
             ) : null}
           </div>
           <Button onClick={runPreview} disabled={previewing}>
-            {previewing ? "Previewing…" : "Preview"}
+            {previewing ? "กำลังแสดงตัวอย่าง…" : "แสดงตัวอย่าง"}
           </Button>
         </CardContent>
       </Card>
@@ -208,7 +208,7 @@ export default function ImportUsersPage() {
       {preview ? (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">2. Preview</CardTitle>
+            <CardTitle className="text-base">2. ตัวอย่าง</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {/* Summary counts */}
@@ -228,11 +228,11 @@ export default function ImportUsersPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>#</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Student ID</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Note</TableHead>
+                    <TableHead>อีเมล</TableHead>
+                    <TableHead>รหัสนักศึกษา</TableHead>
+                    <TableHead>ชื่อ</TableHead>
+                    <TableHead>สถานะ</TableHead>
+                    <TableHead>หมายเหตุ</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -256,8 +256,8 @@ export default function ImportUsersPage() {
             {registerToEvent && overCapCount > 0 ? (
               <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-3">
                 <p className="text-sm text-amber-900">
-                  {overCapCount} row(s) will register the user over the event capacity. This is an
-                  override and will be recorded in the audit log.
+                  {overCapCount} แถวจะลงทะเบียนผู้ใช้เกินจำนวนที่รับของกิจกรรม นี่เป็นการ
+                  ข้ามข้อจำกัดและจะถูกบันทึกไว้ในบันทึกการตรวจสอบ
                 </p>
                 <label className="flex items-center gap-2 text-sm text-amber-900">
                   <input
@@ -265,15 +265,15 @@ export default function ImportUsersPage() {
                     checked={overCapAck}
                     onChange={(e) => setOverCapAck(e.target.checked)}
                   />
-                  I understand and want to register these users over capacity.
+                  ฉันเข้าใจและต้องการลงทะเบียนผู้ใช้เหล่านี้เกินจำนวนที่รับ
                 </label>
                 <div className="space-y-1.5">
-                  <Label htmlFor="oc-reason">Reason (required)</Label>
+                  <Label htmlFor="oc-reason">เหตุผล (จำเป็น)</Label>
                   <Textarea
                     id="oc-reason"
                     value={reason}
                     onChange={(e) => setReason(e.target.value)}
-                    placeholder="Why register over capacity?"
+                    placeholder="เหตุใดจึงลงทะเบียนเกินจำนวนที่รับ?"
                   />
                 </div>
               </div>
@@ -281,10 +281,10 @@ export default function ImportUsersPage() {
 
             <div className="flex gap-2">
               <Button onClick={runConfirm} disabled={confirming}>
-                {confirming ? "Confirming…" : "Confirm import"}
+                {confirming ? "กำลังยืนยัน…" : "ยืนยันการนำเข้า"}
               </Button>
               <Button variant="outline" onClick={downloadResult}>
-                Download preview result
+                ดาวน์โหลดผลตัวอย่าง
               </Button>
             </div>
           </CardContent>
@@ -295,29 +295,29 @@ export default function ImportUsersPage() {
       {result ? (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">3. Result</CardTitle>
+            <CardTitle className="text-base">3. ผลลัพธ์</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap gap-2 text-sm">
               <span className="rounded-md border bg-muted px-2 py-1">
-                Created: <strong>{result.created}</strong>
+                สร้างใหม่: <strong>{result.created}</strong>
               </span>
               <span className="rounded-md border bg-muted px-2 py-1">
-                Updated: <strong>{result.updated}</strong>
+                อัปเดต: <strong>{result.updated}</strong>
               </span>
               <span className="rounded-md border bg-muted px-2 py-1">
-                Registered: <strong>{result.registered}</strong>
+                ลงทะเบียน: <strong>{result.registered}</strong>
               </span>
               <span className="rounded-md border bg-muted px-2 py-1">
-                Over capacity: <strong>{result.over_capacity}</strong>
+                เกินจำนวนที่รับ: <strong>{result.over_capacity}</strong>
               </span>
             </div>
             <p className="text-sm text-muted-foreground">
-              The result file includes generated temporary passwords for created users. Treat it as
-              sensitive.
+              ไฟล์ผลลัพธ์มีรหัสผ่านชั่วคราวที่สร้างขึ้นสำหรับผู้ใช้ที่สร้างใหม่ โปรดถือว่า
+              เป็นข้อมูลละเอียดอ่อน
             </p>
             <Button variant="outline" onClick={downloadResult}>
-              Download result CSV
+              ดาวน์โหลดผลลัพธ์ CSV
             </Button>
           </CardContent>
         </Card>

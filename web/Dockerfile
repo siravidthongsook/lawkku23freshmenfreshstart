@@ -1,4 +1,4 @@
-# E-Ticket web (Next.js prod). Build context = repo root so ../src shared schemas resolve.
+# LawKKUFreshmenFreshStart23 web (Next.js prod). Build context = repo root so ../src shared schemas resolve.
 FROM node:22-slim AS base
 ENV PNPM_HOME="/pnpm" PATH="/pnpm:$PATH"
 RUN corepack enable

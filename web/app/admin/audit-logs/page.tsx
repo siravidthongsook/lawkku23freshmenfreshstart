@@ -70,7 +70,7 @@ export default function AuditLogsPage() {
       const res = await apiGet<AuditLogListResponse>(`/admin/audit-logs?${sp.toString()}`);
       setLogs(res.logs ?? []);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not load audit logs");
+      setError(e instanceof ApiError ? e.message : "ไม่สามารถโหลดบันทึกการตรวจสอบได้");
       setLogs([]);
     } finally {
       setLoading(false);
@@ -89,34 +89,34 @@ export default function AuditLogsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Audit Logs</h1>
+      <h1 className="text-2xl font-semibold">บันทึกการตรวจสอบ</h1>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Filters</CardTitle>
+          <CardTitle className="text-base">ตัวกรอง</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <div className="space-y-1.5">
-              <Label htmlFor="action">Action</Label>
+              <Label htmlFor="action">การกระทำ</Label>
               <Input
                 id="action"
                 value={action}
                 onChange={(e) => setAction(e.target.value)}
-                placeholder="e.g. user_role_changed"
+                placeholder="เช่น user_role_changed"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="entity">Entity type</Label>
+              <Label htmlFor="entity">ประเภทเอนทิตี</Label>
               <Input
                 id="entity"
                 value={entityType}
                 onChange={(e) => setEntityType(e.target.value)}
-                placeholder="e.g. user, event"
+                placeholder="เช่น user, event"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="actor">Target user ID</Label>
+              <Label htmlFor="actor">รหัสผู้ใช้เป้าหมาย</Label>
               <Input
                 id="actor"
                 value={targetUserId}
@@ -125,7 +125,7 @@ export default function AuditLogsPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="afrom">From</Label>
+              <Label htmlFor="afrom">ตั้งแต่</Label>
               <Input
                 id="afrom"
                 type="datetime-local"
@@ -134,7 +134,7 @@ export default function AuditLogsPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="ato">To</Label>
+              <Label htmlFor="ato">ถึง</Label>
               <Input
                 id="ato"
                 type="datetime-local"
@@ -143,7 +143,7 @@ export default function AuditLogsPage() {
               />
             </div>
           </div>
-          <Button onClick={applyFilters}>Apply filters</Button>
+          <Button onClick={applyFilters}>ใช้ตัวกรอง</Button>
         </CardContent>
       </Card>
 
@@ -159,23 +159,23 @@ export default function AuditLogsPage() {
             <div className="py-10 text-center">
               <p className="text-sm text-muted-foreground">{error}</p>
               <Button variant="outline" size="sm" className="mt-3" onClick={load}>
-                Retry
+                ลองใหม่
               </Button>
             </div>
           ) : logs.length === 0 ? (
-            <p className="py-10 text-center text-sm text-muted-foreground">No audit logs found.</p>
+            <p className="py-10 text-center text-sm text-muted-foreground">ไม่พบบันทึกการตรวจสอบ</p>
           ) : (
             <>
               <div className="rounded-md border">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Time</TableHead>
-                      <TableHead>Action</TableHead>
-                      <TableHead>Actor</TableHead>
-                      <TableHead>Entity</TableHead>
-                      <TableHead>Reason</TableHead>
-                      <TableHead>Details</TableHead>
+                      <TableHead>เวลา</TableHead>
+                      <TableHead>การกระทำ</TableHead>
+                      <TableHead>ผู้กระทำ</TableHead>
+                      <TableHead>เอนทิตี</TableHead>
+                      <TableHead>เหตุผล</TableHead>
+                      <TableHead>รายละเอียด</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -213,7 +213,7 @@ export default function AuditLogsPage() {
               {/* Pagination — offset based; backend has no total, so Next disables on short pages. */}
               <div className="mt-4 flex items-center justify-between">
                 <span className="text-xs text-muted-foreground">
-                  Showing {offset + 1}–{offset + logs.length}
+                  กำลังแสดง {offset + 1}–{offset + logs.length}
                 </span>
                 <div className="flex gap-2">
                   <Button
@@ -222,7 +222,7 @@ export default function AuditLogsPage() {
                     disabled={offset === 0}
                     onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
                   >
-                    Previous
+                    ก่อนหน้า
                   </Button>
                   <Button
                     variant="outline"
@@ -230,7 +230,7 @@ export default function AuditLogsPage() {
                     disabled={logs.length < PAGE_SIZE}
                     onClick={() => setOffset((o) => o + PAGE_SIZE)}
                   >
-                    Next
+                    ถัดไป
                   </Button>
                 </div>
               </div>

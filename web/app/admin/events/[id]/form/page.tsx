@@ -30,7 +30,7 @@ export default function FormBuilderPage({ params }: { params: Promise<{ id: stri
       const res = await apiGet<{ form: FormVersion | null }>(`/admin/events/${id}/form`);
       setForm(res.form);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to load form.");
+      setError(err instanceof ApiError ? err.message : "ไม่สามารถโหลดฟอร์มได้");
       setForm(null);
     }
   }, [id]);
@@ -47,10 +47,10 @@ export default function FormBuilderPage({ params }: { params: Promise<{ id: stri
         <Button asChild variant="ghost" size="sm">
           <Link href={`/admin/events/${id}`}>
             <ArrowLeft className="size-4" />
-            Back
+            ย้อนกลับ
           </Link>
         </Button>
-        <h1 className="text-xl font-semibold">Form builder</h1>
+        <h1 className="text-xl font-semibold">เครื่องมือสร้างฟอร์ม</h1>
       </div>
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}

@@ -19,7 +19,7 @@ const STAFF_ROLES = ["checkin_staff", "admin"] as const;
 function CheckinWindow({ e }: { e: StaffEventListItem }) {
   const open = formatBangkok(e.checkinOpenAt);
   const close = formatBangkok(e.checkinCloseAt);
-  if (!open && !close) return <span className="text-muted-foreground">No window set</span>;
+  if (!open && !close) return <span className="text-muted-foreground">ยังไม่ได้กำหนดช่วงเวลา</span>;
   return (
     <span>
       {open || "—"} → {close || "—"}
@@ -39,7 +39,7 @@ function EventsList() {
         if (alive) setEvents(res.events ?? []);
       } catch (err) {
         if (!alive) return;
-        setError(err instanceof ApiError ? err.message : "Could not load events.");
+        setError(err instanceof ApiError ? err.message : "ไม่สามารถโหลดกิจกรรมได้");
         setEvents([]);
       }
     })();
@@ -66,7 +66,7 @@ function EventsList() {
   if (events.length === 0) {
     return (
       <Card className="p-8 text-center text-sm text-muted-foreground">
-        No check-in-capable events right now.
+        ขณะนี้ไม่มีกิจกรรมที่เปิดให้เช็คอิน
       </Card>
     );
   }
@@ -85,7 +85,7 @@ function EventsList() {
                     : "bg-slate-200 text-slate-700 border-transparent"
                 }
               >
-                {e.checkinOpen ? "Open" : "Closed"}
+                {e.checkinOpen ? "เปิด" : "ปิด"}
               </Badge>
             </div>
           </CardHeader>
@@ -106,18 +106,18 @@ function EventsList() {
               <div className="flex gap-4 text-sm">
                 <span>
                   <span className="font-semibold">{e.checkedInCount ?? 0}</span>
-                  <span className="text-muted-foreground"> checked in</span>
+                  <span className="text-muted-foreground"> เช็คอินแล้ว</span>
                 </span>
                 <span>
                   <span className="font-semibold">{e.registeredCount ?? 0}</span>
-                  <span className="text-muted-foreground"> registered</span>
+                  <span className="text-muted-foreground"> ลงทะเบียนแล้ว</span>
                 </span>
               </div>
             )}
 
             <Button asChild className="mt-auto h-11 w-full text-base">
               <Link href={`/staff/events/${e.id}/checkin`}>
-                <ScanLine className="size-5" /> Open scanner
+                <ScanLine className="size-5" /> เปิดเครื่องสแกน
               </Link>
             </Button>
           </CardContent>
@@ -132,7 +132,7 @@ export default function StaffEventsPage() {
     <RequireRole roles={[...STAFF_ROLES]}>
       <AppShell>
         <div className="space-y-4">
-          <h1 className="text-xl font-semibold">Check-in</h1>
+          <h1 className="text-xl font-semibold">เช็คอิน</h1>
           <EventsList />
         </div>
       </AppShell>

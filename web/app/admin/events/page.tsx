@@ -30,7 +30,7 @@ export default function AdminEventsPage() {
       .then((res) => active && setEvents(res.events ?? []))
       .catch((err) => {
         if (!active) return;
-        setError(err instanceof ApiError ? err.message : "Failed to load events.");
+        setError(err instanceof ApiError ? err.message : "ไม่สามารถโหลดกิจกรรมได้");
         setEvents([]);
       });
     return () => {
@@ -41,11 +41,11 @@ export default function AdminEventsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Events</h1>
+        <h1 className="text-xl font-semibold">กิจกรรม</h1>
         <Button asChild>
           <Link href="/admin/events/new">
             <Plus className="size-4" />
-            New event
+            สร้างกิจกรรมใหม่
           </Link>
         </Button>
       </div>
@@ -60,20 +60,20 @@ export default function AdminEventsPage() {
         </div>
       ) : events.length === 0 ? (
         <div className="rounded-md border py-16 text-center text-sm text-muted-foreground">
-          No events yet. Create your first one.
+          ยังไม่มีกิจกรรม สร้างกิจกรรมแรกของคุณ
         </div>
       ) : (
         <div className="rounded-md border">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Title</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Visibility</TableHead>
-                <TableHead className="text-right">Registered</TableHead>
-                <TableHead className="text-right">Checked in</TableHead>
-                <TableHead>Event date</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>หัวข้อ</TableHead>
+                <TableHead>สถานะ</TableHead>
+                <TableHead>การมองเห็น</TableHead>
+                <TableHead className="text-right">ลงทะเบียน</TableHead>
+                <TableHead className="text-right">เช็คอินแล้ว</TableHead>
+                <TableHead>วันที่จัดกิจกรรม</TableHead>
+                <TableHead className="text-right">การกระทำ</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -99,7 +99,7 @@ export default function AdminEventsPage() {
                   </TableCell>
                   <TableCell className="text-right">
                     <Button asChild variant="ghost" size="sm">
-                      <Link href={`/admin/events/${ev.id}/edit`}>Edit</Link>
+                      <Link href={`/admin/events/${ev.id}/edit`}>แก้ไข</Link>
                     </Button>
                   </TableCell>
                 </TableRow>

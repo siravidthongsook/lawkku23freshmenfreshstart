@@ -23,14 +23,14 @@ export function QrTicket({ qr }: { qr: RegistrationQr }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Your ticket</CardTitle>
+        <CardTitle className="text-base">บัตรของคุณ</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col items-center gap-3">
         <div className="rounded-lg bg-white p-4">
-          <QRCodeSVG value={payload} size={208} level="M" aria-label="Registration QR code" />
+          <QRCodeSVG value={payload} size={208} level="M" aria-label="คิวอาร์โค้ดการลงทะเบียน" />
         </div>
         <p className="text-center text-sm text-muted-foreground">
-          Show this code at the event entrance for check-in.
+          แสดงโค้ดนี้ที่ทางเข้ากิจกรรมเพื่อเช็คอิน
         </p>
       </CardContent>
     </Card>

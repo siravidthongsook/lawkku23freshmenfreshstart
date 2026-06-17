@@ -1,4 +1,4 @@
-# E-Ticket Web (frontend)
+# LawKKUFreshmenFreshStart23 Web (frontend)
 
 Next.js 16 (App Router) + Tailwind v4 + shadcn/ui. Talks to the Hono backend via a same-origin proxy.
 

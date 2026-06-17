@@ -1,8 +1,8 @@
-# E-Ticket & Event Registration System Spec — V1
+# LawKKUFreshmenFreshStart23 & Event Registration System Spec — V1
 
 ## 1. Product Summary
 
-ระบบเว็บ e-ticket สำหรับกิจกรรมนักศึกษาใหม่ ภายใน site เดียวขององค์กร/ชมรม/มหาวิทยาลัย ไม่ใช่ multi-tenant SaaS
+ระบบเว็บ LawKKUFreshmenFreshStart23 สำหรับกิจกรรมนักศึกษาใหม่ ภายใน site เดียวขององค์กร/ชมรม/มหาวิทยาลัย ไม่ใช่ multi-tenant SaaS
 
 Core flow:
 

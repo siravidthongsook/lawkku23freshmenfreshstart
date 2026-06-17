@@ -28,11 +28,11 @@ import {
 type StatusFilter = "all" | "registered" | "waitlisted" | "checked_in" | "cancelled";
 
 const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
-  { value: "all", label: "All statuses" },
-  { value: "registered", label: "Registered" },
-  { value: "waitlisted", label: "Waitlisted" },
-  { value: "checked_in", label: "Checked in" },
-  { value: "cancelled", label: "Cancelled" },
+  { value: "all", label: "ทุกสถานะ" },
+  { value: "registered", label: "ลงทะเบียน" },
+  { value: "waitlisted", label: "อยู่ในรายชื่อสำรอง" },
+  { value: "checked_in", label: "เช็คอินแล้ว" },
+  { value: "cancelled", label: "ยกเลิกแล้ว" },
 ];
 
 // datetime-local → ISO-8601 UTC for the filter query. Input is Bangkok wall-clock (spec).
@@ -60,7 +60,7 @@ export default function EventExportPage() {
     };
     const parsed = exportFiltersSchema.safeParse(candidate);
     if (!parsed.success) {
-      toast.error(parsed.error.issues[0]?.message ?? "Invalid filters");
+      toast.error(parsed.error.issues[0]?.message ?? "ตัวกรองไม่ถูกต้อง");
       return null;
     }
     return toQuery({
@@ -80,9 +80,9 @@ export default function EventExportPage() {
         `/admin/events/${eventId}/export/${kind}${qs}`,
         `event-${eventId}-${kind}.csv`,
       );
-      toast.success(`${label} export started`);
+      toast.success(`เริ่มส่งออก ${label} แล้ว`);
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : `Could not export ${label}`);
+      toast.error(e instanceof ApiError ? e.message : `ไม่สามารถส่งออก ${label} ได้`);
     } finally {
       setPending(null);
     }
@@ -91,21 +91,21 @@ export default function EventExportPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Export</h1>
+        <h1 className="text-2xl font-semibold">ส่งออก</h1>
         <Button variant="outline" size="sm" asChild>
-          <Link href={`/admin/events/${eventId}`}>Back to event</Link>
+          <Link href={`/admin/events/${eventId}`}>กลับไปที่กิจกรรม</Link>
         </Button>
       </div>
 
       {/* Filters */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Filters</CardTitle>
+          <CardTitle className="text-base">ตัวกรอง</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="space-y-1.5">
-              <Label>Status</Label>
+              <Label>สถานะ</Label>
               <Select value={status} onValueChange={(v) => setStatus(v as StatusFilter)}>
                 <SelectTrigger>
                   <SelectValue />
@@ -120,7 +120,7 @@ export default function EventExportPage() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="from">Registered from</Label>
+              <Label htmlFor="from">ลงทะเบียนตั้งแต่</Label>
               <Input
                 id="from"
                 type="datetime-local"
@@ -129,7 +129,7 @@ export default function EventExportPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="to">Registered to</Label>
+              <Label htmlFor="to">ลงทะเบียนถึง</Label>
               <Input
                 id="to"
                 type="datetime-local"
@@ -138,18 +138,18 @@ export default function EventExportPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="fv">Form version ID</Label>
+              <Label htmlFor="fv">รหัสเวอร์ชันฟอร์ม</Label>
               <Input
                 id="fv"
                 value={formVersion}
                 onChange={(e) => setFormVersion(e.target.value)}
-                placeholder="UUID (optional)"
+                placeholder="UUID (ไม่บังคับ)"
               />
             </div>
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
-            Date filters use your local time and are sent as UTC. Exported timestamps are in Asia/Bangkok
-            (labeled columns). Output format: CSV.
+            ตัวกรองวันที่ใช้เวลาท้องถิ่นของคุณและส่งเป็น UTC ค่าเวลาในไฟล์ที่ส่งออกเป็นเขตเวลา Asia/Bangkok
+            (มีป้ายกำกับคอลัมน์) รูปแบบไฟล์: CSV
           </p>
         </CardContent>
       </Card>
@@ -157,22 +157,22 @@ export default function EventExportPage() {
       {/* Export actions */}
       <div className="grid gap-4 sm:grid-cols-3">
         <ExportCard
-          title="Summary"
-          description="One row per registration: identity, status, timestamps."
+          title="สรุป"
+          description="หนึ่งแถวต่อหนึ่งการลงทะเบียน: ข้อมูลระบุตัวตน สถานะ และเวลา"
           pending={pending === "registrations-summary"}
-          onExport={() => runExport("registrations-summary", "Summary")}
+          onExport={() => runExport("registrations-summary", "สรุป")}
         />
         <ExportCard
-          title="Full"
-          description="Summary plus flattened form answers and file links (never binaries)."
+          title="เต็ม"
+          description="ข้อมูลสรุปพร้อมคำตอบในฟอร์มและลิงก์ไฟล์ (ไม่รวมไฟล์ไบนารี)"
           pending={pending === "registrations-full"}
-          onExport={() => runExport("registrations-full", "Full")}
+          onExport={() => runExport("registrations-full", "เต็ม")}
         />
         <ExportCard
-          title="Attendance"
-          description="Check-in oriented: attended, time, method, who checked in."
+          title="การเข้าร่วม"
+          description="เน้นการเช็คอิน: การเข้าร่วม เวลา วิธีการ และผู้ที่เช็คอินให้"
           pending={pending === "checkin-attendance"}
-          onExport={() => runExport("checkin-attendance", "Attendance")}
+          onExport={() => runExport("checkin-attendance", "การเข้าร่วม")}
         />
       </div>
     </div>
@@ -198,7 +198,7 @@ function ExportCard({
       <CardContent className="space-y-3">
         <p className="text-sm text-muted-foreground">{description}</p>
         <Button onClick={onExport} disabled={pending}>
-          {pending ? "Preparing…" : "Download CSV"}
+          {pending ? "กำลังเตรียม…" : "ดาวน์โหลด CSV"}
         </Button>
       </CardContent>
     </Card>

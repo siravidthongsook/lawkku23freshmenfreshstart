@@ -50,6 +50,8 @@
 
 /* Map tokens into Tailwind v4 theme so utilities like bg-background, text-foreground work. */
 @theme inline {
+  /* font-sans -> IBM Plex Sans Thai (set on <html> in layout.tsx), system fallbacks. */
+  --font-sans: var(--font-ibm-plex-sans-thai), ui-sans-serif, system-ui, sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);

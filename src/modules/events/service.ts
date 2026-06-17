@@ -113,6 +113,7 @@ export function publicEventView(event: Event, computed: EventComputed) {
     title: event.title,
     description: event.description,
     location: event.location,
+    posterImageUrl: event.posterImageUrl, // null when no poster set
     status: event.status, // published | cancelled | archived (draft never reaches here)
     cancelled: event.status === "cancelled",
     archived: event.status === "archived", // read-only when true

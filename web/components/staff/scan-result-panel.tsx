@@ -24,60 +24,60 @@ const PRESENTATION: Record<
   ScanResultCode,
   { tone: Tone; title: string; hint: string; manualHint?: boolean }
 > = {
-  checked_in_success: { tone: "success", title: "Checked in", hint: "Attendee is now checked in." },
+  checked_in_success: { tone: "success", title: "เช็คอินแล้ว", hint: "ผู้เข้าร่วมได้เช็คอินเรียบร้อยแล้ว" },
   already_checked_in: {
     tone: "warn",
-    title: "Already checked in",
-    hint: "This attendee was already checked in.",
+    title: "เช็คอินไปแล้ว",
+    hint: "ผู้เข้าร่วมรายนี้เช็คอินไปแล้ว",
   },
   wrong_event: {
     tone: "deny",
-    title: "Wrong event",
-    hint: "This ticket belongs to a different event.",
+    title: "ผิดกิจกรรม",
+    hint: "บัตรนี้เป็นของกิจกรรมอื่น",
   },
   registration_cancelled: {
     tone: "deny",
-    title: "Registration cancelled",
-    hint: "This registration was cancelled — cannot check in.",
+    title: "ยกเลิกการลงทะเบียนแล้ว",
+    hint: "การลงทะเบียนนี้ถูกยกเลิก ไม่สามารถเช็คอินได้",
   },
   waitlisted_not_allowed: {
     tone: "deny",
-    title: "Waitlisted",
-    hint: "Waitlisted attendees cannot check in.",
+    title: "รายชื่อสำรอง",
+    hint: "ผู้ที่อยู่ในรายชื่อสำรองไม่สามารถเช็คอินได้",
   },
   checkin_not_open: {
     tone: "warn",
-    title: "Check-in not open yet",
-    hint: "The check-in window has not started.",
+    title: "ยังไม่เปิดเช็คอิน",
+    hint: "ยังไม่ถึงช่วงเวลาเช็คอิน",
   },
   checkin_closed: {
     tone: "warn",
-    title: "Check-in closed",
-    hint: "The check-in window has ended.",
+    title: "ปิดเช็คอินแล้ว",
+    hint: "ช่วงเวลาเช็คอินสิ้นสุดแล้ว",
   },
   event_not_published: {
     tone: "deny",
-    title: "Event not published",
-    hint: "This event is not open for check-in.",
+    title: "กิจกรรมยังไม่เผยแพร่",
+    hint: "กิจกรรมนี้ยังไม่เปิดให้เช็คอิน",
   },
-  event_cancelled: { tone: "deny", title: "Event cancelled", hint: "This event was cancelled." },
+  event_cancelled: { tone: "deny", title: "ยกเลิกกิจกรรมแล้ว", hint: "กิจกรรมนี้ถูกยกเลิก" },
   qr_revoked: {
     tone: "deny",
-    title: "QR revoked",
-    hint: "This QR code is no longer valid. Try manual search.",
+    title: "คิวอาร์โค้ดถูกเพิกถอน",
+    hint: "คิวอาร์โค้ดนี้ใช้ไม่ได้แล้ว ลองค้นหาด้วยตนเอง",
     manualHint: true,
   },
   qr_invalid: {
     tone: "deny",
-    title: "Invalid QR",
-    hint: "This code is not recognised. Try manual search.",
+    title: "คิวอาร์โค้ดไม่ถูกต้อง",
+    hint: "ไม่รู้จักโค้ดนี้ ลองค้นหาด้วยตนเอง",
     manualHint: true,
   },
   // network_error is UI-only: thrown ApiError / non-2xx / offline. NEVER a success.
   network_error: {
     tone: "error",
-    title: "Network error",
-    hint: "Could not reach the server. The attendee was NOT checked in — retry.",
+    title: "เครือข่ายผิดพลาด",
+    hint: "ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้ ผู้เข้าร่วมยังไม่ถูกเช็คอิน กรุณาลองใหม่",
   },
 };
 
@@ -106,7 +106,7 @@ export function ScanResultPanel({
   if (!result) {
     return (
       <Card className="flex min-h-[7rem] items-center justify-center p-6 text-center text-sm text-muted-foreground">
-        Scan a QR code or search manually to begin.
+        สแกนคิวอาร์โค้ดหรือค้นหาด้วยตนเองเพื่อเริ่มต้น
       </Card>
     );
   }
@@ -126,10 +126,10 @@ export function ScanResultPanel({
           {/* Success detail (best-effort: backend may omit name/student_id/time). */}
           {showSuccessDetails && (result.fullName || result.studentId || result.checkedInAt) && (
             <dl className="mt-3 space-y-0.5 text-sm">
-              {result.fullName && <DetailRow label="Name" value={result.fullName} />}
-              {result.studentId && <DetailRow label="Student ID" value={result.studentId} />}
+              {result.fullName && <DetailRow label="ชื่อ" value={result.fullName} />}
+              {result.studentId && <DetailRow label="รหัสนักศึกษา" value={result.studentId} />}
               {result.checkedInAt && (
-                <DetailRow label="Time" value={formatBangkok(result.checkedInAt)} />
+                <DetailRow label="เวลา" value={formatBangkok(result.checkedInAt)} />
               )}
             </dl>
           )}
@@ -138,15 +138,15 @@ export function ScanResultPanel({
           {showAlreadyDetails && (result.originalCheckedInAt || result.checkedInBy) && (
             <dl className="mt-3 space-y-0.5 text-sm">
               {result.originalCheckedInAt && (
-                <DetailRow label="Checked in at" value={formatBangkok(result.originalCheckedInAt)} />
+                <DetailRow label="เช็คอินเมื่อ" value={formatBangkok(result.originalCheckedInAt)} />
               )}
-              {result.checkedInBy && <DetailRow label="By" value={result.checkedInBy} />}
+              {result.checkedInBy && <DetailRow label="โดย" value={result.checkedInBy} />}
             </dl>
           )}
 
           {p.manualHint && (
             <p className="mt-2 flex items-center gap-1 text-sm font-medium">
-              <AlertTriangle className="size-4" /> Use manual search below to verify.
+              <AlertTriangle className="size-4" /> ใช้การค้นหาด้วยตนเองด้านล่างเพื่อตรวจสอบ
             </p>
           )}
 
@@ -157,7 +157,7 @@ export function ScanResultPanel({
               className="mt-3 bg-white"
               onClick={onRetry}
             >
-              <RotateCcw className="size-4" /> Retry
+              <RotateCcw className="size-4" /> ลองใหม่
             </Button>
           )}
         </div>

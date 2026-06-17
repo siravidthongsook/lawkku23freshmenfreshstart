@@ -21,7 +21,7 @@ export function ReasonDialog({
   onOpenChange,
   title,
   description,
-  confirmLabel = "Confirm",
+  confirmLabel = "ยืนยัน",
   destructive = false,
   pending = false,
   onConfirm,
@@ -64,26 +64,26 @@ export function ReasonDialog({
         <div className="space-y-3">
           {children}
           <div className="space-y-1.5">
-            <Label htmlFor="reason">Reason (required)</Label>
+            <Label htmlFor="reason">เหตุผล (จำเป็น)</Label>
             <Textarea
               id="reason"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="Why are you doing this? Recorded in the audit log."
+              placeholder="เหตุใดจึงดำเนินการนี้? บันทึกไว้ในบันทึกการตรวจสอบ"
             />
           </div>
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={pending}>
-            Cancel
+            ยกเลิก
           </Button>
           <Button
             variant={destructive ? "destructive" : "default"}
             onClick={handleConfirm}
             disabled={!valid || pending}
           >
-            {pending ? "Working…" : confirmLabel}
+            {pending ? "กำลังดำเนินการ…" : confirmLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

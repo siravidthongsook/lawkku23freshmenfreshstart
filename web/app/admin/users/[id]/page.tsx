@@ -80,7 +80,7 @@ export default function UserDetailPage() {
         phone: res.user.phone ?? "",
       });
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not load user");
+      setError(e instanceof ApiError ? e.message : "ไม่สามารถโหลดผู้ใช้ได้");
       setUser(null);
     } finally {
       setLoading(false);
@@ -114,12 +114,12 @@ export default function UserDetailPage() {
     }
 
     if (Object.keys(patch).length === 0) {
-      toast.message("Nothing to save");
+      toast.message("ไม่มีข้อมูลที่ต้องบันทึก");
       return;
     }
     const parsed = updateUserSchema.safeParse(patch);
     if (!parsed.success) {
-      toast.error(parsed.error.issues[0]?.message ?? "Invalid input");
+      toast.error(parsed.error.issues[0]?.message ?? "ข้อมูลไม่ถูกต้อง");
       return;
     }
 
@@ -127,9 +127,9 @@ export default function UserDetailPage() {
     try {
       const res = await apiPatch<UserMutationResponse>(`/admin/users/${id}`, parsed.data);
       setUser(res.user);
-      toast.success("Profile updated");
+      toast.success("อัปเดตโปรไฟล์แล้ว");
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Could not update profile");
+      toast.error(e instanceof ApiError ? e.message : "ไม่สามารถอัปเดตโปรไฟล์ได้");
     } finally {
       setSavingProfile(false);
     }
@@ -151,7 +151,7 @@ export default function UserDetailPage() {
       }
       toast.success(successMsg);
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Action failed");
+      toast.error(e instanceof ApiError ? e.message : "การกระทำล้มเหลว");
     } finally {
       setPendingAction(false);
     }
@@ -165,17 +165,17 @@ export default function UserDetailPage() {
       });
       setResetOpen(false);
       setHasPendingTempPw(true);
-      toast.success("Password reset");
+      toast.success("รีเซ็ตรหัสผ่านแล้ว");
       // Show new temp pw once if backend returns it; otherwise direct to export page.
       if (res?.temp_password) {
         setTempPw(res.temp_password);
       } else {
-        toast.message("Temp password not shown", {
-          description: "Export it from the Temp Passwords page.",
+        toast.message("ไม่ได้แสดงรหัสผ่านชั่วคราว", {
+          description: "ส่งออกได้จากหน้ารหัสผ่านชั่วคราว",
         });
       }
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Could not reset password");
+      toast.error(e instanceof ApiError ? e.message : "ไม่สามารถรีเซ็ตรหัสผ่านได้");
     } finally {
       setPendingAction(false);
     }
@@ -184,7 +184,7 @@ export default function UserDetailPage() {
   async function changeRole(reason: string) {
     const parsed = changeRoleSchema.safeParse({ role: newRole, reason });
     if (!parsed.success) {
-      toast.error(parsed.error.issues[0]?.message ?? "Invalid input");
+      toast.error(parsed.error.issues[0]?.message ?? "ข้อมูลไม่ถูกต้อง");
       return;
     }
     setPendingAction(true);
@@ -195,9 +195,9 @@ export default function UserDetailPage() {
       );
       setUser(res.user);
       setRoleOpen(false);
-      toast.success("Role changed");
+      toast.success("เปลี่ยนบทบาทแล้ว");
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Could not change role");
+      toast.error(e instanceof ApiError ? e.message : "ไม่สามารถเปลี่ยนบทบาทได้");
     } finally {
       setPendingAction(false);
     }
@@ -215,13 +215,13 @@ export default function UserDetailPage() {
   if (error || !user) {
     return (
       <div className="py-16 text-center">
-        <p className="text-sm text-muted-foreground">{error ?? "User not found"}</p>
+        <p className="text-sm text-muted-foreground">{error ?? "ไม่พบผู้ใช้"}</p>
         <div className="mt-3 flex justify-center gap-2">
           <Button variant="outline" size="sm" onClick={load}>
-            Retry
+            ลองใหม่
           </Button>
           <Button variant="outline" size="sm" asChild>
-            <Link href="/admin/users">Back to users</Link>
+            <Link href="/admin/users">กลับไปที่ผู้ใช้</Link>
           </Button>
         </div>
       </div>
@@ -235,30 +235,30 @@ export default function UserDetailPage() {
           <h1 className="text-2xl font-semibold">{user.full_name}</h1>
           <RoleBadge role={user.role} />
           {user.status === "active" ? (
-            <Badge className="border-transparent bg-green-100 text-green-800">Active</Badge>
+            <Badge className="border-transparent bg-green-100 text-green-800">ใช้งานอยู่</Badge>
           ) : (
-            <Badge className="border-transparent bg-zinc-200 text-zinc-700">Disabled</Badge>
+            <Badge className="border-transparent bg-zinc-200 text-zinc-700">ปิดใช้งาน</Badge>
           )}
           {hasPendingTempPw ? (
             <Badge className="border-transparent bg-amber-100 text-amber-900">
-              Pending temp password
+              รอใช้รหัสผ่านชั่วคราว
             </Badge>
           ) : null}
         </div>
         <Button variant="outline" size="sm" asChild>
-          <Link href="/admin/users">Back</Link>
+          <Link href="/admin/users">ย้อนกลับ</Link>
         </Button>
       </div>
 
       {/* Profile edit */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Profile</CardTitle>
+          <CardTitle className="text-base">โปรไฟล์</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">อีเมล</Label>
               <Input
                 id="email"
                 type="email"
@@ -267,7 +267,7 @@ export default function UserDetailPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="sid">Student ID</Label>
+              <Label htmlFor="sid">รหัสนักศึกษา</Label>
               <Input
                 id="sid"
                 value={form.student_id}
@@ -275,7 +275,7 @@ export default function UserDetailPage() {
               />
             </div>
             <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="name">Full name</Label>
+              <Label htmlFor="name">ชื่อ-นามสกุล</Label>
               <Input
                 id="name"
                 value={form.full_name}
@@ -283,7 +283,7 @@ export default function UserDetailPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="faculty">Faculty</Label>
+              <Label htmlFor="faculty">คณะ</Label>
               <Input
                 id="faculty"
                 value={form.faculty}
@@ -291,7 +291,7 @@ export default function UserDetailPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="dept">Department</Label>
+              <Label htmlFor="dept">สาขา</Label>
               <Input
                 id="dept"
                 value={form.department}
@@ -299,7 +299,7 @@ export default function UserDetailPage() {
               />
             </div>
             <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="phone">Phone</Label>
+              <Label htmlFor="phone">โทรศัพท์</Label>
               <Input
                 id="phone"
                 value={form.phone}
@@ -309,11 +309,11 @@ export default function UserDetailPage() {
           </div>
           <div className="flex justify-end">
             <Button onClick={saveProfile} disabled={savingProfile}>
-              {savingProfile ? "Saving…" : "Save profile"}
+              {savingProfile ? "กำลังบันทึก…" : "บันทึกโปรไฟล์"}
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            Created {formatBangkok(user.created_at)} · Updated {formatBangkok(user.updated_at)}
+            สร้างเมื่อ {formatBangkok(user.created_at)} · อัปเดตเมื่อ {formatBangkok(user.updated_at)}
           </p>
         </CardContent>
       </Card>
@@ -321,7 +321,7 @@ export default function UserDetailPage() {
       {/* Account actions */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Account actions</CardTitle>
+          <CardTitle className="text-base">การจัดการบัญชี</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2">
@@ -330,30 +330,30 @@ export default function UserDetailPage() {
                 variant="destructive"
                 disabled={pendingAction}
                 onClick={() =>
-                  runAction(`/admin/users/${id}/disable`, "User disabled", { returnsUser: true })
+                  runAction(`/admin/users/${id}/disable`, "ปิดใช้งานผู้ใช้แล้ว", { returnsUser: true })
                 }
               >
-                Disable
+                ปิดใช้งาน
               </Button>
             ) : (
               <Button
                 disabled={pendingAction}
                 onClick={() =>
-                  runAction(`/admin/users/${id}/enable`, "User enabled", { returnsUser: true })
+                  runAction(`/admin/users/${id}/enable`, "เปิดใช้งานผู้ใช้แล้ว", { returnsUser: true })
                 }
               >
-                Enable
+                เปิดใช้งาน
               </Button>
             )}
             <Button
               variant="outline"
               disabled={pendingAction}
-              onClick={() => runAction(`/admin/users/${id}/unlock`, "Account unlocked")}
+              onClick={() => runAction(`/admin/users/${id}/unlock`, "ปลดล็อกบัญชีแล้ว")}
             >
-              Unlock
+              ปลดล็อก
             </Button>
             <Button variant="outline" disabled={pendingAction} onClick={() => setResetOpen(true)}>
-              Reset password
+              รีเซ็ตรหัสผ่าน
             </Button>
           </div>
 
@@ -361,16 +361,16 @@ export default function UserDetailPage() {
 
           {/* Change role — reason required */}
           <div className="space-y-2">
-            <Label>Role</Label>
+            <Label>บทบาท</Label>
             <div className="flex items-center gap-2">
               <Select value={newRole} onValueChange={(v) => setNewRole(v as Role)}>
                 <SelectTrigger className="w-56">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="student">Student</SelectItem>
-                  <SelectItem value="checkin_staff">Check-in staff</SelectItem>
-                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="student">นักศึกษา</SelectItem>
+                  <SelectItem value="checkin_staff">เจ้าหน้าที่เช็คอิน</SelectItem>
+                  <SelectItem value="admin">ผู้ดูแลระบบ</SelectItem>
                 </SelectContent>
               </Select>
               <Button
@@ -378,7 +378,7 @@ export default function UserDetailPage() {
                 disabled={pendingAction || newRole === user.role}
                 onClick={() => setRoleOpen(true)}
               >
-                Change role
+                เปลี่ยนบทบาท
               </Button>
             </div>
           </div>
@@ -389,9 +389,9 @@ export default function UserDetailPage() {
       <ReasonDialog
         open={resetOpen}
         onOpenChange={setResetOpen}
-        title="Reset password"
-        description="Generates a new temporary password, forces a change on next login, and signs the user out everywhere."
-        confirmLabel="Reset password"
+        title="รีเซ็ตรหัสผ่าน"
+        description="สร้างรหัสผ่านชั่วคราวใหม่ บังคับให้เปลี่ยนเมื่อเข้าสู่ระบบครั้งถัดไป และออกจากระบบของผู้ใช้ในทุกอุปกรณ์"
+        confirmLabel="รีเซ็ตรหัสผ่าน"
         pending={pendingAction}
         onConfirm={resetPassword}
       />
@@ -400,9 +400,9 @@ export default function UserDetailPage() {
       <ReasonDialog
         open={roleOpen}
         onOpenChange={setRoleOpen}
-        title="Change role"
-        description={`Change role to ${newRole}. New sessions will use the new role's TTL.`}
-        confirmLabel="Change role"
+        title="เปลี่ยนบทบาท"
+        description={`เปลี่ยนบทบาทเป็น ${newRole} เซสชันใหม่จะใช้ TTL ของบทบาทใหม่`}
+        confirmLabel="เปลี่ยนบทบาท"
         pending={pendingAction}
         onConfirm={changeRole}
       />

@@ -69,36 +69,36 @@ const ACTION_META: Record<
   { title: string; description: string; confirm: string; destructive?: boolean }
 > = {
   cancel: {
-    title: "Cancel registration",
-    description: "Sets the registration to cancelled and revokes any active QR.",
-    confirm: "Cancel registration",
+    title: "ยกเลิกการลงทะเบียน",
+    description: "ตั้งค่าการลงทะเบียนเป็นยกเลิกและเพิกถอน QR ที่ใช้งานอยู่",
+    confirm: "ยกเลิกการลงทะเบียน",
     destructive: true,
   },
   promote: {
-    title: "Promote from waitlist",
-    description: "Moves a waitlisted registration to registered and issues a QR.",
-    confirm: "Promote",
+    title: "เลื่อนขึ้นจากรายชื่อสำรอง",
+    description: "ย้ายการลงทะเบียนจากรายชื่อสำรองไปเป็นลงทะเบียนแล้วและออก QR",
+    confirm: "เลื่อนขึ้น",
   },
   demote: {
-    title: "Demote to waitlist",
-    description: "Moves a registered registration back to waitlisted and revokes its QR.",
-    confirm: "Demote",
+    title: "ลดลงไปยังรายชื่อสำรอง",
+    description: "ย้ายการลงทะเบียนกลับไปยังรายชื่อสำรองและเพิกถอน QR",
+    confirm: "ลดลง",
   },
   qr_regenerate: {
-    title: "Regenerate QR",
-    description: "Revokes the current QR and issues a new one.",
-    confirm: "Regenerate",
+    title: "สร้าง QR ใหม่",
+    description: "เพิกถอน QR ปัจจุบันและออก QR ใหม่",
+    confirm: "สร้างใหม่",
   },
   qr_revoke: {
-    title: "Revoke QR",
-    description: "Revokes the active QR token. The student can no longer check in until reissued.",
-    confirm: "Revoke",
+    title: "เพิกถอน QR",
+    description: "เพิกถอนโทเค็น QR ที่ใช้งานอยู่ นักศึกษาจะไม่สามารถเช็คอินได้จนกว่าจะออกใหม่",
+    confirm: "เพิกถอน",
     destructive: true,
   },
   edit_answers: {
-    title: "Edit answers",
-    description: "Saves the edited answers against the registration's own form version.",
-    confirm: "Save answers",
+    title: "แก้ไขคำตอบ",
+    description: "บันทึกคำตอบที่แก้ไขกับเวอร์ชันฟอร์มของการลงทะเบียนนั้นเอง",
+    confirm: "บันทึกคำตอบ",
   },
 };
 
@@ -121,7 +121,7 @@ export default function RegistrationDetailPage({
       setData(res);
       setDraftAnswers(res.answers ?? {});
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to load registration.");
+      setError(err instanceof ApiError ? err.message : "ไม่สามารถโหลดการลงทะเบียนได้");
     }
   }, [registrationId]);
 
@@ -153,7 +153,7 @@ export default function RegistrationDetailPage({
         await apiPatch(`${base}/answers`, { answers: draftAnswers, reason });
         break;
     }
-    toast.success("Done. Recorded in the audit log.");
+    toast.success("เสร็จสิ้น มีการบันทึกไว้ในบันทึกการตรวจสอบ");
     await load();
   }
 
@@ -177,22 +177,22 @@ export default function RegistrationDetailPage({
           <Button asChild variant="ghost" size="sm">
             <Link href={`/admin/events/${reg.eventId}/registrations`}>
               <ArrowLeft className="size-4" />
-              Back
+              ย้อนกลับ
             </Link>
           </Button>
-          <h1 className="text-xl font-semibold">Registration</h1>
+          <h1 className="text-xl font-semibold">การลงทะเบียน</h1>
           <RegistrationStatusBadge status={status} />
         </div>
         {/* Status-aware action buttons. Each opens the reason dialog. */}
         <div className="flex flex-wrap items-center gap-2">
           {status === "waitlisted" ? (
             <Button variant="outline" size="sm" onClick={() => setAction({ kind: "promote" })}>
-              Promote
+              เลื่อนขึ้น
             </Button>
           ) : null}
           {status === "registered" ? (
             <Button variant="outline" size="sm" onClick={() => setAction({ kind: "demote" })}>
-              Demote
+              ลดลง
             </Button>
           ) : null}
           {status !== "cancelled" && status !== "waitlisted" ? (
@@ -202,16 +202,16 @@ export default function RegistrationDetailPage({
                 size="sm"
                 onClick={() => setAction({ kind: "qr_regenerate" })}
               >
-                Regenerate QR
+                สร้าง QR ใหม่
               </Button>
               <Button variant="outline" size="sm" onClick={() => setAction({ kind: "qr_revoke" })}>
-                Revoke QR
+                เพิกถอน QR
               </Button>
             </>
           ) : null}
           {status !== "cancelled" ? (
             <Button variant="destructive" size="sm" onClick={() => setAction({ kind: "cancel" })}>
-              Cancel
+              ยกเลิก
             </Button>
           ) : null}
         </div>
@@ -220,27 +220,27 @@ export default function RegistrationDetailPage({
       {/* Profile / status. User profile fields are not in the admin payload yet — show IDs we have. */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Details</CardTitle>
+          <CardTitle className="text-sm">รายละเอียด</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-3 text-sm sm:grid-cols-2">
-          <Detail label="User ID" value={reg.userId} mono />
-          <Detail label="Form version ID" value={reg.formVersionId ?? "—"} mono />
-          <Detail label="Registered" value={formatBangkok(reg.registeredAt) || "—"} />
-          <Detail label="Waitlisted" value={formatBangkok(reg.waitlistedAt) || "—"} />
-          <Detail label="Checked in" value={formatBangkok(reg.checkedInAt) || "—"} />
-          <Detail label="Check-in method" value={reg.checkinMethod ?? "—"} />
-          <Detail label="Cancelled" value={formatBangkok(reg.cancelledAt) || "—"} />
+          <Detail label="รหัสผู้ใช้" value={reg.userId} mono />
+          <Detail label="รหัสเวอร์ชันฟอร์ม" value={reg.formVersionId ?? "—"} mono />
+          <Detail label="ลงทะเบียน" value={formatBangkok(reg.registeredAt) || "—"} />
+          <Detail label="อยู่ในรายชื่อสำรอง" value={formatBangkok(reg.waitlistedAt) || "—"} />
+          <Detail label="เช็คอินแล้ว" value={formatBangkok(reg.checkedInAt) || "—"} />
+          <Detail label="วิธีการเช็คอิน" value={reg.checkinMethod ?? "—"} />
+          <Detail label="ยกเลิกแล้ว" value={formatBangkok(reg.cancelledAt) || "—"} />
         </CardContent>
       </Card>
 
       {/* Files (download via authorized backend endpoint; opens stream). */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Files</CardTitle>
+          <CardTitle className="text-sm">ไฟล์</CardTitle>
         </CardHeader>
         <CardContent>
           {data.fileIds.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No files.</p>
+            <p className="text-sm text-muted-foreground">ไม่มีไฟล์</p>
           ) : (
             <ul className="space-y-2">
               {data.fileIds.map((fid) => (
@@ -250,7 +250,7 @@ export default function RegistrationDetailPage({
                     {/* Authorized download endpoint streams the file; admin download is audited server-side. */}
                     <a href={`/api/files/${fid}/download`} target="_blank" rel="noreferrer">
                       <Download className="size-4" />
-                      Download
+                      ดาวน์โหลด
                     </a>
                   </Button>
                 </li>
@@ -263,14 +263,14 @@ export default function RegistrationDetailPage({
       {/* Form answers — editable. "Save answers" requires a reason + audits. */}
       <Card>
         <CardHeader className="flex-row items-center justify-between">
-          <CardTitle className="text-sm">Answers</CardTitle>
+          <CardTitle className="text-sm">คำตอบ</CardTitle>
           <Button variant="secondary" size="sm" onClick={() => setAction({ kind: "edit_answers" })}>
-            Save answers
+            บันทึกคำตอบ
           </Button>
         </CardHeader>
         <CardContent className="space-y-3">
           {Object.keys(draftAnswers).length === 0 ? (
-            <p className="text-sm text-muted-foreground">No answers recorded.</p>
+            <p className="text-sm text-muted-foreground">ไม่มีคำตอบที่บันทึกไว้</p>
           ) : (
             Object.entries(draftAnswers).map(([key, value]) => (
               <AnswerField
@@ -287,18 +287,18 @@ export default function RegistrationDetailPage({
       {/* Audit history for this registration (append-only). */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Audit history</CardTitle>
+          <CardTitle className="text-sm">ประวัติการตรวจสอบ</CardTitle>
         </CardHeader>
         <CardContent>
           {data.auditHistory.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No history.</p>
+            <p className="text-sm text-muted-foreground">ไม่มีประวัติ</p>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>When</TableHead>
-                  <TableHead>Action</TableHead>
-                  <TableHead>Reason</TableHead>
+                  <TableHead>เมื่อ</TableHead>
+                  <TableHead>การกระทำ</TableHead>
+                  <TableHead>เหตุผล</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -326,7 +326,7 @@ export default function RegistrationDetailPage({
         }}
         title={action ? ACTION_META[action.kind].title : ""}
         description={action ? ACTION_META[action.kind].description : undefined}
-        confirmLabel={action ? ACTION_META[action.kind].confirm : "Confirm"}
+        confirmLabel={action ? ACTION_META[action.kind].confirm : "ยืนยัน"}
         destructive={action ? ACTION_META[action.kind].destructive : false}
         onConfirm={runAction}
       />

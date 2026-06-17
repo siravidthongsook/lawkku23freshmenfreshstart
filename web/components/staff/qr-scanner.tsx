@@ -62,8 +62,8 @@ export function QrScanner({
     } catch (err) {
       // Permission denied / no camera / insecure context — fall back to manual paste.
       const msg =
-        err instanceof Error ? err.message : "Camera unavailable";
-      setCamError(`${msg}. Use manual token entry below.`);
+        err instanceof Error ? err.message : "ไม่สามารถใช้กล้องได้";
+      setCamError(`${msg} กรุณากรอกโทเค็นด้วยตนเองด้านล่าง`);
       setScanning(false);
     }
   }
@@ -90,7 +90,7 @@ export function QrScanner({
           {!scanning && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center text-sm text-white/80">
               <Camera className="size-10" />
-              <span>Camera is off</span>
+              <span>กล้องปิดอยู่</span>
             </div>
           )}
         </div>
@@ -99,7 +99,7 @@ export function QrScanner({
       <div className="flex gap-2">
         {!scanning ? (
           <Button onClick={start} disabled={disabled} className="h-12 flex-1 text-base">
-            <Camera className="size-5" /> Start camera
+            <Camera className="size-5" /> เปิดกล้อง
           </Button>
         ) : (
           <Button
@@ -107,7 +107,7 @@ export function QrScanner({
             variant="secondary"
             className="h-12 flex-1 text-base"
           >
-            <CameraOff className="size-5" /> Stop camera
+            <CameraOff className="size-5" /> ปิดกล้อง
           </Button>
         )}
       </div>
@@ -119,7 +119,7 @@ export function QrScanner({
         <Input
           value={manualToken}
           onChange={(e) => setManualToken(e.target.value)}
-          placeholder="Paste QR token manually"
+          placeholder="วางโทเค็น QR ด้วยตนเอง"
           className="h-12 text-base"
           inputMode="text"
           autoComplete="off"
@@ -130,7 +130,7 @@ export function QrScanner({
           disabled={disabled || !manualToken.trim()}
           className="h-12"
         >
-          <ClipboardPaste className="size-5" /> Submit
+          <ClipboardPaste className="size-5" /> ส่ง
         </Button>
       </form>
     </div>

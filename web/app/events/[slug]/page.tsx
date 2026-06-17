@@ -55,7 +55,7 @@ export default function EventDetailPage() {
         setStatus("notfound");
         return;
       }
-      setErrorMsg(err instanceof ApiError ? err.message : "Could not load this event");
+      setErrorMsg(err instanceof ApiError ? err.message : "ไม่สามารถโหลดกิจกรรมนี้ได้");
       setStatus("error");
     }
   }
@@ -100,18 +100,18 @@ export default function EventDetailPage() {
       await apiPost(path, body);
       setFormDialogOpen(false);
       toast.success(
-        action === "register" ? "You're registered!" : "You've joined the waitlist.",
+        action === "register" ? "ลงทะเบียนสำเร็จแล้ว!" : "เข้าร่วมรายชื่อสำรองแล้ว",
       );
       router.push("/me/registrations");
     } catch (err) {
       const code = err instanceof ApiError ? err.code : "";
       // already-registered is a friendly outcome, not a hard failure.
       if (code === "already_registered") {
-        toast.info("You're already registered for this event.");
+        toast.info("คุณได้ลงทะเบียนกิจกรรมนี้ไว้แล้ว");
         router.push("/me/registrations");
         return;
       }
-      toast.error(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
+      toast.error(err instanceof ApiError ? err.message : "เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง");
       void load(); // refresh capacity/window state
     } finally {
       setSubmitting(false);
@@ -128,7 +128,7 @@ export default function EventDetailPage() {
         <div className="rounded-lg border border-dashed py-16 text-center">
           <p className="text-sm text-muted-foreground">{errorMsg}</p>
           <Button variant="outline" size="sm" className="mt-4" onClick={() => void load()}>
-            Try again
+            ลองใหม่อีกครั้ง
           </Button>
         </div>
       ) : event ? (
@@ -185,12 +185,12 @@ function EventDetail({
         {/* Cancelled/archived banners make state unmistakable. */}
         {event.status === "cancelled" ? (
           <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm font-medium text-red-800">
-            This event has been cancelled. Registration and check-in are closed.
+            กิจกรรมนี้ถูกยกเลิกแล้ว ปิดรับการลงทะเบียนและการเช็คอิน
           </p>
         ) : null}
         {event.status === "archived" ? (
           <p className="mt-3 rounded-md bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-700">
-            This event is archived. It is shown for reference only — no actions available.
+            กิจกรรมนี้ถูกเก็บถาวรแล้ว แสดงไว้เพื่อการอ้างอิงเท่านั้น ไม่สามารถดำเนินการใด ๆ ได้
           </p>
         ) : null}
 
@@ -205,11 +205,11 @@ function EventDetail({
       <div className="lg:col-span-1">
         <Card className="lg:sticky lg:top-20">
           <CardContent className="space-y-4 p-5">
-            <InfoRow label="When" value={eventTimeRange(event)} />
-            {event.location ? <InfoRow label="Where" value={event.location} /> : null}
-            {cap ? <InfoRow label="Capacity" value={cap} /> : null}
+            <InfoRow label="วันและเวลา" value={eventTimeRange(event)} />
+            {event.location ? <InfoRow label="สถานที่" value={event.location} /> : null}
+            {cap ? <InfoRow label="จำนวนที่รับ" value={cap} /> : null}
             <InfoRow
-              label="Registration"
+              label="การลงทะเบียน"
               value={registrationWindowText(event)}
             />
 
@@ -237,34 +237,34 @@ function ActionArea({
     case "register":
       return (
         <Button className="w-full" disabled={submitting} onClick={() => onAction("register")}>
-          {submitting ? "Registering…" : "Register"}
+          {submitting ? "กำลังลงทะเบียน…" : "ลงทะเบียน"}
         </Button>
       );
     case "waitlist":
       return (
         <div className="space-y-2">
-          <p className="text-sm text-muted-foreground">This event is full.</p>
+          <p className="text-sm text-muted-foreground">กิจกรรมนี้เต็มแล้ว</p>
           <Button
             className="w-full"
             variant="secondary"
             disabled={submitting}
             onClick={() => onAction("waitlist")}
           >
-            {submitting ? "Joining…" : "Join waitlist"}
+            {submitting ? "กำลังเข้าร่วม…" : "เข้าร่วมรายชื่อสำรอง"}
           </Button>
         </div>
       );
     case "full":
       return (
         <Button className="w-full" disabled>
-          Full
+          เต็มแล้ว
         </Button>
       );
     case "not_open":
       return (
         <>
           <Button className="w-full" disabled>
-            Registration unavailable
+            ไม่สามารถลงทะเบียนได้
           </Button>
           <p className="mt-2 text-center text-xs text-muted-foreground">{action.reason}</p>
         </>
@@ -272,24 +272,24 @@ function ActionArea({
     case "closed_mode":
       return (
         <p className="text-center text-sm text-muted-foreground">
-          Registration for this event is managed by the organizers.
+          การลงทะเบียนกิจกรรมนี้จัดการโดยผู้จัดกิจกรรม
         </p>
       );
     case "cancelled":
       return (
         <Button className="w-full" variant="destructive" disabled>
-          Event cancelled
+          กิจกรรมถูกยกเลิก
         </Button>
       );
     case "archived":
       return (
-        <p className="text-center text-sm text-muted-foreground">This event has ended.</p>
+        <p className="text-center text-sm text-muted-foreground">กิจกรรมนี้สิ้นสุดแล้ว</p>
       );
     case "unavailable":
     default:
       return (
         <p className="text-center text-sm text-muted-foreground">
-          Registration is not available.
+          ไม่สามารถลงทะเบียนได้
         </p>
       );
   }
@@ -299,9 +299,9 @@ function registrationWindowText(e: EventPublic): string {
   const open = formatBangkok(e.registrationOpenAt);
   const close = formatBangkok(e.registrationCloseAt);
   if (open && close) return `${open} – ${close}`;
-  if (close) return `Closes ${close}`;
-  if (open) return `Opens ${open}`;
-  return "Open";
+  if (close) return `ปิดรับ ${close}`;
+  if (open) return `เปิดรับ ${open}`;
+  return "เปิดรับ";
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
@@ -316,12 +316,12 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 function NotFoundState({ onBack }: { onBack: () => void }) {
   return (
     <div className="rounded-lg border border-dashed py-20 text-center">
-      <h1 className="text-lg font-semibold">Event not found</h1>
+      <h1 className="text-lg font-semibold">ไม่พบกิจกรรม</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        This event doesn’t exist or isn’t publicly available.
+        กิจกรรมนี้ไม่มีอยู่หรือไม่ได้เปิดให้สาธารณะเข้าถึง
       </p>
       <Button variant="outline" size="sm" className="mt-4" onClick={onBack}>
-        Back to events
+        กลับไปหน้ากิจกรรม
       </Button>
     </div>
   );

@@ -10,10 +10,10 @@ const EVENT_STATUS_STYLE: Record<EventStatus, string> = {
   archived: "bg-zinc-100 text-zinc-600 border-transparent",
 };
 const EVENT_STATUS_LABEL: Record<EventStatus, string> = {
-  draft: "Draft",
-  published: "Published",
-  cancelled: "Cancelled",
-  archived: "Archived",
+  draft: "ฉบับร่าง",
+  published: "เผยแพร่แล้ว",
+  cancelled: "ยกเลิกแล้ว",
+  archived: "เก็บถาวร",
 };
 
 export function EventStatusBadge({ status }: { status: EventStatus }) {
@@ -27,10 +27,10 @@ const REG_STATUS_STYLE: Record<RegistrationStatus, string> = {
   cancelled: "bg-red-100 text-red-800 border-transparent",
 };
 const REG_STATUS_LABEL: Record<RegistrationStatus, string> = {
-  registered: "Registered",
-  waitlisted: "Waitlisted",
-  checked_in: "Checked in",
-  cancelled: "Cancelled",
+  registered: "ลงทะเบียนแล้ว",
+  waitlisted: "รายชื่อสำรอง",
+  checked_in: "เช็คอินแล้ว",
+  cancelled: "ยกเลิกแล้ว",
 };
 
 export function RegistrationStatusBadge({ status }: { status: RegistrationStatus }) {
@@ -43,9 +43,9 @@ const ROLE_STYLE: Record<Role, string> = {
   admin: "bg-slate-800 text-slate-50 border-transparent",
 };
 const ROLE_LABEL: Record<Role, string> = {
-  student: "Student",
-  checkin_staff: "Check-in staff",
-  admin: "Admin",
+  student: "นักศึกษา",
+  checkin_staff: "เจ้าหน้าที่เช็คอิน",
+  admin: "ผู้ดูแลระบบ",
 };
 
 export function RoleBadge({ role }: { role: Role }) {

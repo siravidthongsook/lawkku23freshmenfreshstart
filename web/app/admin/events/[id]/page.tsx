@@ -34,10 +34,10 @@ type EventComputed = {
 };
 
 const STATUS_LABEL: Record<EventStatus, string> = {
-  draft: "Draft",
-  published: "Published",
-  cancelled: "Cancelled",
-  archived: "Archived",
+  draft: "ฉบับร่าง",
+  published: "เผยแพร่แล้ว",
+  cancelled: "ยกเลิกแล้ว",
+  archived: "เก็บถาวรแล้ว",
 };
 
 export default function EventOverviewPage({ params }: { params: Promise<{ id: string }> }) {
@@ -55,7 +55,7 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
       setEvent(res.event);
       setComputed(res.computed ?? null);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to load event.");
+      setError(err instanceof ApiError ? err.message : "ไม่สามารถโหลดกิจกรรมได้");
     }
   }, [id]);
 
@@ -68,10 +68,10 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
     setBusy(true);
     try {
       await apiPost(`/admin/events/${id}/status`, { status });
-      toast.success(`Status changed to ${STATUS_LABEL[status]}.`);
+      toast.success(`เปลี่ยนสถานะเป็น ${STATUS_LABEL[status]} แล้ว`);
       await load();
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Failed to change status.");
+      toast.error(err instanceof ApiError ? err.message : "ไม่สามารถเปลี่ยนสถานะได้");
     } finally {
       setBusy(false);
     }
@@ -82,10 +82,10 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
     setBusy(true);
     try {
       await apiPost(`/admin/events/${id}/visibility`, { visibility });
-      toast.success(`Visibility changed to ${visibility}.`);
+      toast.success(`เปลี่ยนการมองเห็นเป็น ${visibility} แล้ว`);
       await load();
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Failed to change visibility.");
+      toast.error(err instanceof ApiError ? err.message : "ไม่สามารถเปลี่ยนการมองเห็นได้");
     } finally {
       setBusy(false);
     }
@@ -110,7 +110,7 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
           <Button asChild variant="ghost" size="sm">
             <Link href="/admin/events">
               <ArrowLeft className="size-4" />
-              Back
+              ย้อนกลับ
             </Link>
           </Button>
           <div>
@@ -123,25 +123,25 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
           <Button asChild variant="outline" size="sm">
             <Link href={`/admin/events/${id}/edit`}>
               <Pencil className="size-4" />
-              Edit
+              แก้ไข
             </Link>
           </Button>
           <Button asChild variant="outline" size="sm">
             <Link href={`/admin/events/${id}/form`}>
               <FileText className="size-4" />
-              Form
+              ฟอร์ม
             </Link>
           </Button>
           <Button asChild variant="outline" size="sm">
             <Link href={`/admin/events/${id}/registrations`}>
               <Users className="size-4" />
-              Registrations
+              การลงทะเบียน
             </Link>
           </Button>
           <Button asChild variant="outline" size="sm">
             <Link href={`/admin/events/${id}/export`}>
               <Download className="size-4" />
-              Export
+              ส่งออก
             </Link>
           </Button>
         </div>
@@ -151,7 +151,7 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
       <div className="grid gap-4 sm:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm">Status</CardTitle>
+            <CardTitle className="text-sm">สถานะ</CardTitle>
           </CardHeader>
           <CardContent>
             <Select
@@ -174,7 +174,7 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm">Visibility</CardTitle>
+            <CardTitle className="text-sm">การมองเห็น</CardTitle>
           </CardHeader>
           <CardContent>
             <Select
@@ -199,17 +199,17 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
 
       {/* Count tiles. Per-status counts come from the row when present; else "—". */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Registered" value={event.registeredCount} />
-        <Stat label="Checked in" value={event.checkedInCount} />
-        <Stat label="Waitlisted" value={event.waitlistedCount} />
-        <Stat label="Cancelled" value={event.cancelledCount} />
+        <Stat label="ลงทะเบียน" value={event.registeredCount} />
+        <Stat label="เช็คอินแล้ว" value={event.checkedInCount} />
+        <Stat label="อยู่ในรายชื่อสำรอง" value={event.waitlistedCount} />
+        <Stat label="ยกเลิกแล้ว" value={event.cancelledCount} />
       </div>
 
       {/* Capacity + window status (from computed). */}
       <div className="grid gap-4 sm:grid-cols-3">
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm">Capacity</CardTitle>
+            <CardTitle className="text-sm">จำนวนที่รับ</CardTitle>
           </CardHeader>
           <CardContent className="text-sm">
             {cap?.enabled ? (
@@ -217,17 +217,17 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
                 <span className="text-2xl font-semibold">{cap.used}</span>
                 <span className="text-muted-foreground"> / {cap.limit ?? "∞"}</span>
                 {cap.full ? (
-                  <Badge className="ml-2 border-transparent bg-red-100 text-red-800">Full</Badge>
+                  <Badge className="ml-2 border-transparent bg-red-100 text-red-800">เต็ม</Badge>
                 ) : null}
               </>
             ) : (
-              <span className="text-muted-foreground">No limit</span>
+              <span className="text-muted-foreground">ไม่จำกัด</span>
             )}
           </CardContent>
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm">Registration window</CardTitle>
+            <CardTitle className="text-sm">ช่วงเวลาลงทะเบียน</CardTitle>
           </CardHeader>
           <CardContent className="space-y-1 text-sm">
             <WindowBadge open={computed?.registrationOpen} />
@@ -239,7 +239,7 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm">Check-in window</CardTitle>
+            <CardTitle className="text-sm">ช่วงเวลาเช็คอิน</CardTitle>
           </CardHeader>
           <CardContent className="space-y-1 text-sm">
             <WindowBadge open={computed?.checkinOpen} />
@@ -268,10 +268,10 @@ function Stat({ label, value }: { label: string; value: number | undefined | nul
 }
 
 function WindowBadge({ open }: { open: boolean | undefined }) {
-  if (open === undefined) return <Badge variant="outline">Unknown</Badge>;
+  if (open === undefined) return <Badge variant="outline">ไม่ทราบ</Badge>;
   return open ? (
-    <Badge className="border-transparent bg-green-100 text-green-800">Open</Badge>
+    <Badge className="border-transparent bg-green-100 text-green-800">เปิด</Badge>
   ) : (
-    <Badge className="border-transparent bg-slate-200 text-slate-700">Closed</Badge>
+    <Badge className="border-transparent bg-slate-200 text-slate-700">ปิด</Badge>
   );
 }

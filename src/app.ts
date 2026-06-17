@@ -1,7 +1,7 @@
 import { Hono } from "hono";
-import { logger } from "hono/logger";
 import type { AppVariables } from "./lib/context";
 import { errorHandler } from "./lib/errors";
+import { requestLogger } from "./lib/request-log";
 
 // Module routers. Each declares ABSOLUTE paths and is mounted at "/" — no prefix collisions.
 import authRoutes from "./modules/auth/routes";
@@ -18,7 +18,8 @@ import auditRoutes from "./modules/audit-logs/routes";
 export function createApp() {
   const app = new Hono<{ Variables: AppVariables }>();
 
-  app.use("*", logger());
+  // Structured per-request logger first — sets c.get("log"), emits one JSON line at request end.
+  app.use("*", requestLogger());
   app.onError(errorHandler);
 
   app.get("/health", (c) => c.json({ ok: true }));

@@ -22,7 +22,7 @@ export default function EditEventPage({ params }: { params: Promise<{ id: string
       .then((res) => active && setEvent(res.event))
       .catch((err) => {
         if (!active) return;
-        setError(err instanceof ApiError ? err.message : "Failed to load event.");
+        setError(err instanceof ApiError ? err.message : "ไม่สามารถโหลดกิจกรรมได้");
       });
     return () => {
       active = false;
@@ -35,10 +35,10 @@ export default function EditEventPage({ params }: { params: Promise<{ id: string
         <Button asChild variant="ghost" size="sm">
           <Link href={`/admin/events/${id}`}>
             <ArrowLeft className="size-4" />
-            Back
+            ย้อนกลับ
           </Link>
         </Button>
-        <h1 className="text-xl font-semibold">Edit event</h1>
+        <h1 className="text-xl font-semibold">แก้ไขกิจกรรม</h1>
       </div>
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}

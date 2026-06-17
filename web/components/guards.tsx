@@ -49,9 +49,9 @@ export function RequireRole({
   if (!roles.includes(user.role)) {
     return (
       <div className="py-16 text-center">
-        <h1 className="text-lg font-semibold">No access</h1>
+        <h1 className="text-lg font-semibold">ไม่มีสิทธิ์เข้าถึง</h1>
         <p className="text-sm text-muted-foreground">
-          Your account does not have permission to view this page.
+          บัญชีของคุณไม่มีสิทธิ์ในการดูหน้านี้
         </p>
       </div>
     );

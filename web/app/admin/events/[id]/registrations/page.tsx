@@ -46,7 +46,7 @@ export default function EventRegistrationsPage({ params }: { params: Promise<{ i
       );
       setRows(res.registrations ?? []);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to load registrations.");
+      setError(err instanceof ApiError ? err.message : "ไม่สามารถโหลดการลงทะเบียนได้");
       setRows([]);
     }
   }, [id]);
@@ -62,14 +62,14 @@ export default function EventRegistrationsPage({ params }: { params: Promise<{ i
           <Button asChild variant="ghost" size="sm">
             <Link href={`/admin/events/${id}`}>
               <ArrowLeft className="size-4" />
-              Back
+              ย้อนกลับ
             </Link>
           </Button>
-          <h1 className="text-xl font-semibold">Registrations</h1>
+          <h1 className="text-xl font-semibold">การลงทะเบียน</h1>
         </div>
         <Button onClick={() => setManualOpen(true)}>
           <UserPlus className="size-4" />
-          Manual register
+          ลงทะเบียนด้วยตนเอง
         </Button>
       </div>
 
@@ -82,23 +82,23 @@ export default function EventRegistrationsPage({ params }: { params: Promise<{ i
         </div>
       ) : rows.length === 0 ? (
         <div className="rounded-md border py-16 text-center text-sm text-muted-foreground">
-          No registrations yet.
+          ยังไม่มีการลงทะเบียน
         </div>
       ) : (
         <div className="rounded-md border">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Student ID</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Faculty</TableHead>
-                <TableHead>Department</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Registered</TableHead>
-                <TableHead>Checked in</TableHead>
-                <TableHead>By</TableHead>
-                <TableHead>Form ver.</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>รหัสนักศึกษา</TableHead>
+                <TableHead>ชื่อ</TableHead>
+                <TableHead>คณะ</TableHead>
+                <TableHead>สาขา</TableHead>
+                <TableHead>สถานะ</TableHead>
+                <TableHead>ลงทะเบียน</TableHead>
+                <TableHead>เช็คอินแล้ว</TableHead>
+                <TableHead>โดย</TableHead>
+                <TableHead>เวอร์ชันฟอร์ม</TableHead>
+                <TableHead className="text-right">การกระทำ</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -125,7 +125,7 @@ export default function EventRegistrationsPage({ params }: { params: Promise<{ i
                   </TableCell>
                   <TableCell className="text-right">
                     <Button asChild variant="ghost" size="sm">
-                      <Link href={`/admin/registrations/${r.id}`}>View</Link>
+                      <Link href={`/admin/registrations/${r.id}`}>ดู</Link>
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -178,12 +178,12 @@ function ManualRegisterDialog({
         reason: reason.trim(),
         answers: {}, // admins may leave answers empty; backend validates against active form
       });
-      toast.success("User registered.");
+      toast.success("ลงทะเบียนผู้ใช้แล้ว");
       reset();
       onOpenChange(false);
       onDone();
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Failed to register user.");
+      toast.error(err instanceof ApiError ? err.message : "ไม่สามารถลงทะเบียนผู้ใช้ได้");
     } finally {
       setSubmitting(false);
     }
@@ -199,14 +199,14 @@ function ManualRegisterDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Manual register</DialogTitle>
+          <DialogTitle>ลงทะเบียนด้วยตนเอง</DialogTitle>
           <DialogDescription>
-            Overrides the registration window and capacity. Recorded in the audit log.
+            ข้ามช่วงเวลาลงทะเบียนและจำนวนที่รับ มีการบันทึกไว้ในบันทึกการตรวจสอบ
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <Label htmlFor="userId">User ID (UUID)</Label>
+            <Label htmlFor="userId">รหัสผู้ใช้ (UUID)</Label>
             <Input
               id="userId"
               value={userId}
@@ -216,7 +216,7 @@ function ManualRegisterDialog({
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="manual-reason">
-              Reason <span className="text-destructive">*</span>
+              เหตุผล <span className="text-destructive">*</span>
             </Label>
             <Textarea
               id="manual-reason"
@@ -228,10 +228,10 @@ function ManualRegisterDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
-            Cancel
+            ยกเลิก
           </Button>
           <Button onClick={submit} disabled={!valid || submitting}>
-            {submitting ? "Working…" : "Register"}
+            {submitting ? "กำลังดำเนินการ…" : "ลงทะเบียน"}
           </Button>
         </DialogFooter>
       </DialogContent>

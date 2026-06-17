@@ -43,7 +43,7 @@ function EditInner({ registrationId }: { registrationId: string }) {
         setValues({ ...(d.answers ?? {}) }); // seed with current answers
       })
       .catch((e) => {
-        if (active) setError(e instanceof ApiError ? e.message : "Could not load registration");
+        if (active) setError(e instanceof ApiError ? e.message : "ไม่สามารถโหลดการลงทะเบียนได้");
       });
     return () => {
       active = false;
@@ -88,17 +88,17 @@ function EditInner({ registrationId }: { registrationId: string }) {
       const result = validateAnswers(schema, nextValues);
       if (!result.ok) {
         setFieldErrors(result.errors);
-        toast.error("Please fix the highlighted fields");
+        toast.error("กรุณาแก้ไขช่องที่ถูกไฮไลต์");
         setSaving(false);
         return;
       }
 
       // 3) Persist answers (JSON). Backend re-validates + enforces edit window/status.
       await apiPatch(`/registrations/${registrationId}/answers`, { answers: result.values });
-      toast.success("Answers updated");
+      toast.success("อัปเดตคำตอบแล้ว");
       router.push(`/me/registrations/${registrationId}`);
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Could not save answers");
+      toast.error(e instanceof ApiError ? e.message : "ไม่สามารถบันทึกคำตอบได้");
       setSaving(false);
     }
   }
@@ -123,7 +123,7 @@ function EditInner({ registrationId }: { registrationId: string }) {
     <Button asChild variant="ghost" size="sm">
       <Link href={`/me/registrations/${registrationId}`}>
         <ArrowLeft className="size-4" />
-        Back
+        ย้อนกลับ
       </Link>
     </Button>
   );
@@ -135,7 +135,7 @@ function EditInner({ registrationId }: { registrationId: string }) {
         {back}
         <Card>
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            Editing is not available for this registration.
+            ไม่สามารถแก้ไขการลงทะเบียนนี้ได้
           </CardContent>
         </Card>
       </div>
@@ -149,7 +149,7 @@ function EditInner({ registrationId }: { registrationId: string }) {
         {back}
         <Card>
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            This registration&apos;s form is not available to edit right now.
+            แบบฟอร์มของการลงทะเบียนนี้ยังไม่พร้อมสำหรับการแก้ไขในขณะนี้
           </CardContent>
         </Card>
       </div>
@@ -159,11 +159,11 @@ function EditInner({ registrationId }: { registrationId: string }) {
   return (
     <div className="space-y-6">
       {back}
-      <h1 className="text-xl font-semibold">Edit answers</h1>
+      <h1 className="text-xl font-semibold">แก้ไขคำตอบ</h1>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Registration form</CardTitle>
+          <CardTitle className="text-base">แบบฟอร์มการลงทะเบียน</CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
           {fields.map((field) =>
@@ -191,10 +191,10 @@ function EditInner({ registrationId }: { registrationId: string }) {
 
       <div className="flex justify-end gap-2">
         <Button asChild variant="outline" disabled={saving}>
-          <Link href={`/me/registrations/${registrationId}`}>Cancel</Link>
+          <Link href={`/me/registrations/${registrationId}`}>ยกเลิก</Link>
         </Button>
         <Button onClick={handleSave} disabled={saving}>
-          {saving ? "Saving..." : "Save changes"}
+          {saving ? "กำลังบันทึก..." : "บันทึกการเปลี่ยนแปลง"}
         </Button>
       </div>
     </div>

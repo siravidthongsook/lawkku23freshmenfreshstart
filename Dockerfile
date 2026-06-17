@@ -1,4 +1,4 @@
-# E-Ticket backend. tsx runtime (no compile step) — internal app, keep it simple.
+# LawKKUFreshmenFreshStart23 backend. tsx runtime (no compile step) — internal app, keep it simple.
 FROM node:22-slim AS base
 ENV PNPM_HOME="/pnpm" PATH="/pnpm:$PATH"
 RUN corepack enable
