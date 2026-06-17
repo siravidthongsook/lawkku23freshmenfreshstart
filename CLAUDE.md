@@ -18,7 +18,7 @@ Full spec: `spec.md`. Derived docs: `docs/01-database-schema.md`, `docs/02-api-c
 
 Two packages, one repo:
 - **Backend** — root pkg `lawkku-freshstart23-backend`, code in `src/`, Hono on `PORT` (default `3000`). Run `pnpm dev:backend`.
-- **Frontend** — `web/` pkg `lawkku-freshstart23-web`, Next.js 16 on port `3001`. Run `pnpm dev:frontend`. Has own `node_modules`.
+- **Frontend** — `web/` pkg `lawkku-freshstart23-web`, Next.js 16 on port `33490` (`next dev/start -p 33490`, dev + prod). Run `pnpm dev:frontend`. Has own `node_modules`.
 - `pnpm dev` runs both via concurrently.
 
 Frontend imports backend Zod schemas directly via path alias `@be/*` → `../src/*` (see `web/tsconfig.json`). Zod = single source of truth for validation across both. `@/*` → web root.
