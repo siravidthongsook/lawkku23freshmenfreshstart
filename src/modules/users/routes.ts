@@ -312,6 +312,32 @@ router.post(
   },
 );
 
+// GET /admin/users/:userId/temp-password — decrypt + return THIS user's pending temp pw (single-user reveal).
+// Avoids exporting everyone just to resolve one person. 404 if no pending temp pw. Audits the reveal (no pw).
+router.get("/admin/users/:userId/temp-password", async (c) => {
+  const admin = c.get("user");
+  const meta = requestMeta(c);
+  const target = await getUserOr404(c.req.param("userId"));
+
+  const [row] = await db
+    .select({ encrypted: temporaryPasswords.encryptedTempPassword })
+    .from(temporaryPasswords)
+    .where(eq(temporaryPasswords.userId, target.id))
+    .limit(1);
+  if (!row) throw notFound("no pending temporary password");
+
+  await writeAudit({
+    actorUserId: admin.id,
+    actorRole: admin.role,
+    action: "temp_password_revealed",
+    entityType: "user",
+    entityId: target.id,
+    targetUserId: target.id,
+    ...meta,
+  });
+  return c.json({ temp_password: decryptSecret(row.encrypted) });
+});
+
 // POST /admin/users/:userId/unlock — clear lockout rows for the user's email.
 router.post("/admin/users/:userId/unlock", async (c) => {
   const admin = c.get("user");

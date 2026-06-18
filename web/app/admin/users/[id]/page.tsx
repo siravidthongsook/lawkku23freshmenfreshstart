@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
+import { Check, Copy } from "lucide-react";
 import { apiGet, apiPatch, apiPost, ApiError } from "@/lib/api";
 import { updateUserSchema, changeRoleSchema } from "@/lib/schemas";
 import { formatBangkok } from "@/lib/time";
@@ -28,6 +29,7 @@ import { ReasonDialog } from "@/components/admin-tools/reason-dialog";
 import { TempPasswordDialog } from "@/components/admin-tools/temp-password-dialog";
 import type {
   ResetPasswordResponse,
+  TempPasswordResponse,
   UserDetailResponse,
   UserMutationResponse,
   UserWire,
@@ -62,6 +64,11 @@ export default function UserDetailPage() {
 
   // One-time temp pw reveal (reset-password).
   const [tempPw, setTempPw] = useState<string | null>(null);
+
+  // Inline single-user temp pw reveal (resolve one person without exporting everyone).
+  const [revealedPw, setRevealedPw] = useState<string | null>(null);
+  const [revealing, setRevealing] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -165,6 +172,7 @@ export default function UserDetailPage() {
       });
       setResetOpen(false);
       setHasPendingTempPw(true);
+      setRevealedPw(null); // any previously-revealed pw is now stale
       toast.success("รีเซ็ตรหัสผ่านแล้ว");
       // Show new temp pw once if backend returns it; otherwise direct to export page.
       if (res?.temp_password) {
@@ -179,6 +187,26 @@ export default function UserDetailPage() {
     } finally {
       setPendingAction(false);
     }
+  }
+
+  // Reveal this user's pending temp pw inline (single-user, not bulk export).
+  async function revealTempPw() {
+    setRevealing(true);
+    try {
+      const res = await apiGet<TempPasswordResponse>(`/admin/users/${id}/temp-password`);
+      setRevealedPw(res.temp_password);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "ไม่มีรหัสผ่านชั่วคราวสำหรับผู้ใช้นี้");
+    } finally {
+      setRevealing(false);
+    }
+  }
+
+  async function copyTempPw() {
+    if (!revealedPw) return;
+    await navigator.clipboard.writeText(revealedPw);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
   }
 
   async function changeRole(reason: string) {
@@ -355,6 +383,28 @@ export default function UserDetailPage() {
             <Button variant="outline" disabled={pendingAction} onClick={() => setResetOpen(true)}>
               รีเซ็ตรหัสผ่าน
             </Button>
+
+            {/* Single-user temp pw reveal — only when this user has a pending temp pw. */}
+            {hasPendingTempPw ? (
+              revealedPw ? (
+                <div className="flex h-9 items-center gap-2 rounded-md border bg-muted px-3">
+                  <code className="break-all font-mono text-sm">{revealedPw}</code>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-7"
+                    onClick={copyTempPw}
+                    aria-label="คัดลอกรหัสผ่านชั่วคราว"
+                  >
+                    {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+                  </Button>
+                </div>
+              ) : (
+                <Button variant="outline" disabled={revealing} onClick={revealTempPw}>
+                  {revealing ? "กำลังโหลด…" : "แสดง/คัดลอกรหัสผ่านชั่วคราว"}
+                </Button>
+              )
+            ) : null}
           </div>
 
           <Separator />

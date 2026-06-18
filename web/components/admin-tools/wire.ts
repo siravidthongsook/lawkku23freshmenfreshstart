@@ -33,6 +33,9 @@ export type CreateUserResponse = { user: UserWire; temp_password?: string };
 // Reset-password returns { ok: true } today; tolerate a temp_password if backend later includes it.
 export type ResetPasswordResponse = { ok: true; temp_password?: string };
 
+// GET /admin/users/:userId/temp-password — single-user reveal of the pending temp pw (404 if none).
+export type TempPasswordResponse = { temp_password: string };
+
 // Import preview — POST /admin/imports/users/preview
 export type ImportPreviewRow = {
   rowNumber: number;
