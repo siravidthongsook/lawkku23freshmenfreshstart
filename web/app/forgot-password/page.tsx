@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 const SUPPORT_FACEBOOK_URL = "https://www.facebook.com/profile.php?id=100064856854356";
 const SUPPORT_FACEBOOK_LABEL = "สโมสรนักศึกษา คณะนิติศาสตร์";
 const SUPPORT_PHONE = "062-190-0924"; // (เฟรม) — เฉพาะเรื่องระบบ
+const SUPPORT_EMAIL = "siravidthongsook@gmail.com"; // (ปลื้ม) — เฉพาะระบบบัค/มีปัญหา
 
 export default function ForgotPasswordPage() {
   return (
@@ -48,7 +49,19 @@ export default function ForgotPasswordPage() {
                 </a>{" "}
                 (เฟรม) *เฉพาะเรื่องระบบ
               </li>
+              <li>
+                อีเมล:{" "}
+                <a href={`mailto:${SUPPORT_EMAIL}`} className="underline underline-offset-4">
+                  {SUPPORT_EMAIL}
+                </a>{" "}
+                (ปลื้ม) *เฉพาะระบบบัค/มีปัญหา
+              </li>
             </ul>
+            {/* Ask users to leave a reachable contact so the admin can follow up. */}
+            <p className="mt-2 text-xs text-muted-foreground">
+              สำคัญ: เมื่อติดต่อ กรุณาแจ้งช่องทางติดต่อกลับของคุณ (เช่น เบอร์โทร/อีเมล/Facebook)
+              เพื่อให้ผู้ดูแลระบบติดต่อกลับได้
+            </p>
           </div>
 
           {/* Hint: many users forget the login field also accepts a student ID. */}
