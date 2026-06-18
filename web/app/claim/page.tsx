@@ -46,6 +46,8 @@ export default function ClaimPage() {
   const [identifier, setIdentifier] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  // IG required at claim — saved onto the user (event registration no longer collects it).
+  const [instagram, setInstagram] = useState("");
   // PDPA consent — required to submit. Mock text for now; gate blocks submit until checked.
   const [pdpaAgreed, setPdpaAgreed] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +65,7 @@ export default function ClaimPage() {
   const lengthOk = newPassword.length >= MIN && newPassword.length <= MAX;
   const matchOk = confirm.length > 0 && newPassword === confirm;
   const canSubmit =
-    !submitting && identifier.trim().length > 0 && lengthOk && matchOk && pdpaAgreed;
+    !submitting && identifier.trim().length > 0 && instagram.trim().length > 0 && lengthOk && matchOk && pdpaAgreed;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -83,6 +85,7 @@ export default function ClaimPage() {
       const res = await apiPost<ClaimResponse>("/auth/claim", {
         identifier: identifier.trim(),
         new_password: newPassword,
+        instagram: instagram.trim(),
       });
       await refetch(); // populate auth context from the new session
       // Claim sets the password here, so must-change shouldn't happen — keep the guard as a safety net.
@@ -171,6 +174,25 @@ export default function ClaimPage() {
                 value={confirm}
                 onChange={(e) => {
                   setConfirm(e.target.value);
+                  if (error) setError(null);
+                }}
+                required
+              />
+            </div>
+
+            {/* IG required at claim — stored on the user (events no longer ask for it). */}
+            <div className="space-y-1.5">
+              <Label htmlFor="instagram">Instagram (IG)</Label>
+              <Input
+                id="instagram"
+                type="text"
+                inputMode="text"
+                autoComplete="off"
+                autoCapitalize="none"
+                placeholder="กรอก IG ของคุณ"
+                value={instagram}
+                onChange={(e) => {
+                  setInstagram(e.target.value);
                   if (error) setError(null);
                 }}
                 required

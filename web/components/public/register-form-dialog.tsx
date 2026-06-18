@@ -76,7 +76,11 @@ export function RegisterFormDialog({
       <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>ลงทะเบียนกิจกรรม {eventTitle}</DialogTitle>
-          <DialogDescription>กรุณากรอกแบบฟอร์มการลงทะเบียนด้านล่าง</DialogDescription>
+          <DialogDescription>
+            {fields.length > 0
+              ? "กรุณากรอกแบบฟอร์มการลงทะเบียนด้านล่าง"
+              : "กรุณายืนยันความยินยอม (PDPA) ด้านล่างเพื่อลงทะเบียน"}
+          </DialogDescription>
         </DialogHeader>
 
         {/* Capacity/state changed under the student between opening the form and submitting. */}

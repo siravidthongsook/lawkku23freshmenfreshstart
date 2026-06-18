@@ -18,6 +18,8 @@ export const users = pgTable("users", {
   faculty: text("faculty"),
   department: text("department"),
   phone: text("phone"),
+  instagram: text("instagram"), // collected at account claim (required there); replaces per-event IG form field
+
   passwordHash: text("password_hash"), // nullable: NULL = account not yet claimed
   passwordMustChange: boolean("password_must_change").notNull().default(false),
   status: userStatus("status").notNull().default("active"),

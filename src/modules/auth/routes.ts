@@ -97,7 +97,7 @@ router.post("/auth/login", zValidator("json", loginSchema), async (c) => {
 // identifier = student_id (students) OR username e.g. staff-01 (staff). Only unclaimed accounts (null hash) match.
 // Every mismatch (not found / already claimed) returns the SAME generic error — no enumeration.
 router.post("/auth/claim", zValidator("json", claimSchema), async (c) => {
-  const { identifier, new_password } = c.req.valid("json");
+  const { identifier, new_password, instagram } = c.req.valid("json");
   const meta = requestMeta(c);
   const log = c.get("log");
   log.set("identifier", identifier); // who is claiming (not a secret); password never logged
@@ -159,7 +159,7 @@ router.post("/auth/claim", zValidator("json", claimSchema), async (c) => {
   await db.transaction(async (tx) => {
     const updated = await tx
       .update(users)
-      .set({ passwordHash, updatedAt: new Date() })
+      .set({ passwordHash, instagram, updatedAt: new Date() })
       .where(and(eq(users.id, user.id), isNull(users.passwordHash)))
       .returning({ id: users.id });
     if (updated.length === 0) throw invalidCredentials();

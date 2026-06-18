@@ -90,15 +90,15 @@ export default function EventDetailPage() {
   // Active registration form (validated). When present, register must collect answers first.
   const registrationForm: FormSchema | null = event ? extractEventForm(event) : null;
 
-  // Register CTA: open the form dialog when a form exists; otherwise register directly (formless event).
-  // Waitlist always posts {} — backend does not collect answers on waitlist join (docs/02 §Registration).
+  // Register CTA: always open the dialog — it carries the required PDPA consent gate even when the
+  // event collects no fields (formless register still needs consent). Waitlist posts {} directly.
   function onAction(action: "register" | "waitlist") {
     if (!event) return;
     if (!user) {
       router.push(`/login?next=/events/${slug}`);
       return;
     }
-    if (action === "register" && registrationForm) {
+    if (action === "register") {
       setFormDialogOpen(true);
       return;
     }
@@ -169,15 +169,16 @@ export default function EventDetailPage() {
       ) : event ? (
         <>
           <EventDetail event={event} submitting={submitting} onAction={onAction} />
-          {/* Form step for register-with-form events; formless register skips this entirely. */}
-          {registrationForm ? (
+          {/* Register step. Always rendered — holds the PDPA gate; schema falls back to a fieldless
+              form so formless / untied events still require consent before submit. */}
+          {(
             <RegisterFormDialog
               open={formDialogOpen}
               onOpenChange={(o) => {
                 if (!o) setCapacityBeforeRetry(null); // clear stale notice when the dialog closes
                 setFormDialogOpen(o);
               }}
-              schema={registrationForm}
+              schema={registrationForm ?? { fields: [] }}
               eventTitle={event.title}
               submitting={submitting}
               initialValues={restoredAnswers ?? undefined}
@@ -189,7 +190,7 @@ export default function EventDetailPage() {
               }
               onSubmit={(answers) => void submit("register", answers)}
             />
-          ) : null}
+          )}
         </>
       ) : null}
     </PublicShell>

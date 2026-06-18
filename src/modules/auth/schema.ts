@@ -11,6 +11,7 @@ export const loginSchema = z.object({
 export const claimSchema = z.object({
   identifier: z.string().trim().min(1),
   new_password: z.string().min(1),
+  instagram: z.string().trim().min(1), // required at claim — stored on the user (untied from event forms)
 });
 
 // Change-password: only need the new password; policy enforced via validatePasswordPolicy.

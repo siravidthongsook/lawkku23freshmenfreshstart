@@ -43,6 +43,13 @@
       "when": 1781796199395,
       "tag": "0005_gifted_scarlet_spider",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781797739534,
+      "tag": "0006_organic_luminals",
+      "breakpoints": true
     }
   ]
 }
