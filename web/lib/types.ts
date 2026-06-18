@@ -19,6 +19,7 @@ export type Me = {
   faculty: string | null;
   department: string | null;
   phone: string | null;
+  groupNumber: number | null; // บรรพ — admin-managed
   role: Role;
   status: "active" | "disabled";
   passwordMustChange: boolean;

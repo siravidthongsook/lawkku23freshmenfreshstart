@@ -139,30 +139,14 @@ function AccountForm() {
               />
             </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="faculty">คณะ</Label>
-              <Input id="faculty" value={faculty} onChange={(e) => setFaculty(e.target.value)} />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="department">สาขา/ภาควิชา</Label>
-              <Input
-                id="department"
-                value={department}
-                onChange={(e) => setDepartment(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="phone">เบอร์โทรศัพท์</Label>
-              <Input
-                id="phone"
-                type="tel"
-                autoComplete="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-              />
-            </div>
+            {/* บรรพ (group_number) — admin-managed, read-only here. */}
+            {user.groupNumber != null ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="groupNumber">บรรพ</Label>
+                <Input id="groupNumber" value={String(user.groupNumber)} disabled readOnly />
+                <p className="text-xs text-muted-foreground">แก้ไขได้โดยผู้ดูแลระบบเท่านั้น</p>
+              </div>
+            ) : null}
 
             {/* Read-only identity — only an admin can change these. */}
             {user.studentId ? (

@@ -28,6 +28,7 @@ type MeResponse = {
     faculty: string | null;
     department: string | null;
     phone: string | null;
+    group_number: number | null;
     status: Me["status"];
   };
   password_must_change: boolean;
@@ -44,6 +45,7 @@ function toMe(res: MeResponse): Me {
     faculty: u.faculty,
     department: u.department,
     phone: u.phone,
+    groupNumber: u.group_number,
     role: u.role,
     status: u.status,
     passwordMustChange: res.password_must_change,

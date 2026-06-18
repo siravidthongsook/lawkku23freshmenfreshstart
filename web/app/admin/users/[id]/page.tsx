@@ -57,6 +57,7 @@ export default function UserDetailPage() {
     faculty: "",
     department: "",
     phone: "",
+    group_number: "", // บรรพ — held as string in the form, parsed to int|null on save
   });
   const [savingProfile, setSavingProfile] = useState(false);
 
@@ -93,6 +94,7 @@ export default function UserDetailPage() {
         faculty: res.user.faculty ?? "",
         department: res.user.department ?? "",
         phone: res.user.phone ?? "",
+        group_number: res.user.group_number != null ? String(res.user.group_number) : "",
       });
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "ไม่สามารถโหลดผู้ใช้ได้");
@@ -113,7 +115,7 @@ export default function UserDetailPage() {
   async function saveProfile() {
     if (!user) return;
     // Send only changed fields; null clears nullable fields (student_id/faculty/department/phone).
-    const patch: Record<string, string | null> = {};
+    const patch: Record<string, string | number | null> = {};
     if (form.email.trim() !== user.email) patch.email = form.email.trim();
     if (form.full_name.trim() !== user.full_name) patch.full_name = form.full_name.trim();
     const optional: [keyof typeof form, string | null][] = [
@@ -126,6 +128,11 @@ export default function UserDetailPage() {
       const next = form[key].trim();
       const normalized = next === "" ? null : next;
       if (normalized !== (current ?? null)) patch[key] = normalized;
+    }
+    // บรรพ — numeric; send int or null (cleared). Compare against current as string to detect change.
+    const bunNext = form.group_number.trim();
+    if (bunNext !== (user.group_number != null ? String(user.group_number) : "")) {
+      patch.group_number = bunNext === "" ? null : Number(bunNext);
     }
 
     if (Object.keys(patch).length === 0) {
@@ -378,12 +385,23 @@ export default function UserDetailPage() {
                 onChange={(e) => setField("department", e.target.value)}
               />
             </div>
-            <div className="space-y-1.5 sm:col-span-2">
+            <div className="space-y-1.5">
               <Label htmlFor="phone">โทรศัพท์</Label>
               <Input
                 id="phone"
                 value={form.phone}
                 onChange={(e) => setField("phone", e.target.value)}
+              />
+            </div>
+            {/* บรรพ (group_number) — admin-editable cohort number. */}
+            <div className="space-y-1.5">
+              <Label htmlFor="bun">บรรพ</Label>
+              <Input
+                id="bun"
+                type="number"
+                inputMode="numeric"
+                value={form.group_number}
+                onChange={(e) => setField("group_number", e.target.value)}
               />
             </div>
           </div>

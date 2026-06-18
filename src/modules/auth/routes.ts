@@ -314,6 +314,7 @@ function publicUser(u: typeof users.$inferSelect) {
     faculty: u.faculty,
     department: u.department,
     phone: u.phone,
+    group_number: u.groupNumber, // บรรพ — admin-managed, read-only for the user
     status: u.status,
     created_at: u.createdAt.toISOString(),
     updated_at: u.updatedAt.toISOString(),
