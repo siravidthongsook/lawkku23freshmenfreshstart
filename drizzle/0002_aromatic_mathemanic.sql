@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX IF NOT EXISTS "event_form_versions_one_active_uq" ON "event_form_versions" USING btree ("event_id") WHERE is_active;--> statement-breakpoint
+ALTER TABLE "event_form_versions" ADD CONSTRAINT "event_form_versions_event_version_uq" UNIQUE("event_id","version_number");

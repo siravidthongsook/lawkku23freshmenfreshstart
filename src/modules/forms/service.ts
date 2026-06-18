@@ -1,7 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db, type Tx } from "../../db/client";
 import { eventFormVersions } from "../../db/schema/forms";
-import { registrations } from "../../db/schema/registrations";
+import { registrations, registrationFormAnswers } from "../../db/schema/registrations";
 import type { FormField, FormSchema } from "../../lib/form-schema";
 
 // Active form version for an event (at most one is_active=true).
@@ -14,13 +14,24 @@ export async function getActiveVersion(eventId: string) {
   return row ?? null;
 }
 
-// True if any registration exists for the event (i.e. submissions exist → structural edits need a new version).
-export async function hasSubmissions(eventId: string): Promise<boolean> {
-  const [row] = await db
+// True if any stored data references this form version — answers rows OR a registration's form_version_id.
+// Used to decide whether a structural edit must fork a new version (in-place edit would corrupt those refs),
+// regardless of registration status (cancelled regs still hold answers we must not mutate).
+export async function versionIsReferenced(
+  exec: Tx | typeof db,
+  formVersionId: string,
+): Promise<boolean> {
+  const [ans] = await exec
+    .select({ c: sql<number>`count(*)::int` })
+    .from(registrationFormAnswers)
+    .where(eq(registrationFormAnswers.formVersionId, formVersionId));
+  if ((ans?.c ?? 0) > 0) return true;
+
+  const [reg] = await exec
     .select({ c: sql<number>`count(*)::int` })
     .from(registrations)
-    .where(eq(registrations.eventId, eventId));
-  return (row?.c ?? 0) > 0;
+    .where(eq(registrations.formVersionId, formVersionId));
+  return (reg?.c ?? 0) > 0;
 }
 
 // Index fields by stable key for structural comparison.

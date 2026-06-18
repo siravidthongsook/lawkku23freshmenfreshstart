@@ -44,12 +44,21 @@ const TYPE_LABEL: Record<string, string> = {
   file_upload: "อัปโหลดไฟล์",
 };
 
+// Shape of a saved form version returned by PATCH/POST (subset we rely on; schemaJson re-baselines the builder).
+export type SavedForm = {
+  id: string;
+  versionNumber: number;
+  schemaJson: FormSchema;
+  isActive: boolean;
+};
+
 type Props = {
   eventId: string;
   initialFields: FormField[];
   // Original schema = baseline to detect structural changes against (the active version's schema).
   versionNumber: number | null;
-  onSaved: () => void;
+  // Pass the just-saved form row up so the page can set state directly (never refetch-to-empty).
+  onSaved: (form: SavedForm) => void;
 };
 
 // Detect structural diff (mirrors backend isStructuralChange): add/remove key, or type/required/options change.
@@ -141,12 +150,13 @@ export function FormBuilder({ eventId, initialFields, versionNumber, onSaved }: 
     if (!schema || saving) return;
     setSaving(true);
     try {
-      const res = await apiPatch<{ versioned: boolean }>(
+      // PATCH returns the resulting form row + whether it forked a version. Hand the row up to re-baseline.
+      const res = await apiPatch<{ form: SavedForm; versioned: boolean }>(
         `/admin/events/${eventId}/form`,
         { schema },
       );
       toast.success(res.versioned ? "บันทึกเป็นฟอร์มเวอร์ชันใหม่แล้ว" : "บันทึกฟอร์มแล้ว");
-      onSaved();
+      onSaved(res.form);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "ไม่สามารถบันทึกฟอร์มได้");
     } finally {
@@ -159,9 +169,13 @@ export function FormBuilder({ eventId, initialFields, versionNumber, onSaved }: 
     const schema = buildSchema();
     if (!schema) return;
     try {
-      await apiPost(`/admin/events/${eventId}/form/version`, { schema, reason });
+      // POST returns the new active form row; hand it up so the page re-baselines without a refetch.
+      const res = await apiPost<{ form: SavedForm }>(
+        `/admin/events/${eventId}/form/version`,
+        { schema, reason },
+      );
       toast.success("สร้างฟอร์มเวอร์ชันใหม่แล้ว");
-      onSaved();
+      onSaved(res.form);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "ไม่สามารถสร้างเวอร์ชันได้");
       throw err; // keep dialog open on failure
@@ -172,7 +186,12 @@ export function FormBuilder({ eventId, initialFields, versionNumber, onSaved }: 
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          {versionNumber != null ? <Badge variant="outline">เวอร์ชัน {versionNumber}</Badge> : null}
+          {versionNumber != null ? (
+            // Badge marks which form version is live; existing registrations stay on it until forked.
+            <Badge variant="outline" title="เวอร์ชันที่ใช้งานอยู่" aria-label="เวอร์ชันที่ใช้งานอยู่">
+              เวอร์ชัน {versionNumber}
+            </Badge>
+          ) : null}
           <span>{fields.length} ฟิลด์</span>
         </div>
         <div className="flex items-center gap-2">
@@ -187,6 +206,20 @@ export function FormBuilder({ eventId, initialFields, versionNumber, onSaved }: 
             บันทึกเป็นเวอร์ชันใหม่
           </Button>
         </div>
+      </div>
+
+      {/* Static explainer: clarifies what each save button does so admins know when a new version is created. */}
+      <div className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
+        <ul className="space-y-1">
+          <li>
+            <span className="font-medium text-foreground">บันทึก</span> = แก้ไขในเวอร์ชันเดิม (ถ้ายังไม่มีการลงทะเบียน
+            หรือแก้เฉพาะป้ายกำกับ/ลำดับ); ถ้าเปลี่ยนโครงสร้างและมีการลงทะเบียนแล้ว ระบบจะสร้างเวอร์ชันใหม่ให้อัตโนมัติ
+          </li>
+          <li>
+            <span className="font-medium text-foreground">บันทึกเป็นเวอร์ชันใหม่</span> = แยกเวอร์ชันใหม่ทันที
+            พร้อมบันทึกเหตุผล การลงทะเบียนเดิมยังใช้เวอร์ชันเก่า
+          </li>
+        </ul>
       </div>
 
       {/* Structural-change warning: existing submissions keep their old version; saving may fork a version. */}

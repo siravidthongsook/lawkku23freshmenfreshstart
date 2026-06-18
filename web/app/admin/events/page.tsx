@@ -5,10 +5,11 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { apiGet, ApiError } from "@/lib/api";
-import type { EventAdmin } from "@/lib/types";
+import type { EventAdmin, EventVisibility, RegistrationMode } from "@/lib/types";
 import { formatBangkok } from "@/lib/time";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { EventStatusBadge } from "@/components/badges";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -19,6 +20,28 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+
+const VISIBILITY_LABEL: Record<EventVisibility, string> = {
+  listed: "แสดงในรายการ",
+  unlisted: "ผ่านลิงก์เท่านั้น",
+};
+
+// Lightweight derived effective-state for the list (no `computed` here — uses row fields only).
+// Mirrors the self-register rule minus capacity/now precision: status + mode + window timestamps.
+function effectiveState(ev: EventAdmin): { label: string; cls: string } {
+  if (ev.status === "draft") return { label: "ฉบับร่าง", cls: "bg-slate-200 text-slate-700" };
+  if (ev.status === "cancelled") return { label: "ยกเลิก", cls: "bg-red-100 text-red-800" };
+  if (ev.status === "archived") return { label: "เก็บถาวร", cls: "bg-zinc-100 text-zinc-600" };
+  // published
+  const mode = ev.registrationMode as RegistrationMode;
+  if (mode !== "public_self_register") return { label: "ปิดรับ", cls: "bg-amber-100 text-amber-800" };
+  const now = Date.now();
+  const opensOk = !ev.registrationOpenAt || new Date(ev.registrationOpenAt).getTime() <= now;
+  const closesOk = !ev.registrationCloseAt || new Date(ev.registrationCloseAt).getTime() > now;
+  return opensOk && closesOk
+    ? { label: "เปิดรับ", cls: "bg-green-100 text-green-800" }
+    : { label: "ปิดรับ", cls: "bg-amber-100 text-amber-800" };
+}
 
 export default function AdminEventsPage() {
   const [events, setEvents] = useState<EventAdmin[] | null>(null);
@@ -69,6 +92,7 @@ export default function AdminEventsPage() {
               <TableRow>
                 <TableHead>หัวข้อ</TableHead>
                 <TableHead>สถานะ</TableHead>
+                <TableHead>สำหรับนักศึกษา</TableHead>
                 <TableHead>การมองเห็น</TableHead>
                 <TableHead className="text-right">ลงทะเบียน</TableHead>
                 <TableHead className="text-right">เช็คอินแล้ว</TableHead>
@@ -88,8 +112,17 @@ export default function AdminEventsPage() {
                   <TableCell>
                     <EventStatusBadge status={ev.status} />
                   </TableCell>
+                  {/* Derived effective-state (best-effort, row-only). */}
                   <TableCell>
-                    <Badge variant="outline">{ev.visibility ?? "—"}</Badge>
+                    {(() => {
+                      const eff = effectiveState(ev);
+                      return <Badge className={cn("border-transparent", eff.cls)}>{eff.label}</Badge>;
+                    })()}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline">
+                      {ev.visibility ? VISIBILITY_LABEL[ev.visibility] : "—"}
+                    </Badge>
                   </TableCell>
                   {/* Counts may be absent until backend includes them — fall back to "—". */}
                   <TableCell className="text-right">{ev.registeredCount ?? "—"}</TableCell>

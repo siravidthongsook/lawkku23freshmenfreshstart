@@ -113,6 +113,32 @@ export function EventForm({ mode, eventId, initial }: Props) {
       return;
     }
 
+    // Client-side guard: each window's open must precede its close (only when both ends present).
+    if (
+      payload.registrationOpenAt &&
+      payload.registrationCloseAt &&
+      payload.registrationOpenAt >= payload.registrationCloseAt
+    ) {
+      toast.error("เวลาเปิดลงทะเบียนต้องอยู่ก่อนเวลาปิดลงทะเบียน");
+      return;
+    }
+    if (
+      payload.checkinOpenAt &&
+      payload.checkinCloseAt &&
+      payload.checkinOpenAt >= payload.checkinCloseAt
+    ) {
+      toast.error("เวลาเปิดเช็คอินต้องอยู่ก่อนเวลาปิดเช็คอิน");
+      return;
+    }
+    if (
+      payload.eventStartAt &&
+      payload.eventEndAt &&
+      payload.eventStartAt >= payload.eventEndAt
+    ) {
+      toast.error("เวลาเริ่มกิจกรรมต้องอยู่ก่อนเวลาสิ้นสุดกิจกรรม");
+      return;
+    }
+
     // Validate against the shared zod schema (coerces dates) before hitting the API.
     const schema = mode === "create" ? createEventSchema : updateEventSchema;
     const parsed = schema.safeParse(payload);
@@ -192,15 +218,19 @@ export function EventForm({ mode, eventId, initial }: Props) {
               </SelectContent>
             </Select>
           </Field>
+          {/* Window only enforced after publish — ties to the readiness rule. */}
+          <p className="text-xs text-muted-foreground">
+            ช่วงเวลาลงทะเบียนจะมีผลก็ต่อเมื่อเผยแพร่กิจกรรมแล้วเท่านั้น
+          </p>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="เปิดลงทะเบียน (เวลาไทย)">
+            <Field label="เปิดลงทะเบียน (เวลาไทย)" hint="เว้นว่าง = ไม่มีกำหนด">
               <Input
                 type="datetime-local"
                 value={registrationOpenAt}
                 onChange={(e) => setRegistrationOpenAt(e.target.value)}
               />
             </Field>
-            <Field label="ปิดลงทะเบียน (เวลาไทย)">
+            <Field label="ปิดลงทะเบียน (เวลาไทย)" hint="เว้นว่าง = ไม่มีกำหนด">
               <Input
                 type="datetime-local"
                 value={registrationCloseAt}
@@ -217,28 +247,28 @@ export function EventForm({ mode, eventId, initial }: Props) {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="เริ่มกิจกรรม (เวลาไทย)">
+            <Field label="เริ่มกิจกรรม (เวลาไทย)" hint="เว้นว่าง = ไม่มีกำหนด">
               <Input
                 type="datetime-local"
                 value={eventStartAt}
                 onChange={(e) => setEventStartAt(e.target.value)}
               />
             </Field>
-            <Field label="สิ้นสุดกิจกรรม (เวลาไทย)">
+            <Field label="สิ้นสุดกิจกรรม (เวลาไทย)" hint="เว้นว่าง = ไม่มีกำหนด">
               <Input
                 type="datetime-local"
                 value={eventEndAt}
                 onChange={(e) => setEventEndAt(e.target.value)}
               />
             </Field>
-            <Field label="เปิดเช็คอิน (เวลาไทย)">
+            <Field label="เปิดเช็คอิน (เวลาไทย)" hint="เว้นว่าง = ไม่มีกำหนด">
               <Input
                 type="datetime-local"
                 value={checkinOpenAt}
                 onChange={(e) => setCheckinOpenAt(e.target.value)}
               />
             </Field>
-            <Field label="ปิดเช็คอิน (เวลาไทย)">
+            <Field label="ปิดเช็คอิน (เวลาไทย)" hint="เว้นว่าง = ไม่มีกำหนด">
               <Input
                 type="datetime-local"
                 value={checkinCloseAt}
@@ -257,7 +287,12 @@ export function EventForm({ mode, eventId, initial }: Props) {
           <Checkbox
             label="เปิดใช้งานการจำกัดจำนวนที่รับ"
             checked={capacityEnabled}
-            onChange={setCapacityEnabled}
+            // Turning capacity off makes waitlist meaningless — clear it too.
+            onChange={(v) => {
+              setCapacityEnabled(v);
+              if (!v) setWaitlistEnabled(false);
+            }}
+            hint="นับเฉพาะผู้ที่ลงทะเบียนและเช็คอินแล้ว"
           />
           {capacityEnabled && (
             <Field label="จำนวนที่รับ" required>
@@ -269,10 +304,13 @@ export function EventForm({ mode, eventId, initial }: Props) {
               />
             </Field>
           )}
+          {/* Waitlist only makes sense with a capacity cap. */}
           <Checkbox
             label="เปิดใช้งานรายชื่อสำรองเมื่อเต็ม"
             checked={waitlistEnabled}
             onChange={setWaitlistEnabled}
+            disabled={!capacityEnabled}
+            hint={!capacityEnabled ? "ต้องเปิดการจำกัดจำนวนก่อน" : undefined}
           />
         </CardContent>
       </Card>
@@ -351,24 +389,37 @@ function Field({
 }
 
 // Plain checkbox row (no shadcn checkbox primitive in the foundation — use native input).
+// Optional `disabled` + `hint` added for dependent toggles (e.g. waitlist needs capacity on).
 function Checkbox({
   label,
   checked,
   onChange,
+  disabled,
+  hint,
 }: {
   label: string;
   checked: boolean;
   onChange: (v: boolean) => void;
+  disabled?: boolean;
+  hint?: string;
 }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2 text-sm">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="size-4 rounded border-input"
-      />
-      {label}
-    </label>
+    <div className="space-y-1">
+      <label
+        className={`flex items-center gap-2 text-sm ${
+          disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer"
+        }`}
+      >
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.checked)}
+          className="size-4 rounded border-input"
+        />
+        {label}
+      </label>
+      {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+    </div>
   );
 }
