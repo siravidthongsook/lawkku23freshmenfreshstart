@@ -149,6 +149,19 @@ export async function listUserRegistrations(userId: string): Promise<Registratio
     .orderBy(desc(registrations.createdAt));
 }
 
+// Same as above but joined to the event so the student list can show which event each reg is for.
+export async function listUserRegistrationsWithEvent(
+  userId: string,
+): Promise<{ registration: Registration; event: Event | null }[]> {
+  const rows = await db
+    .select({ registration: registrations, event: events })
+    .from(registrations)
+    .leftJoin(events, eq(registrations.eventId, events.id))
+    .where(eq(registrations.userId, userId))
+    .orderBy(desc(registrations.createdAt));
+  return rows.map((r) => ({ registration: r.registration, event: r.event }));
+}
+
 // Serialize a registration row for API responses (UTC ISO timestamps).
 export function serializeRegistration(reg: Registration) {
   return {

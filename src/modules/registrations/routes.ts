@@ -20,7 +20,7 @@ import {
   getFileIds,
   getFormVersionById,
   getRegistrationOrThrow,
-  listUserRegistrations,
+  listUserRegistrationsWithEvent,
   serializeRegistration,
   validateAgainstVersion,
   writeAnswers,
@@ -294,8 +294,15 @@ router.patch("/registrations/:registrationId/answers", requireAuth, async (c) =>
 // Caller's registrations (incl. archived/cancelled).
 router.get("/me/registrations", requireAuth, async (c) => {
   const user = c.get("user");
-  const regs = await listUserRegistrations(user.id);
-  return c.json({ registrations: regs.map(serializeRegistration) });
+  const regs = await listUserRegistrationsWithEvent(user.id);
+  // Enrich each bare reg row with event title/start so the student list shows which event it's for.
+  return c.json({
+    registrations: regs.map(({ registration, event }) => ({
+      ...serializeRegistration(registration),
+      eventTitle: event?.title ?? null,
+      eventStartAt: event?.eventStartAt?.toISOString() ?? null,
+    })),
+  });
 });
 
 // Caller's registration detail + QR (if eligible) + answers + file ids.
@@ -312,6 +319,20 @@ router.get("/me/registrations/:registrationId", requireAuth, async (c) => {
 
   return c.json({
     registration: serializeRegistration(reg),
+    // Event context so the student detail page can show title/date/location + edit/cancel windows.
+    event: {
+      title: event.title,
+      description: event.description,
+      location: event.location,
+      status: event.status,
+      eventStartAt: event.eventStartAt?.toISOString() ?? null,
+      eventEndAt: event.eventEndAt?.toISOString() ?? null,
+      publicSlug: event.publicSlug,
+      allowStudentCancelRegistration: event.allowStudentCancelRegistration,
+      cancelRegistrationCloseAt: event.cancelRegistrationCloseAt?.toISOString() ?? null,
+      allowStudentEditRegistration: event.allowStudentEditRegistration,
+      editRegistrationCloseAt: event.editRegistrationCloseAt?.toISOString() ?? null,
+    },
     answers,
     fileIds,
     qr: { eligible, available: qrAvailable, publicEventId: event.publicId },
