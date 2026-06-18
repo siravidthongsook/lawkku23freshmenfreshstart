@@ -35,6 +35,20 @@ export async function countActiveRegistrations(exec: Exec, eventId: string): Pro
   return row?.c ?? 0;
 }
 
+// Per-status registration counts for an event (all four statuses, default 0).
+export async function countRegistrationsByStatus(
+  eventId: string,
+): Promise<{ registered: number; waitlisted: number; checked_in: number; cancelled: number }> {
+  const counts = { registered: 0, waitlisted: 0, checked_in: 0, cancelled: 0 };
+  const rows = await db
+    .select({ status: registrations.status, c: sql<number>`count(*)::int` })
+    .from(registrations)
+    .where(eq(registrations.eventId, eventId))
+    .groupBy(registrations.status);
+  for (const row of rows) counts[row.status] = row.c;
+  return counts;
+}
+
 // Active form version for an event (the one new registrations bind to).
 export async function getActiveFormVersion(
   exec: Exec,

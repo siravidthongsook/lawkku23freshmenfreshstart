@@ -11,6 +11,7 @@ import { writeAudit } from "../../lib/audit";
 import { storage, buildEventPosterKey } from "../../lib/storage";
 import { computeEventStatus, ensureUniqueSlug, publicEventView } from "./service";
 import { getActiveVersion } from "../forms/service";
+import { countRegistrationsByStatus } from "../registrations/service";
 import {
   createEventSchema,
   eventIdParam,
@@ -144,7 +145,18 @@ router.get("/admin/events/:eventId", async (c) => {
   const [event] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);
   if (!event) throw notFound("Event not found");
   const computed = await computeEventStatus(event);
-  return c.json({ event, computed });
+  // Per-status counts feed the admin overview tiles.
+  const counts = await countRegistrationsByStatus(eventId);
+  return c.json({
+    event: {
+      ...event,
+      registeredCount: counts.registered,
+      checkedInCount: counts.checked_in,
+      waitlistedCount: counts.waitlisted,
+      cancelledCount: counts.cancelled,
+    },
+    computed,
+  });
 });
 
 // PATCH /admin/events/:eventId — edit fields/windows/config. Slug change → audit event_slug_changed.
