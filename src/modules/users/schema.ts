@@ -62,6 +62,11 @@ export const updateUserSchema = z
     faculty: z.string().trim().nullable().optional(),
     department: z.string().trim().nullable().optional(),
     phone: z.string().trim().nullable().optional(),
+    // IG handle — collected at claim; admin-editable. Blank string -> null (clears).
+    instagram: z.preprocess(
+      (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+      z.string().trim().nullable().optional(),
+    ),
     // บรรพ — int cohort number; blank string -> null (clears). Coerce so "" / numeric strings both work.
     group_number: z.preprocess(
       (v) => (typeof v === "string" && v.trim() === "" ? null : v),

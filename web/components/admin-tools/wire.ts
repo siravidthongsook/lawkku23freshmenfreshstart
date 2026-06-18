@@ -16,6 +16,7 @@ export type UserWire = {
   faculty: string | null;
   department: string | null;
   phone: string | null;
+  instagram: string | null; // IG handle (collected at claim)
   group_number: number | null; // บรรพ
   status: "active" | "disabled";
   password_must_change: boolean;

@@ -57,6 +57,7 @@ export default function UserDetailPage() {
     faculty: "",
     department: "",
     phone: "",
+    instagram: "", // IG — collected at claim, admin-editable
     group_number: "", // บรรพ — held as string in the form, parsed to int|null on save
   });
   const [savingProfile, setSavingProfile] = useState(false);
@@ -94,6 +95,7 @@ export default function UserDetailPage() {
         faculty: res.user.faculty ?? "",
         department: res.user.department ?? "",
         phone: res.user.phone ?? "",
+        instagram: res.user.instagram ?? "",
         group_number: res.user.group_number != null ? String(res.user.group_number) : "",
       });
     } catch (e) {
@@ -124,6 +126,7 @@ export default function UserDetailPage() {
       ["faculty", user.faculty],
       ["department", user.department],
       ["phone", user.phone],
+      ["instagram", user.instagram],
     ];
     for (const [key, current] of optional) {
       const next = form[key].trim();
@@ -392,6 +395,15 @@ export default function UserDetailPage() {
                 id="phone"
                 value={form.phone}
                 onChange={(e) => setField("phone", e.target.value)}
+              />
+            </div>
+            {/* IG handle — collected at claim, admin-editable. */}
+            <div className="space-y-1.5">
+              <Label htmlFor="instagram">Instagram (IG)</Label>
+              <Input
+                id="instagram"
+                value={form.instagram}
+                onChange={(e) => setField("instagram", e.target.value)}
               />
             </div>
             {/* บรรพ (group_number) — admin-editable cohort number. */}

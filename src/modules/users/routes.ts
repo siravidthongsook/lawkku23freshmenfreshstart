@@ -228,6 +228,7 @@ router.patch("/admin/users/:userId", zValidator("json", updateUserSchema), async
   if (body.faculty !== undefined) patch.faculty = body.faculty;
   if (body.department !== undefined) patch.department = body.department;
   if (body.phone !== undefined) patch.phone = body.phone;
+  if (body.instagram !== undefined) patch.instagram = body.instagram; // IG handle
   if (body.group_number !== undefined) patch.groupNumber = body.group_number; // บรรพ
 
   const updated = await db.transaction(async (tx) => {
@@ -525,6 +526,7 @@ function publicUser(u: User) {
     faculty: u.faculty,
     department: u.department,
     phone: u.phone,
+    instagram: u.instagram, // IG handle (collected at claim)
     group_number: u.groupNumber, // บรรพ
     status: u.status,
     password_must_change: u.passwordMustChange,
