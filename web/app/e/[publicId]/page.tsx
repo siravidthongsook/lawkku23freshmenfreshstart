@@ -13,7 +13,7 @@ import { EventStatusBadge } from "@/components/badges";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { galleryImage, eventTimeRange, capacityLabel } from "@/components/public/event-helpers";
+import { eventThumbnail, eventTimeRange, capacityLabel } from "@/components/public/event-helpers";
 
 // Resolve response may be a redirect hint ({ slug }/{ publicSlug }) or a full event object.
 type ResolveResponse = Partial<EventPublic> & { slug?: string };
@@ -95,7 +95,7 @@ function FallbackEvent({ event }: { event: EventPublic }) {
     <div className="mx-auto max-w-2xl">
       <div className="relative mb-6 aspect-[16/7] w-full overflow-hidden rounded-xl bg-muted">
         <Image
-          src={galleryImage(event.publicId || event.publicSlug || event.id)}
+          src={eventThumbnail(event)}
           alt=""
           fill
           sizes="(max-width: 1024px) 100vw, 66vw"
