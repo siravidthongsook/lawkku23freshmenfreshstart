@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
+import Link from "next/link";
 import { apiGet, apiPost, ApiError } from "@/lib/api";
 import type { EventPublic } from "@/lib/types";
 import { useAuth } from "@/lib/auth";
@@ -239,6 +240,17 @@ function ActionArea({
   onAction: (a: "register" | "waitlist") => void;
 }) {
   switch (action.kind) {
+    case "already_registered":
+      // Pre-click signal: viewer already holds a reg → link to its detail instead of registering again.
+      return (
+        <Button asChild className="w-full" variant="secondary">
+          <Link href={`/me/registrations/${action.registrationId}`}>
+            {action.status === "waitlisted"
+              ? "อยู่ในรายชื่อสำรอง — ดูรายละเอียด"
+              : "ลงทะเบียนแล้ว — ดูรายละเอียด"}
+          </Link>
+        </Button>
+      );
     case "register":
       return (
         <Button className="w-full" disabled={submitting} onClick={() => onAction("register")}>

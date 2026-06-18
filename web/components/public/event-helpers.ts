@@ -1,5 +1,5 @@
 // Shared, pure helpers for public event pages. No I/O — derive UI state from an EventPublic.
-import type { EventPublic } from "@/lib/types";
+import type { EventPublic, RegistrationStatus } from "@/lib/types";
 import { formSchema, type FormSchema } from "@/lib/schemas";
 import { formatBangkok } from "@/lib/time";
 
@@ -43,6 +43,7 @@ function inRegistrationWindow(e: EventPublic, now = new Date()): boolean {
 }
 
 export type RegistrationAction =
+  | { kind: "already_registered"; registrationId: string; status: RegistrationStatus } // viewer already holds a (non-cancelled) reg
   | { kind: "register" } // self-register available now
   | { kind: "waitlist" } // full but waitlist enabled
   | { kind: "full" } // full, no waitlist
@@ -55,6 +56,15 @@ export type RegistrationAction =
 // The single source of truth for which action (if any) a public visitor can take.
 // Mirrors spec §16: draft→none, published→by mode/window/capacity, cancelled→none, archived→read-only.
 export function registrationAction(e: EventPublic, now = new Date()): RegistrationAction {
+  // Viewer already holds a registration → takes precedence over any register/waitlist/full CTA.
+  // Backend omits these fields for cancelled regs, so a cancelled viewer can still re-register below.
+  if (e.myRegistrationId) {
+    return {
+      kind: "already_registered",
+      registrationId: e.myRegistrationId,
+      status: e.myRegistrationStatus ?? "registered",
+    };
+  }
   if (e.status === "cancelled") return { kind: "cancelled" };
   if (e.status === "archived") return { kind: "archived" };
   if (e.status !== "published") return { kind: "unavailable" };

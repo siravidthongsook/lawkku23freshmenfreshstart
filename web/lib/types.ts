@@ -48,6 +48,9 @@ export type EventPublic = {
   // OPTIONAL active registration form. Backend MAY include it; tolerant shape (bare schema or {schema}).
   // When present with fields, the public register flow must collect answers. Absent → formless register.
   form?: { version?: number; schema: FormSchema } | FormSchema | null;
+  // OPTIONAL: present only for an authenticated viewer who already has a non-cancelled registration.
+  myRegistrationId?: string | null;
+  myRegistrationStatus?: RegistrationStatus | null;
 };
 
 // Admin event row (GET /admin/events) — superset incl. cancel/edit config + counts.

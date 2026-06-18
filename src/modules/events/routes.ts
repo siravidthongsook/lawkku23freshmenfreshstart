@@ -11,6 +11,8 @@ import { writeAudit } from "../../lib/audit";
 import { storage, buildEventPosterKey } from "../../lib/storage";
 import { computeEventStatus, ensureUniqueSlug, publicEventView } from "./service";
 import { getActiveVersion } from "../forms/service";
+import { resolveSession } from "../../lib/session";
+import { registrations } from "../../db/schema/registrations";
 import { countRegistrationsByStatus } from "../registrations/service";
 import {
   createEventSchema,
@@ -56,7 +58,29 @@ router.get("/events/:slug", async (c) => {
   // dialog never opened → empty body → backend rejected required fields). Detail page only.
   const active = await getActiveVersion(event.id);
   const form = active ? { version: active.versionNumber, schema: active.schemaJson } : null;
-  return c.json({ event: { ...publicEventView(event, computed), form } });
+
+  // Optional auth: if a viewer is logged in, surface their own (non-cancelled) registration so the
+  // page can show a "view registration" CTA pre-click instead of the plain register button.
+  // Anonymous visitors (session === null) still get the page, just without these fields.
+  let myRegistrationId: string | null = null;
+  let myRegistrationStatus: (typeof registrations.$inferSelect)["status"] | null = null;
+  const session = await resolveSession(c);
+  if (session) {
+    const [reg] = await db
+      .select({ id: registrations.id, status: registrations.status })
+      .from(registrations)
+      .where(and(eq(registrations.eventId, event.id), eq(registrations.userId, session.userId)))
+      .limit(1);
+    // A cancelled reg must still allow re-registering → don't signal "already registered" for it.
+    if (reg && reg.status !== "cancelled") {
+      myRegistrationId = reg.id;
+      myRegistrationStatus = reg.status;
+    }
+  }
+
+  return c.json({
+    event: { ...publicEventView(event, computed), form, myRegistrationId, myRegistrationStatus },
+  });
 });
 
 // GET /e/:publicId — permanent QR URL: resolve by public_id → 302 to current /events/:slug.
