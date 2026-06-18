@@ -4,7 +4,7 @@
 // student_id/role are admin-only, so shown read-only here. Password change lives at /change-password.
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { KeyRound } from "lucide-react";
+import { KeyRound, ArrowRight } from "lucide-react";
 import { apiPatch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
@@ -210,6 +210,14 @@ function AccountForm() {
           </Button>
         </CardContent>
       </Card>
+
+      {/* Exit to the main events page once the user is done filling in their info. */}
+      <Button asChild className="w-full">
+        <Link href="/events">
+          ไปยังหน้ากิจกรรม
+          <ArrowRight className="size-4" />
+        </Link>
+      </Button>
     </div>
   );
 }

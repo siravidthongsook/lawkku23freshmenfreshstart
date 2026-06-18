@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils";
 const MIN = 10;
 const MAX = 128;
 // Single generic message for all claim failures — mirrors login (no enumeration).
-const GENERIC_ERROR = "ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบรหัสนักศึกษา/ชื่อผู้ใช้ และหมู่ของคุณ";
+const GENERIC_ERROR = "ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบรหัสนักศึกษา/ชื่อผู้ใช้ และบรรพของคุณ";
 
 // Claim response mirrors login: wrapped + snake_case (see src/modules/auth/routes.ts).
 type ClaimResponse = { user: { role: Role }; password_must_change: boolean };
@@ -47,6 +47,8 @@ export default function ClaimPage() {
   const [groupNumber, setGroupNumber] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  // PDPA consent — required to submit. Mock text for now; gate blocks submit until checked.
+  const [pdpaAgreed, setPdpaAgreed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // Refocus identifier after a failed claim so the user can retype without reaching for the field.
@@ -63,7 +65,7 @@ export default function ClaimPage() {
   const lengthOk = newPassword.length >= MIN && newPassword.length <= MAX;
   const matchOk = confirm.length > 0 && newPassword === confirm;
   const canSubmit =
-    !submitting && identifier.trim().length > 0 && groupOk && lengthOk && matchOk;
+    !submitting && identifier.trim().length > 0 && groupOk && lengthOk && matchOk && pdpaAgreed;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -86,12 +88,13 @@ export default function ClaimPage() {
         new_password: newPassword,
       });
       await refetch(); // populate auth context from the new session
-      // Mirror login redirect: must-change → /change-password, else role home.
+      // Claim sets the password here, so must-change shouldn't happen — keep the guard as a safety net.
       if (res.password_must_change) {
         router.replace("/change-password");
         return;
       }
-      router.replace(roleHome(res.user.role));
+      // After claim, send the user to their account page to fill in more info (then they can go to /events).
+      router.replace("/me");
     } catch (err) {
       // Never leak account existence/claimed state. Generic message for all failures.
       if (err instanceof ApiError && err.status >= 500) {
@@ -122,10 +125,9 @@ export default function ClaimPage() {
         {/* Title on two lines: action label above, event name below */}
         <h1 className="text-center text-xl font-bold tracking-tight">
           <span className="block">ตั้งรหัสผ่านครั้งแรก</span>
-          <span className="block">LawKKUFreshmenFreshStart23</span>
         </h1>
         <p className="max-w-sm text-center text-sm text-muted-foreground">
-          สำหรับการเข้าใช้งานครั้งแรก กรอกรหัสนักศึกษา/ชื่อผู้ใช้ หมู่ของคุณ และตั้งรหัสผ่านใหม่
+          สำหรับการเข้าใช้งานครั้งแรก กรอกรหัสนักศึกษา/ชื่อผู้ใช้ บรรพของคุณ และตั้งรหัสผ่านใหม่
         </p>
       </div>
 
@@ -151,7 +153,7 @@ export default function ClaimPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="group">หมู่</Label>
+              <Label htmlFor="group">บรรพ</Label>
               <Input
                 id="group"
                 type="number"
@@ -198,6 +200,22 @@ export default function ClaimPage() {
               <Rule ok={lengthOk}>ความยาว {MIN}–{MAX} ตัวอักษร</Rule>
               <Rule ok={matchOk}>ยืนยันรหัสผ่านให้ตรงกัน</Rule>
             </ul>
+
+            {/* PDPA consent — required gate. Mock copy for now; submit stays disabled until checked. */}
+            <label htmlFor="pdpa" className="flex cursor-pointer items-start gap-2 text-xs text-muted-foreground">
+              <input
+                id="pdpa"
+                type="checkbox"
+                checked={pdpaAgreed}
+                onChange={(e) => setPdpaAgreed(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-primary"
+              />
+              <span>
+                ข้าพเจ้ายินยอมให้เก็บรวบรวมและใช้ข้อมูลส่วนบุคคลตาม
+                นโยบายความเป็นส่วนตัว (PDPA) ของกิจกรรม{" "}
+                <span className="text-muted-foreground/70">[ข้อความตัวอย่าง รอเนื้อหาจริง]</span>
+              </span>
+            </label>
 
             {error ? (
               <p role="alert" className="text-sm font-medium text-destructive">
