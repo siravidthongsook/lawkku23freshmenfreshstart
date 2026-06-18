@@ -1,4 +1,4 @@
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { db, type Tx } from "../../db/client";
 import { events, type Event } from "../../db/schema/events";
 import { registrations } from "../../db/schema/registrations";
@@ -103,6 +103,57 @@ export async function computeEventStatus(
       full,
     },
   };
+}
+
+// Server-computed effective registration state for an event (admin list/overview).
+// Single source of truth so the list badge stops drifting from the detail page's `computed`.
+// Mirrors computeEventStatus's self-register rule but collapses to one label kind.
+export type EventEffectiveState =
+  | "draft"
+  | "cancelled"
+  | "archived"
+  | "open" // published + self-register + within window + not full
+  | "full" // published + self-register + within window but capacity full
+  | "not_open" // published + self-register but outside the window
+  | "closed_mode"; // published but registrationMode isn't self-register
+
+export function effectiveState(event: Event, computed: EventComputed): EventEffectiveState {
+  if (event.status === "draft") return "draft";
+  if (event.status === "cancelled") return "cancelled";
+  if (event.status === "archived") return "archived";
+  // published
+  if (event.registrationMode !== "public_self_register") return "closed_mode";
+  if (computed.registrationOpen) return "open";
+  if (computed.capacity.full) return "full";
+  return "not_open";
+}
+
+// Per-status registration counts for many events in one query (avoids N+1 on the admin list).
+export async function countRegistrationsByStatusForEvents(
+  eventIds: string[],
+): Promise<Map<string, { registered: number; waitlisted: number; checked_in: number; cancelled: number }>> {
+  const result = new Map<
+    string,
+    { registered: number; waitlisted: number; checked_in: number; cancelled: number }
+  >();
+  for (const id of eventIds) {
+    result.set(id, { registered: 0, waitlisted: 0, checked_in: 0, cancelled: 0 });
+  }
+  if (eventIds.length === 0) return result;
+  const rows = await db
+    .select({
+      eventId: registrations.eventId,
+      status: registrations.status,
+      c: sql<number>`count(*)::int`,
+    })
+    .from(registrations)
+    .where(inArray(registrations.eventId, eventIds))
+    .groupBy(registrations.eventId, registrations.status);
+  for (const row of rows) {
+    const entry = result.get(row.eventId);
+    if (entry) entry[row.status] = row.c;
+  }
+  return result;
 }
 
 // Public-safe projection — no internal admin/audit fields. Shape MUST match the frontend

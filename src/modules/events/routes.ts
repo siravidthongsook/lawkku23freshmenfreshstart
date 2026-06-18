@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { stream } from "hono/streaming";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { db } from "../../db/client";
 import { events } from "../../db/schema/events";
 import { requireAuth, requirePermission, requestMeta } from "../../lib/auth-middleware";
@@ -9,12 +9,19 @@ import { badRequest, notFound } from "../../lib/errors";
 import { canManageEvents } from "../../lib/permissions";
 import { writeAudit } from "../../lib/audit";
 import { storage, buildEventPosterKey } from "../../lib/storage";
-import { computeEventStatus, ensureUniqueSlug, publicEventView } from "./service";
+import {
+  computeEventStatus,
+  countRegistrationsByStatusForEvents,
+  effectiveState,
+  ensureUniqueSlug,
+  publicEventView,
+} from "./service";
 import { getActiveVersion } from "../forms/service";
 import { resolveSession } from "../../lib/session";
 import { registrations } from "../../db/schema/registrations";
 import { countRegistrationsByStatus } from "../registrations/service";
 import {
+  adminEventsQuerySchema,
   createEventSchema,
   eventIdParam,
   publicIdParam,
@@ -148,10 +155,58 @@ router.get("/events/:publicId/poster", async (c) => {
 router.use("/admin/events", requireAuth, requirePermission(canManageEvents));
 router.use("/admin/events/*", requireAuth, requirePermission(canManageEvents));
 
-// GET /admin/events — all events incl. draft/archived.
+// GET /admin/events — all events incl. draft/archived. Supports text search (title/slug),
+// status filter, and limit/offset pagination. Each row carries server-computed effective state
+// + per-status counts so the list never drifts from the detail page or recomputes on the client.
 router.get("/admin/events", async (c) => {
-  const rows = await db.select().from(events).orderBy(desc(events.createdAt));
-  return c.json({ events: rows });
+  const query = adminEventsQuerySchema.parse(c.req.query());
+
+  // WHERE: optional status + case-insensitive title/slug match.
+  const conds: SQL[] = [];
+  if (query.status) conds.push(eq(events.status, query.status));
+  if (query.q) {
+    const like = `%${query.q}%`;
+    conds.push(or(ilike(events.title, like), ilike(events.publicSlug, like))!);
+  }
+  const where = conds.length ? and(...conds) : undefined;
+
+  // Total (pre-pagination) so the client can render "showing X of N" + disable Next correctly.
+  const [totalRow] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(events)
+    .where(where);
+  const total = totalRow?.total ?? 0;
+
+  const rows = await db
+    .select()
+    .from(events)
+    .where(where)
+    .orderBy(desc(events.createdAt))
+    .limit(query.limit)
+    .offset(query.offset);
+
+  // Batch active-counts in one query, then derive computed/effective-state per row.
+  const counts = await countRegistrationsByStatusForEvents(rows.map((e) => e.id));
+  const now = new Date();
+  const out = await Promise.all(
+    rows.map(async (e) => {
+      const cnt = counts.get(e.id)!;
+      const computed = await computeEventStatus(e, {
+        now,
+        activeCount: cnt.registered + cnt.checked_in,
+      });
+      return {
+        ...e,
+        registeredCount: cnt.registered,
+        checkedInCount: cnt.checked_in,
+        waitlistedCount: cnt.waitlisted,
+        cancelledCount: cnt.cancelled,
+        effectiveState: effectiveState(e, computed),
+      };
+    }),
+  );
+
+  return c.json({ events: out, total, limit: query.limit, offset: query.offset });
 });
 
 // POST /admin/events — create as draft. Auto slug (slugify title) unique; public_id defaultRandom.

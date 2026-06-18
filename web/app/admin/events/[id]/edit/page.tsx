@@ -14,6 +14,8 @@ export default function EditEventPage({ params }: { params: Promise<{ id: string
   const { id } = use(params);
   const [event, setEvent] = useState<EventAdmin | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Distinguish "not found" (404) from generic load errors so we can show a friendly state.
+  const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -22,12 +24,31 @@ export default function EditEventPage({ params }: { params: Promise<{ id: string
       .then((res) => active && setEvent(res.event))
       .catch((err) => {
         if (!active) return;
+        if (err instanceof ApiError && err.status === 404) {
+          setNotFound(true);
+          return;
+        }
         setError(err instanceof ApiError ? err.message : "ไม่สามารถโหลดกิจกรรมได้");
       });
     return () => {
       active = false;
     };
   }, [id]);
+
+  if (notFound) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 rounded-md border py-20 text-center">
+        <p className="text-lg font-medium">ไม่พบกิจกรรม</p>
+        <p className="text-sm text-muted-foreground">กิจกรรมนี้อาจถูกลบหรือลิงก์ไม่ถูกต้อง</p>
+        <Button asChild variant="outline" size="sm">
+          <Link href="/admin/events">
+            <ArrowLeft className="size-4" />
+            กลับไปที่รายการกิจกรรม
+          </Link>
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">

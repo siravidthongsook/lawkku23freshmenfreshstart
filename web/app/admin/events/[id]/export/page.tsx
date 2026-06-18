@@ -5,12 +5,13 @@
 // blob download. Times in the file are Bangkok with labeled columns (backend's job).
 // NOTE: backend exportFiltersSchema accepts only CSV output — no XLSX format param exists yet,
 // so we surface CSV only rather than offering a toggle the API can't honor.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { ApiError } from "@/lib/api";
+import { apiGet, ApiError } from "@/lib/api";
 import { exportFiltersSchema } from "@/lib/schemas";
+import { formatBangkok } from "@/lib/time";
 import { downloadFile, toQuery } from "@/components/admin-tools/download";
 import { bangkokInputToIso } from "@/components/admin-events/datetime";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -40,6 +41,14 @@ function localToIso(local: string): string | undefined {
   return bangkokInputToIso(local) ?? undefined;
 }
 
+// Form version row from GET /admin/events/:id/form/versions (id is the filter value).
+type FormVersionRow = {
+  id: string;
+  versionNumber: number;
+  isActive: boolean;
+  createdAt: string;
+};
+
 export default function EventExportPage() {
   const params = useParams<{ id: string }>();
   const eventId = params.id;
@@ -47,8 +56,20 @@ export default function EventExportPage() {
   const [status, setStatus] = useState<StatusFilter>("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const [formVersion, setFormVersion] = useState("");
+  const [formVersion, setFormVersion] = useState("all"); // "all" = no form-version filter
   const [pending, setPending] = useState<string | null>(null);
+
+  // Available form versions for the version filter dropdown (replaces the raw UUID input).
+  const [versions, setVersions] = useState<FormVersionRow[]>([]);
+  useEffect(() => {
+    let active = true;
+    apiGet<{ versions: FormVersionRow[] }>(`/admin/events/${eventId}/form/versions`)
+      .then((res) => active && setVersions(res.versions ?? []))
+      .catch(() => active && setVersions([])); // non-fatal — filter just stays empty
+    return () => {
+      active = false;
+    };
+  }, [eventId]);
 
   // Build + validate the filter query string from current inputs. Returns null on invalid input.
   function buildQuery(): string | null {
@@ -56,7 +77,7 @@ export default function EventExportPage() {
       ...(status !== "all" ? { status } : {}),
       ...(from ? { from: localToIso(from) } : {}),
       ...(to ? { to: localToIso(to) } : {}),
-      ...(formVersion.trim() ? { form_version: formVersion.trim() } : {}),
+      ...(formVersion !== "all" ? { form_version: formVersion } : {}),
     };
     const parsed = exportFiltersSchema.safeParse(candidate);
     if (!parsed.success) {
@@ -76,11 +97,18 @@ export default function EventExportPage() {
     if (qs === null) return;
     setPending(kind);
     try {
-      await downloadFile(
+      const { rowCount } = await downloadFile(
         `/admin/events/${eventId}/export/${kind}${qs}`,
         `event-${eventId}-${kind}.csv`,
       );
-      toast.success(`เริ่มส่งออก ${label} แล้ว`);
+      // Surface row count + warn on a zero-match export (empty CSV is easy to mistake for success).
+      if (rowCount === 0) {
+        toast.warning(`ส่งออก ${label} แล้ว แต่ไม่พบข้อมูลที่ตรงกับตัวกรอง (ไฟล์ว่าง)`);
+      } else if (rowCount != null) {
+        toast.success(`ดาวน์โหลด ${label} แล้ว (${rowCount} แถว)`);
+      } else {
+        toast.success(`ดาวน์โหลด ${label} แล้ว`);
+      }
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : `ไม่สามารถส่งออก ${label} ได้`);
     } finally {
@@ -138,13 +166,22 @@ export default function EventExportPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="fv">รหัสเวอร์ชันฟอร์ม</Label>
-              <Input
-                id="fv"
-                value={formVersion}
-                onChange={(e) => setFormVersion(e.target.value)}
-                placeholder="UUID (ไม่บังคับ)"
-              />
+              <Label>เวอร์ชันฟอร์ม</Label>
+              <Select value={formVersion} onValueChange={setFormVersion}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">ทุกเวอร์ชัน</SelectItem>
+                  {versions.map((v) => (
+                    <SelectItem key={v.id} value={v.id}>
+                      เวอร์ชัน {v.versionNumber}
+                      {v.isActive ? " (ใช้งานอยู่)" : ""}
+                      {v.createdAt ? ` — ${formatBangkok(v.createdAt)}` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
@@ -160,18 +197,21 @@ export default function EventExportPage() {
           title="สรุป"
           description="หนึ่งแถวต่อหนึ่งการลงทะเบียน: ข้อมูลระบุตัวตน สถานะ และเวลา"
           pending={pending === "registrations-summary"}
+          disabled={pending !== null}
           onExport={() => runExport("registrations-summary", "สรุป")}
         />
         <ExportCard
           title="เต็ม"
           description="ข้อมูลสรุปพร้อมคำตอบในฟอร์มและลิงก์ไฟล์ (ไม่รวมไฟล์ไบนารี)"
           pending={pending === "registrations-full"}
+          disabled={pending !== null}
           onExport={() => runExport("registrations-full", "เต็ม")}
         />
         <ExportCard
           title="การเข้าร่วม"
           description="เน้นการเช็คอิน: การเข้าร่วม เวลา วิธีการ และผู้ที่เช็คอินให้"
           pending={pending === "checkin-attendance"}
+          disabled={pending !== null}
           onExport={() => runExport("checkin-attendance", "การเข้าร่วม")}
         />
       </div>
@@ -183,11 +223,14 @@ function ExportCard({
   title,
   description,
   pending,
+  disabled,
   onExport,
 }: {
   title: string;
   description: string;
   pending: boolean;
+  // True while ANY export is running → disable this card too (avoid concurrent triple download).
+  disabled?: boolean;
   onExport: () => void;
 }) {
   return (
@@ -197,7 +240,7 @@ function ExportCard({
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-sm text-muted-foreground">{description}</p>
-        <Button onClick={onExport} disabled={pending}>
+        <Button onClick={onExport} disabled={pending || disabled}>
           {pending ? "กำลังเตรียม…" : "ดาวน์โหลด CSV"}
         </Button>
       </CardContent>

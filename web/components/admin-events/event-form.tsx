@@ -2,7 +2,7 @@
 
 // Shared create/edit event form. Used by /admin/events/new (mode="create") and /admin/events/[id]/edit.
 // Validates with createEventSchema/updateEventSchema before sending; sends ISO-UTC strings (backend coerces).
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { apiPost, apiPatch, ApiError } from "@/lib/api";
@@ -12,6 +12,7 @@ import {
   registrationModeEnum,
 } from "@/lib/schemas";
 import type { EventAdmin } from "@/lib/types";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -42,9 +43,25 @@ const REG_MODE_LABEL: Record<string, string> = {
   closed: "ปิด",
 };
 
+// Local slug format hint — matches backend slugify (letters/numbers/hyphen, lowercase).
+// We only validate the user's raw input for obviously-bad chars; backend normalizes on save.
+const SLUG_OK = /^[\p{L}\p{N}-]*$/u;
+
+// Drop one key from a record without mutating it.
+function omit(obj: Record<string, string>, key: string): Record<string, string> {
+  const { [key]: _, ...rest } = obj;
+  return rest;
+}
+
 export function EventForm({ mode, eventId, initial }: Props) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
+  // Per-field validation errors (keyed by field name). Cleared on edit + before each submit.
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  // Set once the user edits anything → drives the unsaved-changes guard. Cleared on successful save.
+  const [dirty, setDirty] = useState(false);
+  // Form element ref for scroll-to-first-error.
+  const formRef = useRef<HTMLFormElement>(null);
 
   // Form state. Times kept as Bangkok wall-clock strings for the datetime-local inputs.
   const [title, setTitle] = useState(initial?.title ?? "");
@@ -80,6 +97,35 @@ export function EventForm({ mode, eventId, initial }: Props) {
   );
   const [editCloseAt, setEditCloseAt] = useState(isoToBangkokInput(initial?.editRegistrationCloseAt));
 
+  // Warn before leaving with unsaved edits (tab close / in-app link). See use-unsaved-changes.
+  useUnsavedChanges(dirty);
+
+  // Wrap a setter so any edit marks the form dirty + clears that field's inline error.
+  function bind<T>(setter: (v: T) => void, field?: string) {
+    return (v: T) => {
+      setDirty(true);
+      if (field) setErrors((prev) => (prev[field] ? omit(prev, field) : prev));
+      setter(v);
+    };
+  }
+
+  // Live slug-format check (advisory; backend normalizes/dedupes on save).
+  const slugFormatError = useMemo(
+    () => (publicSlug.trim() !== "" && !SLUG_OK.test(publicSlug.trim())
+      ? "ใช้ได้เฉพาะตัวอักษร ตัวเลข และเครื่องหมายขีด (-) เท่านั้น"
+      : null),
+    [publicSlug],
+  );
+
+  // Scroll to + focus the first field that has an error (by name attribute).
+  function scrollToFirstError(errs: Record<string, string>) {
+    const first = Object.keys(errs)[0];
+    if (!first || !formRef.current) return;
+    const el = formRef.current.querySelector<HTMLElement>(`[data-field="${first}"]`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    el?.querySelector<HTMLElement>("input,textarea,[role=combobox]")?.focus();
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (saving) return;
@@ -107,91 +153,118 @@ export function EventForm({ mode, eventId, initial }: Props) {
       ...(publicSlug.trim() !== "" ? { publicSlug: publicSlug.trim() } : {}),
     };
 
-    // Client-side guard: capacity limit required when capacity enabled (mirrors backend invariant).
+    // Collect per-field errors so we can mark + scroll to the offending field (not just toast the first).
+    const fieldErrors: Record<string, string> = {};
+
+    if (title.trim() === "") fieldErrors.title = "กรุณากรอกชื่อกิจกรรม";
+    if (slugFormatError) fieldErrors.publicSlug = slugFormatError;
+
+    // Capacity limit required when capacity enabled (mirrors backend invariant).
     if (capacityEnabled && (capacityLimit === "" || Number(capacityLimit) <= 0)) {
-      toast.error("จำนวนที่รับต้องมากกว่า 0 เมื่อเปิดการจำกัดจำนวน");
-      return;
+      fieldErrors.capacityLimit = "จำนวนที่รับต้องมากกว่า 0 เมื่อเปิดการจำกัดจำนวน";
     }
 
-    // Client-side guard: each window's open must precede its close (only when both ends present).
+    // Each window's open must precede its close (only when both ends present).
     if (
       payload.registrationOpenAt &&
       payload.registrationCloseAt &&
       payload.registrationOpenAt >= payload.registrationCloseAt
     ) {
-      toast.error("เวลาเปิดลงทะเบียนต้องอยู่ก่อนเวลาปิดลงทะเบียน");
-      return;
+      fieldErrors.registrationCloseAt = "เวลาปิดลงทะเบียนต้องอยู่หลังเวลาเปิดลงทะเบียน";
     }
     if (
       payload.checkinOpenAt &&
       payload.checkinCloseAt &&
       payload.checkinOpenAt >= payload.checkinCloseAt
     ) {
-      toast.error("เวลาเปิดเช็คอินต้องอยู่ก่อนเวลาปิดเช็คอิน");
-      return;
+      fieldErrors.checkinCloseAt = "เวลาปิดเช็คอินต้องอยู่หลังเวลาเปิดเช็คอิน";
     }
     if (
       payload.eventStartAt &&
       payload.eventEndAt &&
       payload.eventStartAt >= payload.eventEndAt
     ) {
-      toast.error("เวลาเริ่มกิจกรรมต้องอยู่ก่อนเวลาสิ้นสุดกิจกรรม");
-      return;
+      fieldErrors.eventEndAt = "เวลาสิ้นสุดกิจกรรมต้องอยู่หลังเวลาเริ่มกิจกรรม";
     }
 
-    // Validate against the shared zod schema (coerces dates) before hitting the API.
+    // Validate against the shared zod schema (coerces dates); map any issues onto their field.
     const schema = mode === "create" ? createEventSchema : updateEventSchema;
     const parsed = schema.safeParse(payload);
     if (!parsed.success) {
-      toast.error(parsed.error.issues[0]?.message ?? "กรุณาตรวจสอบข้อมูลในฟอร์ม");
+      for (const issue of parsed.error.issues) {
+        const key = String(issue.path[0] ?? "");
+        if (key && !fieldErrors[key]) fieldErrors[key] = issue.message;
+      }
+    }
+
+    if (Object.keys(fieldErrors).length > 0) {
+      setErrors(fieldErrors);
+      scrollToFirstError(fieldErrors);
+      toast.error("กรุณาตรวจสอบข้อมูลในฟอร์ม");
       return;
     }
+    setErrors({});
 
     setSaving(true);
     try {
       if (mode === "create") {
         const res = await apiPost<{ event: { id: string } }>("/admin/events", payload);
+        setDirty(false); // saved → drop the unsaved-changes guard before navigating
         toast.success("สร้างกิจกรรมเป็นฉบับร่างแล้ว");
         router.push(`/admin/events/${res.event.id}`);
       } else {
         await apiPatch(`/admin/events/${eventId}`, payload);
+        setDirty(false);
         toast.success("อัปเดตกิจกรรมแล้ว");
         router.push(`/admin/events/${eventId}`);
       }
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "ไม่สามารถบันทึกกิจกรรมได้";
-      toast.error(msg);
+      // Slug collision (409) → attach to the slug field instead of an opaque toast.
+      // (Backend currently auto-dedupes slugs, so this is a defensive guard for future strict mode.)
+      if (err instanceof ApiError && (err.status === 409 || /slug/i.test(err.code))) {
+        const slugMsg = "Slug นี้ถูกใช้แล้ว กรุณาเลือก slug อื่น";
+        setErrors({ publicSlug: slugMsg });
+        scrollToFirstError({ publicSlug: slugMsg });
+        toast.error(slugMsg);
+      } else {
+        toast.error(err instanceof ApiError ? err.message : "ไม่สามารถบันทึกกิจกรรมได้");
+      }
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form ref={formRef} onSubmit={handleSubmit} className="space-y-6">
       <Card>
         <CardHeader>
           <CardTitle>ข้อมูลพื้นฐาน</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Field label="ชื่อกิจกรรม" required>
-            <Input value={title} onChange={(e) => setTitle(e.target.value)} required />
+          <Field label="ชื่อกิจกรรม" required name="title" error={errors.title}>
+            <Input value={title} onChange={(e) => bind(setTitle, "title")(e.target.value)} />
           </Field>
-          <Field label="Slug" hint="เว้นว่างไว้เพื่อสร้างอัตโนมัติจากชื่อ">
+          <Field
+            label="Slug"
+            name="publicSlug"
+            error={errors.publicSlug ?? slugFormatError ?? undefined}
+            hint="เว้นว่างไว้เพื่อสร้างอัตโนมัติจากชื่อ • ใช้ได้เฉพาะตัวอักษร ตัวเลข และขีด (-) เช่น my-event"
+          >
             <Input
               value={publicSlug}
-              onChange={(e) => setPublicSlug(e.target.value)}
+              onChange={(e) => bind(setPublicSlug, "publicSlug")(e.target.value)}
               placeholder="my-event"
             />
           </Field>
           <Field label="รายละเอียด">
             <Textarea
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              onChange={(e) => bind(setDescription)(e.target.value)}
               rows={4}
             />
           </Field>
           <Field label="สถานที่">
-            <Input value={location} onChange={(e) => setLocation(e.target.value)} />
+            <Input value={location} onChange={(e) => bind(setLocation)(e.target.value)} />
           </Field>
         </CardContent>
       </Card>
@@ -201,10 +274,17 @@ export function EventForm({ mode, eventId, initial }: Props) {
           <CardTitle>การลงทะเบียน</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Field label="รูปแบบการลงทะเบียน">
+          <Field
+            label="รูปแบบการลงทะเบียน"
+            hint={
+              registrationMode === "closed"
+                ? "ค่าเริ่มต้นคือ 'ปิด' — นักศึกษายังลงทะเบียนเองไม่ได้จนกว่าจะเลือก 'ลงทะเบียนเองแบบสาธารณะ'"
+                : undefined
+            }
+          >
             <Select
               value={registrationMode}
-              onValueChange={(v) => setRegistrationMode(v as typeof registrationMode)}
+              onValueChange={(v) => bind(setRegistrationMode)(v as typeof registrationMode)}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -227,14 +307,19 @@ export function EventForm({ mode, eventId, initial }: Props) {
               <Input
                 type="datetime-local"
                 value={registrationOpenAt}
-                onChange={(e) => setRegistrationOpenAt(e.target.value)}
+                onChange={(e) => bind(setRegistrationOpenAt)(e.target.value)}
               />
             </Field>
-            <Field label="ปิดลงทะเบียน (เวลาไทย)" hint="เว้นว่าง = ไม่มีกำหนด">
+            <Field
+              label="ปิดลงทะเบียน (เวลาไทย)"
+              name="registrationCloseAt"
+              error={errors.registrationCloseAt}
+              hint="เว้นว่าง = ไม่มีกำหนด"
+            >
               <Input
                 type="datetime-local"
                 value={registrationCloseAt}
-                onChange={(e) => setRegistrationCloseAt(e.target.value)}
+                onChange={(e) => bind(setRegistrationCloseAt, "registrationCloseAt")(e.target.value)}
               />
             </Field>
           </div>
@@ -251,28 +336,38 @@ export function EventForm({ mode, eventId, initial }: Props) {
               <Input
                 type="datetime-local"
                 value={eventStartAt}
-                onChange={(e) => setEventStartAt(e.target.value)}
+                onChange={(e) => bind(setEventStartAt)(e.target.value)}
               />
             </Field>
-            <Field label="สิ้นสุดกิจกรรม (เวลาไทย)" hint="เว้นว่าง = ไม่มีกำหนด">
+            <Field
+              label="สิ้นสุดกิจกรรม (เวลาไทย)"
+              name="eventEndAt"
+              error={errors.eventEndAt}
+              hint="เว้นว่าง = ไม่มีกำหนด"
+            >
               <Input
                 type="datetime-local"
                 value={eventEndAt}
-                onChange={(e) => setEventEndAt(e.target.value)}
+                onChange={(e) => bind(setEventEndAt, "eventEndAt")(e.target.value)}
               />
             </Field>
             <Field label="เปิดเช็คอิน (เวลาไทย)" hint="เว้นว่าง = ไม่มีกำหนด">
               <Input
                 type="datetime-local"
                 value={checkinOpenAt}
-                onChange={(e) => setCheckinOpenAt(e.target.value)}
+                onChange={(e) => bind(setCheckinOpenAt)(e.target.value)}
               />
             </Field>
-            <Field label="ปิดเช็คอิน (เวลาไทย)" hint="เว้นว่าง = ไม่มีกำหนด">
+            <Field
+              label="ปิดเช็คอิน (เวลาไทย)"
+              name="checkinCloseAt"
+              error={errors.checkinCloseAt}
+              hint="เว้นว่าง = ไม่มีกำหนด"
+            >
               <Input
                 type="datetime-local"
                 value={checkinCloseAt}
-                onChange={(e) => setCheckinCloseAt(e.target.value)}
+                onChange={(e) => bind(setCheckinCloseAt, "checkinCloseAt")(e.target.value)}
               />
             </Field>
           </div>
@@ -288,19 +383,19 @@ export function EventForm({ mode, eventId, initial }: Props) {
             label="เปิดใช้งานการจำกัดจำนวนที่รับ"
             checked={capacityEnabled}
             // Turning capacity off makes waitlist meaningless — clear it too.
-            onChange={(v) => {
+            onChange={bind((v: boolean) => {
               setCapacityEnabled(v);
               if (!v) setWaitlistEnabled(false);
-            }}
+            })}
             hint="นับเฉพาะผู้ที่ลงทะเบียนและเช็คอินแล้ว"
           />
           {capacityEnabled && (
-            <Field label="จำนวนที่รับ" required>
+            <Field label="จำนวนที่รับ" required name="capacityLimit" error={errors.capacityLimit}>
               <Input
                 type="number"
                 min={1}
                 value={capacityLimit}
-                onChange={(e) => setCapacityLimit(e.target.value)}
+                onChange={(e) => bind(setCapacityLimit, "capacityLimit")(e.target.value)}
               />
             </Field>
           )}
@@ -308,7 +403,7 @@ export function EventForm({ mode, eventId, initial }: Props) {
           <Checkbox
             label="เปิดใช้งานรายชื่อสำรองเมื่อเต็ม"
             checked={waitlistEnabled}
-            onChange={setWaitlistEnabled}
+            onChange={bind(setWaitlistEnabled)}
             disabled={!capacityEnabled}
             hint={!capacityEnabled ? "ต้องเปิดการจำกัดจำนวนก่อน" : undefined}
           />
@@ -323,14 +418,14 @@ export function EventForm({ mode, eventId, initial }: Props) {
           <Checkbox
             label="อนุญาตให้นักศึกษายกเลิกการลงทะเบียนของตนเอง"
             checked={allowStudentCancel}
-            onChange={setAllowStudentCancel}
+            onChange={bind(setAllowStudentCancel)}
           />
           {allowStudentCancel && (
             <Field label="ปิดการยกเลิก (เวลาไทย)" hint="เว้นว่าง = ไม่มีกำหนดเวลา">
               <Input
                 type="datetime-local"
                 value={cancelCloseAt}
-                onChange={(e) => setCancelCloseAt(e.target.value)}
+                onChange={(e) => bind(setCancelCloseAt)(e.target.value)}
               />
             </Field>
           )}
@@ -338,21 +433,27 @@ export function EventForm({ mode, eventId, initial }: Props) {
           <Checkbox
             label="อนุญาตให้นักศึกษาแก้ไขคำตอบของตนเอง"
             checked={allowStudentEdit}
-            onChange={setAllowStudentEdit}
+            onChange={bind(setAllowStudentEdit)}
           />
           {allowStudentEdit && (
             <Field label="ปิดการแก้ไข (เวลาไทย)" hint="เว้นว่าง = ไม่มีกำหนดเวลา">
               <Input
                 type="datetime-local"
                 value={editCloseAt}
-                onChange={(e) => setEditCloseAt(e.target.value)}
+                onChange={(e) => bind(setEditCloseAt)(e.target.value)}
               />
             </Field>
           )}
         </CardContent>
       </Card>
 
-      <div className="flex items-center justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {/* Make the draft rule visible before submit (was only a post-submit toast). */}
+        {mode === "create" ? (
+          <span className="mr-auto text-xs text-muted-foreground">
+            กิจกรรมจะถูกสร้างเป็น “ฉบับร่าง” — เผยแพร่ภายหลังจากหน้าภาพรวม
+          </span>
+        ) : null}
         <Button type="button" variant="outline" onClick={() => router.back()} disabled={saving}>
           ยกเลิก
         </Button>
@@ -364,26 +465,34 @@ export function EventForm({ mode, eventId, initial }: Props) {
   );
 }
 
-// Small labelled field wrapper.
+// Small labelled field wrapper. `name` tags the field for scroll-to-error; `error` shows inline.
 function Field({
   label,
   required,
   hint,
+  name,
+  error,
   children,
 }: {
   label: string;
   required?: boolean;
   hint?: string;
+  name?: string;
+  error?: string;
   children: React.ReactNode;
 }) {
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-1.5" data-field={name}>
       <Label>
         {label}
         {required ? <span className="text-destructive"> *</span> : null}
       </Label>
       {children}
-      {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+      {error ? (
+        <p className="text-xs text-destructive">{error}</p>
+      ) : hint ? (
+        <p className="text-xs text-muted-foreground">{hint}</p>
+      ) : null}
     </div>
   );
 }
@@ -415,7 +524,7 @@ function Checkbox({
           checked={checked}
           disabled={disabled}
           onChange={(e) => onChange(e.target.checked)}
-          className="size-4 rounded border-input"
+          className="size-4 rounded border-input accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         />
         {label}
       </label>
