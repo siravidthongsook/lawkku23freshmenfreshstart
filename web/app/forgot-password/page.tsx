@@ -4,9 +4,10 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
-// TODO(boss): replace with the real admin contact channel before launch.
-const SUPPORT_EMAIL = "TODO@example.com";
-const SUPPORT_LINE = "TODO";
+// Real admin contact channels (system issues only).
+const SUPPORT_FACEBOOK_URL = "https://www.facebook.com/profile.php?id=100064856854356";
+const SUPPORT_FACEBOOK_LABEL = "สโมสรนักศึกษา คณะนิติศาสตร์";
+const SUPPORT_PHONE = "062-190-0924"; // (เฟรม) — เฉพาะเรื่องระบบ
 
 export default function ForgotPasswordPage() {
   return (
@@ -25,17 +26,28 @@ export default function ForgotPasswordPage() {
             คุณจะได้รับรหัสผ่านชั่วคราว และจะถูกขอให้ตั้งรหัสผ่านใหม่ในการเข้าสู่ระบบครั้งถัดไป
           </p>
 
-          {/* Concrete contact channels so this page isn't a dead end. Values are placeholders — see TODO above. */}
+          {/* Concrete contact channels so this page isn't a dead end. */}
           <div className="rounded-md border bg-muted/40 p-3 text-sm">
             <p className="font-medium">ช่องทางติดต่อผู้ดูแลระบบ</p>
             <ul className="mt-1.5 space-y-1 text-muted-foreground">
               <li>
-                อีเมล:{" "}
-                <a href={`mailto:${SUPPORT_EMAIL}`} className="underline underline-offset-4">
-                  {SUPPORT_EMAIL}
+                Facebook:{" "}
+                <a
+                  href={SUPPORT_FACEBOOK_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline underline-offset-4"
+                >
+                  {SUPPORT_FACEBOOK_LABEL}
                 </a>
               </li>
-              <li>Line: {SUPPORT_LINE}</li>
+              <li>
+                เบอร์โทรศัพท์:{" "}
+                <a href={`tel:${SUPPORT_PHONE}`} className="underline underline-offset-4">
+                  {SUPPORT_PHONE}
+                </a>{" "}
+                (เฟรม) *เฉพาะเรื่องระบบ
+              </li>
             </ul>
           </div>
 
