@@ -29,6 +29,8 @@ import { TempPasswordDialog } from "@/components/admin-tools/temp-password-dialo
 import type { CreateUserResponse } from "@/components/admin-tools/wire";
 import type { Role } from "@/lib/types";
 
+type ProvisionMode = "temp_password" | "claim";
+
 const EMPTY = {
   email: "",
   student_id: "",
@@ -37,6 +39,7 @@ const EMPTY = {
   faculty: "",
   department: "",
   phone: "",
+  provision_mode: "temp_password" as ProvisionMode,
 };
 
 export function CreateUserDialog({
@@ -67,6 +70,7 @@ export function CreateUserDialog({
       email: form.email.trim(),
       role: form.role,
       full_name: form.full_name.trim(),
+      provision_mode: form.provision_mode,
       ...(form.student_id.trim() ? { student_id: form.student_id.trim() } : {}),
       ...(form.faculty.trim() ? { faculty: form.faculty.trim() } : {}),
       ...(form.department.trim() ? { department: form.department.trim() } : {}),
@@ -85,8 +89,13 @@ export function CreateUserDialog({
       onOpenChange(false);
       setForm({ ...EMPTY });
       onCreated();
-      // Show temp pw once if backend returned it; otherwise direct admin to the export page.
-      if (res.temp_password) {
+      // Claim accounts have no temp pw at all — tell the admin to send the user to /claim.
+      if (parsed.data.provision_mode === "claim") {
+        toast.message("สร้างบัญชีแบบเคลมแล้ว", {
+          description: "ผู้ใช้ต้องตั้งรหัสผ่านเองที่หน้าเคลม (/claim) ด้วยรหัสนักศึกษา",
+        });
+      } else if (res.temp_password) {
+        // Show temp pw once if backend returned it; otherwise direct admin to the export page.
         setCreatedEmail(res.user?.email ?? form.email);
         setTempPw(res.temp_password);
       } else {
@@ -145,6 +154,27 @@ export function CreateUserDialog({
                 value={form.student_id}
                 onChange={(e) => set("student_id", e.target.value)}
               />
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label>วิธีตั้งรหัสผ่าน</Label>
+              <Select
+                value={form.provision_mode}
+                onValueChange={(v) => set("provision_mode", v as ProvisionMode)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="temp_password">รหัสผ่านชั่วคราว (ระบบสร้างให้)</SelectItem>
+                  <SelectItem value="claim">ให้ผู้ใช้เคลมเอง (ไม่มีรหัสผ่าน)</SelectItem>
+                </SelectContent>
+              </Select>
+              {/* Claim mode needs an identifier; student_id is how the user claims. */}
+              {form.provision_mode === "claim" ? (
+                <p className="text-xs text-muted-foreground">
+                  ผู้ใช้จะตั้งรหัสผ่านเองที่ /claim ด้วยรหัสนักศึกษา (ต้องระบุรหัสนักศึกษา)
+                </p>
+              ) : null}
             </div>
             <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="cu-name">ชื่อ-นามสกุล</Label>

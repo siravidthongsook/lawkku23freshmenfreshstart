@@ -12,6 +12,11 @@ export const listUsersQuery = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
+// How a new/reset account gets its first password:
+//  - temp_password: admin-issued temp pw (hash set now, must_change=true) — user logs in + changes it.
+//  - claim: NO password (passwordHash NULL) — user self-claims at /claim with their identifier.
+export const provisionModeEnum = z.enum(["temp_password", "claim"]);
+
 // Create user — temp password is generated server-side, never accepted from client.
 // Students MUST have a student_id (they log in with email OR student_id).
 export const createUserSchema = z
@@ -23,9 +28,15 @@ export const createUserSchema = z
     faculty: z.string().trim().optional(),
     department: z.string().trim().optional(),
     phone: z.string().trim().optional(),
+    provision_mode: provisionModeEnum.default("temp_password"),
   })
   .refine((v) => v.role !== "student" || !!v.student_id, {
     message: "student_id is required for students",
+    path: ["student_id"],
+  })
+  // Claim matches on student_id/username only — a claimable account needs an identifier to claim with.
+  .refine((v) => v.provision_mode !== "claim" || !!v.student_id, {
+    message: "student_id is required for claim-mode accounts",
     path: ["student_id"],
   });
 
@@ -43,6 +54,10 @@ export const updateUserSchema = z
 
 // Reason-required mutations.
 export const reasonSchema = z.object({ reason: z.string().trim().min(1) });
+// Reset password — same reason gate, plus the provisioning mode (temp pw vs reset-to-claim).
+export const resetPasswordSchema = reasonSchema.extend({
+  mode: provisionModeEnum.default("temp_password"),
+});
 export const changeRoleSchema = z.object({ role: roleEnum, reason: z.string().trim().min(1) });
 
 export type ListUsersQuery = z.infer<typeof listUsersQuery>;

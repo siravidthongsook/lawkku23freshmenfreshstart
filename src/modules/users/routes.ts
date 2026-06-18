@@ -17,6 +17,7 @@ import {
   createUserSchema,
   listUsersQuery,
   reasonSchema,
+  resetPasswordSchema,
   updateUserSchema,
 } from "./schema";
 
@@ -85,8 +86,10 @@ router.post("/admin/users", zValidator("json", createUserSchema), async (c) => {
   await assertEmailFree(body.email, null);
   if (body.student_id) await assertStudentIdFree(body.student_id, null);
 
-  const tempPw = generateTempPassword();
-  const passwordHash = await hashPassword(tempPw);
+  // claim mode -> no password (hash NULL); user self-claims at /claim. temp_password -> admin-issued temp pw.
+  const claimMode = body.provision_mode === "claim";
+  const tempPw = claimMode ? null : generateTempPassword();
+  const passwordHash = tempPw ? await hashPassword(tempPw) : null;
 
   const created = await db.transaction(async (tx) => {
     const row = one(
@@ -100,18 +103,20 @@ router.post("/admin/users", zValidator("json", createUserSchema), async (c) => {
           faculty: body.faculty ?? null,
           department: body.department ?? null,
           phone: body.phone ?? null,
-          passwordHash,
-          passwordMustChange: true,
+          passwordHash, // NULL in claim mode = account not yet claimed
+          passwordMustChange: !claimMode, // claimed users set their own pw, no forced change
           createdByAdminId: admin.id,
         })
         .returning(),
     );
-    // Keep encrypted temp pw so admin can re-export until the user changes it.
-    await tx.insert(temporaryPasswords).values({
-      userId: row.id,
-      encryptedTempPassword: encryptSecret(tempPw),
-      createdByAdminId: admin.id,
-    });
+    // Only temp-pw accounts get an encrypted temp pw row (claim accounts have none to export).
+    if (tempPw) {
+      await tx.insert(temporaryPasswords).values({
+        userId: row.id,
+        encryptedTempPassword: encryptSecret(tempPw),
+        createdByAdminId: admin.id,
+      });
+    }
     await writeAudit(
       {
         actorUserId: admin.id,
@@ -120,7 +125,12 @@ router.post("/admin/users", zValidator("json", createUserSchema), async (c) => {
         entityType: "user",
         entityId: row.id,
         targetUserId: row.id,
-        newValue: { email: row.email, student_id: row.studentId, role: row.role },
+        newValue: {
+          email: row.email,
+          student_id: row.studentId,
+          role: row.role,
+          provision_mode: body.provision_mode,
+        },
         ...meta,
       },
       tx,
@@ -307,37 +317,50 @@ router.post("/admin/users/:userId/enable", async (c) => {
   return c.json({ user: publicUser(updated) });
 });
 
-// POST /admin/users/:userId/reset-password — new temp pw, update hash, upsert encrypted temp, revoke all sessions.
+// POST /admin/users/:userId/reset-password — two modes:
+//  - temp_password: new temp pw, set hash, upsert encrypted temp, revoke all sessions.
+//  - claim: wipe hash to NULL + drop any temp pw row, revoke all sessions -> user must re-claim at /claim.
 router.post(
   "/admin/users/:userId/reset-password",
   requirePermission(canResetPassword),
-  zValidator("json", reasonSchema),
+  zValidator("json", resetPasswordSchema),
   async (c) => {
     const admin = c.get("user");
     const meta = requestMeta(c);
-    const { reason } = c.req.valid("json");
+    const { reason, mode } = c.req.valid("json");
     const target = await getUserOr404(c.req.param("userId"));
 
-    const tempPw = generateTempPassword();
-    const passwordHash = await hashPassword(tempPw);
+    const claimMode = mode === "claim";
+    // Reset-to-claim needs an identifier to claim with (student_id/username), else the user is locked out.
+    if (claimMode && !target.studentId && !target.username) {
+      throw conflict("no_identifier", "user has no identifier (student_id/username) to claim with");
+    }
+
+    const tempPw = claimMode ? null : generateTempPassword();
+    const passwordHash = tempPw ? await hashPassword(tempPw) : null;
 
     await db.transaction(async (tx) => {
       await tx
         .update(users)
-        .set({ passwordHash, passwordMustChange: true, updatedAt: new Date() })
+        .set({ passwordHash, passwordMustChange: !claimMode, updatedAt: new Date() })
         .where(eq(users.id, target.id));
-      // Upsert encrypted temp so the new password can be exported.
-      await tx
-        .insert(temporaryPasswords)
-        .values({
-          userId: target.id,
-          encryptedTempPassword: encryptSecret(tempPw),
-          createdByAdminId: admin.id,
-        })
-        .onConflictDoUpdate({
-          target: temporaryPasswords.userId,
-          set: { encryptedTempPassword: encryptSecret(tempPw), createdByAdminId: admin.id, createdAt: new Date() },
-        });
+      if (tempPw) {
+        // Upsert encrypted temp so the new password can be exported.
+        await tx
+          .insert(temporaryPasswords)
+          .values({
+            userId: target.id,
+            encryptedTempPassword: encryptSecret(tempPw),
+            createdByAdminId: admin.id,
+          })
+          .onConflictDoUpdate({
+            target: temporaryPasswords.userId,
+            set: { encryptedTempPassword: encryptSecret(tempPw), createdByAdminId: admin.id, createdAt: new Date() },
+          });
+      } else {
+        // Claim mode: no temp pw exists for this account anymore — clear any stale one.
+        await tx.delete(temporaryPasswords).where(eq(temporaryPasswords.userId, target.id));
+      }
       await revokeAllSessions(target.id, tx);
       await writeAudit(
         {
@@ -348,6 +371,7 @@ router.post(
           entityId: target.id,
           targetUserId: target.id,
           reason,
+          newValue: { mode },
           ...meta,
         },
         tx,

@@ -62,6 +62,8 @@ export default function UserDetailPage() {
 
   // Mutation dialogs.
   const [resetOpen, setResetOpen] = useState(false);
+  // Reset mode: temp_password (admin-issued) vs claim (wipe pw -> user re-claims at /claim).
+  const [resetMode, setResetMode] = useState<"temp_password" | "claim">("temp_password");
   const [roleOpen, setRoleOpen] = useState(false);
   const [disableOpen, setDisableOpen] = useState(false); // reason-gated (logs user out everywhere)
   const [unlockOpen, setUnlockOpen] = useState(false); // confirm before clearing lockout
@@ -198,18 +200,27 @@ export default function UserDetailPage() {
     try {
       const res = await apiPost<ResetPasswordResponse>(`/admin/users/${id}/reset-password`, {
         reason,
+        mode: resetMode,
       });
       setResetOpen(false);
-      setHasPendingTempPw(true);
       setRevealedPw(null); // any previously-revealed pw is now stale
-      toast.success("รีเซ็ตรหัสผ่านแล้ว");
-      // Show new temp pw once if backend returns it; otherwise direct to export page.
-      if (res?.temp_password) {
-        setTempPw(res.temp_password);
-      } else {
-        toast.message("ไม่ได้แสดงรหัสผ่านชั่วคราว", {
-          description: "ส่งออกได้จากหน้ารหัสผ่านชั่วคราว",
+      if (resetMode === "claim") {
+        // Claim reset wipes the password — no pending temp pw remains.
+        setHasPendingTempPw(false);
+        toast.success("รีเซ็ตเป็นแบบเคลมแล้ว", {
+          description: "ผู้ใช้ต้องตั้งรหัสผ่านใหม่เองที่หน้าเคลม (/claim)",
         });
+      } else {
+        setHasPendingTempPw(true);
+        toast.success("รีเซ็ตรหัสผ่านแล้ว");
+        // Show new temp pw once if backend returns it; otherwise direct to export page.
+        if (res?.temp_password) {
+          setTempPw(res.temp_password);
+        } else {
+          toast.message("ไม่ได้แสดงรหัสผ่านชั่วคราว", {
+            description: "ส่งออกได้จากหน้ารหัสผ่านชั่วคราว",
+          });
+        }
       }
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "ไม่สามารถรีเซ็ตรหัสผ่านได้");
@@ -494,16 +505,33 @@ export default function UserDetailPage() {
         onConfirm={unlockUser}
       />
 
-      {/* Reason-gated reset password */}
+      {/* Reason-gated reset password — mode picks temp pw vs reset-to-claim */}
       <ReasonDialog
         open={resetOpen}
         onOpenChange={setResetOpen}
         title="รีเซ็ตรหัสผ่าน"
-        description="สร้างรหัสผ่านชั่วคราวใหม่ บังคับให้เปลี่ยนเมื่อเข้าสู่ระบบครั้งถัดไป และออกจากระบบของผู้ใช้ในทุกอุปกรณ์"
+        description={
+          resetMode === "claim"
+            ? "ล้างรหัสผ่านของผู้ใช้ และออกจากระบบทุกอุปกรณ์ ผู้ใช้ต้องตั้งรหัสผ่านใหม่เองที่หน้าเคลม (/claim)"
+            : "สร้างรหัสผ่านชั่วคราวใหม่ บังคับให้เปลี่ยนเมื่อเข้าสู่ระบบครั้งถัดไป และออกจากระบบของผู้ใช้ในทุกอุปกรณ์"
+        }
         confirmLabel="รีเซ็ตรหัสผ่าน"
         pending={pendingAction}
         onConfirm={resetPassword}
-      />
+      >
+        <div className="space-y-1.5">
+          <Label>วิธีรีเซ็ต</Label>
+          <Select value={resetMode} onValueChange={(v) => setResetMode(v as "temp_password" | "claim")}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="temp_password">รหัสผ่านชั่วคราว (ระบบสร้างให้)</SelectItem>
+              <SelectItem value="claim">ให้ผู้ใช้เคลมใหม่ (ไม่มีรหัสผ่าน)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </ReasonDialog>
 
       {/* Reason-gated change role */}
       <ReasonDialog
