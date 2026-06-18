@@ -69,6 +69,10 @@ export const visibilityChangeSchema = z.object({
 export const adminEventsQuerySchema = z.object({
   q: z.string().trim().max(300).optional(),
   status: eventStatusEnum.optional(),
+  // Sort: event-date desc/asc, title, or created. Default newest event date first.
+  sort: z
+    .enum(["date_desc", "date_asc", "title_asc", "created_desc"])
+    .default("date_desc"),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });

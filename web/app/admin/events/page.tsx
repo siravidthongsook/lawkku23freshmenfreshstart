@@ -55,6 +55,15 @@ const STATUS_FILTER: { value: string; label: string }[] = [
   { value: "archived", label: "เก็บถาวรแล้ว" },
 ];
 
+// Sort options. Default = newest event date first (matches public page's date sort, server-side).
+type SortKey = "date_desc" | "date_asc" | "title_asc" | "created_desc";
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: "date_desc", label: "วันที่จัดกิจกรรม: ใหม่สุดไปเก่าสุด" },
+  { value: "date_asc", label: "วันที่จัดกิจกรรม: เก่าสุดไปใหม่สุด" },
+  { value: "title_asc", label: "ชื่อกิจกรรม (ก–ฮ / A–Z)" },
+  { value: "created_desc", label: "เพิ่มล่าสุด" },
+];
+
 const PAGE_SIZE = 50;
 
 // Admin row now also carries the server-computed effectiveState (events service).
@@ -70,6 +79,7 @@ export default function AdminEventsPage() {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [status, setStatus] = useState("all");
+  const [sort, setSort] = useState<SortKey>("date_desc");
   const [offset, setOffset] = useState(0);
 
   // Debounce the text input so we don't refetch on every keystroke.
@@ -81,12 +91,13 @@ export default function AdminEventsPage() {
   // Reset to first page whenever the filters change.
   useEffect(() => {
     setOffset(0);
-  }, [debouncedSearch, status]);
+  }, [debouncedSearch, status, sort]);
 
   const load = useCallback(async () => {
     const qs = new URLSearchParams();
     if (debouncedSearch) qs.set("q", debouncedSearch);
     if (status !== "all") qs.set("status", status);
+    qs.set("sort", sort);
     qs.set("limit", String(PAGE_SIZE));
     qs.set("offset", String(offset));
 
@@ -104,7 +115,7 @@ export default function AdminEventsPage() {
     } finally {
       setReloading(false);
     }
-  }, [debouncedSearch, status, offset]);
+  }, [debouncedSearch, status, sort, offset]);
 
   useEffect(() => {
     void load();
@@ -143,6 +154,18 @@ export default function AdminEventsPage() {
           </SelectTrigger>
           <SelectContent>
             {STATUS_FILTER.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
+          <SelectTrigger className="w-full sm:w-64" aria-label="เรียงลำดับ">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SORT_OPTIONS.map((o) => (
               <SelectItem key={o.value} value={o.value}>
                 {o.label}
               </SelectItem>

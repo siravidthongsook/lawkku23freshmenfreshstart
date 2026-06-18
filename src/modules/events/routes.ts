@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { stream } from "hono/streaming";
-import { and, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { db } from "../../db/client";
 import { events } from "../../db/schema/events";
 import { requireAuth, requirePermission, requestMeta } from "../../lib/auth-middleware";
@@ -177,11 +177,22 @@ router.get("/admin/events", async (c) => {
     .where(where);
   const total = totalRow?.total ?? 0;
 
+  // Sort order. Event-date sorts keep null start dates last; counts aren't sortable
+  // server-side (computed post-query), so those options live on the client only if needed.
+  const orderBy =
+    query.sort === "date_asc"
+      ? sql`${events.eventStartAt} asc nulls last`
+      : query.sort === "title_asc"
+        ? asc(events.title)
+        : query.sort === "created_desc"
+          ? desc(events.createdAt)
+          : sql`${events.eventStartAt} desc nulls last`; // date_desc (default)
+
   const rows = await db
     .select()
     .from(events)
     .where(where)
-    .orderBy(desc(events.createdAt))
+    .orderBy(orderBy)
     .limit(query.limit)
     .offset(query.offset);
 
