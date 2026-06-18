@@ -52,7 +52,11 @@ export const createUserSchema = z
 // Edit profile — all optional; email/student_id must stay unique.
 export const updateUserSchema = z
   .object({
-    email: z.string().trim().toLowerCase().email().optional(), // normalize -> case-insensitive login match
+    // Email nullable: claim users have none. Blank string -> null (clears it).
+    email: z.preprocess(
+      (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+      z.string().trim().toLowerCase().email().nullable().optional(),
+    ),
     student_id: z.string().trim().min(1).nullable().optional(),
     full_name: z.string().trim().min(1).optional(),
     faculty: z.string().trim().nullable().optional(),

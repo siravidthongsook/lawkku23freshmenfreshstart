@@ -116,9 +116,10 @@ export default function UserDetailPage() {
     if (!user) return;
     // Send only changed fields; null clears nullable fields (student_id/faculty/department/phone).
     const patch: Record<string, string | number | null> = {};
-    if (form.email.trim() !== user.email) patch.email = form.email.trim();
     if (form.full_name.trim() !== user.full_name) patch.full_name = form.full_name.trim();
+    // email nullable (claim users have none): blank -> null, only send when changed.
     const optional: [keyof typeof form, string | null][] = [
+      ["email", user.email],
       ["student_id", user.student_id],
       ["faculty", user.faculty],
       ["department", user.department],

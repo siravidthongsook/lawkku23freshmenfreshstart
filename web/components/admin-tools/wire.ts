@@ -9,7 +9,7 @@ import type { ImportRowStatus } from "@/lib/types";
 // publicUser() in src/modules/users/routes.ts
 export type UserWire = {
   id: string;
-  email: string;
+  email: string | null; // claim users have none
   student_id: string | null;
   role: Role;
   full_name: string;
