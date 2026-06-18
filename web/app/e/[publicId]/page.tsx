@@ -13,7 +13,7 @@ import { EventStatusBadge } from "@/components/badges";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { galleryImage, eventTimeRange } from "@/components/public/event-helpers";
+import { galleryImage, eventTimeRange, capacityLabel } from "@/components/public/event-helpers";
 
 // Resolve response may be a redirect hint ({ slug }/{ publicSlug }) or a full event object.
 type ResolveResponse = Partial<EventPublic> & { slug?: string };
@@ -90,6 +90,7 @@ export default function PublicIdRedirectPage() {
 }
 
 function FallbackEvent({ event }: { event: EventPublic }) {
+  const cap = capacityLabel(event);
   return (
     <div className="mx-auto max-w-2xl">
       <div className="relative mb-6 aspect-[16/7] w-full overflow-hidden rounded-xl bg-muted">
@@ -101,20 +102,29 @@ function FallbackEvent({ event }: { event: EventPublic }) {
           className="object-cover"
           priority
         />
-        <div className="absolute left-3 top-3">
-          <EventStatusBadge status={event.status} />
-        </div>
+        {/* Students only ever see published events here — hide the admin "เผยแพร่แล้ว" badge; flag exceptional states only. */}
+        {event.status !== "published" ? (
+          <div className="absolute left-3 top-3">
+            <EventStatusBadge status={event.status} />
+          </div>
+        ) : null}
       </div>
       <h1 className="text-2xl font-bold tracking-tight">{event.title}</h1>
       <Card className="mt-4">
         <CardContent className="space-y-2 p-5">
           <p className="text-sm text-muted-foreground">{eventTimeRange(event)}</p>
           {event.location ? <p className="text-sm">{event.location}</p> : null}
+          {cap ? <p className="text-xs font-medium text-muted-foreground">{cap}</p> : null}
+          {/* Always provide a way forward: open the event page when we have a slug, else fall back to the list. */}
           {event.publicSlug ? (
             <Button className="mt-2" asChild>
-              <Link href={`/events/${event.publicSlug}`}>เปิดหน้ากิจกรรม</Link>
+              <Link href={`/events/${event.publicSlug}`}>เปิดหน้ากิจกรรมเพื่อลงทะเบียน</Link>
             </Button>
-          ) : null}
+          ) : (
+            <Button className="mt-2" variant="outline" asChild>
+              <Link href="/events">ดูกิจกรรมทั้งหมด</Link>
+            </Button>
+          )}
         </CardContent>
       </Card>
     </div>

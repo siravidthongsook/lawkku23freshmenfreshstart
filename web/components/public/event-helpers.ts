@@ -16,16 +16,22 @@ export function eventTimeRange(e: Pick<EventPublic, "eventStartAt" | "eventEndAt
   const end = formatBangkok(e.eventEndAt);
   if (start && end) return `${start} – ${end}`;
   if (start) return start;
-  return "Date to be announced";
+  return "จะประกาศวันและเวลาภายหลัง";
 }
 
-// Capacity display: "42 / 100", "42 registered", or null when not meaningful.
+// Capacity display: "42 / 100", "ลงทะเบียนแล้ว 42 คน", or null when not meaningful.
 export function capacityLabel(e: EventPublic): string | null {
   if (e.capacityEnabled && typeof e.capacityLimit === "number") {
     return `${e.registeredCount} / ${e.capacityLimit}`;
   }
-  if (typeof e.registeredCount === "number") return `${e.registeredCount} registered`;
+  if (typeof e.registeredCount === "number") return `ลงทะเบียนแล้ว ${e.registeredCount} คน`;
   return null;
+}
+
+// Seats remaining for a capacity-enabled event, clamped at 0. null when capacity isn't tracked.
+export function seatsRemaining(e: EventPublic): number | null {
+  if (!e.capacityEnabled || typeof e.capacityLimit !== "number") return null;
+  return Math.max(0, e.capacityLimit - (e.registeredCount ?? 0));
 }
 
 // True when capacity is enabled AND the limit has been reached (count >= limit).
@@ -75,9 +81,9 @@ export function registrationAction(e: EventPublic, now = new Date()): Registrati
   if (!inRegistrationWindow(e, now)) {
     const open = e.registrationOpenAt ? new Date(e.registrationOpenAt) : null;
     if (open && now < open) {
-      return { kind: "not_open", reason: `Registration opens ${formatBangkok(e.registrationOpenAt)}` };
+      return { kind: "not_open", reason: `เปิดรับลงทะเบียน ${formatBangkok(e.registrationOpenAt)}` };
     }
-    return { kind: "not_open", reason: "Registration is closed" };
+    return { kind: "not_open", reason: "ปิดรับลงทะเบียนแล้ว" };
   }
 
   if (isFull(e)) {

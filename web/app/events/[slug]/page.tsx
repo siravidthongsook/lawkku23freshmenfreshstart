@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import { apiGet, apiPost, ApiError } from "@/lib/api";
 import type { EventPublic } from "@/lib/types";
 import { useAuth } from "@/lib/auth";
@@ -23,6 +24,7 @@ import {
   galleryImage,
   eventTimeRange,
   capacityLabel,
+  seatsRemaining,
   extractEventForm,
   registrationAction,
   type RegistrationAction,
@@ -39,6 +41,10 @@ export default function EventDetailPage() {
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   const [formDialogOpen, setFormDialogOpen] = useState(false);
+  // Answers preserved across a mid-session login redirect (see submit()); restored once on return.
+  const [restoredAnswers, setRestoredAnswers] = useState<AnswerMap | null>(null);
+  // Registered count snapshot taken on a failed register submit — lets the dialog flag a silent capacity change.
+  const [capacityBeforeRetry, setCapacityBeforeRetry] = useState<number | null>(null);
 
   async function load() {
     setStatus("loading");
@@ -67,6 +73,20 @@ export default function EventDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
+  // On return from a mid-session login redirect: restore stashed answers + reopen the form dialog.
+  useEffect(() => {
+    if (!user || !slug) return;
+    try {
+      const raw = sessionStorage.getItem(`register-answers:${slug}`);
+      if (!raw) return;
+      sessionStorage.removeItem(`register-answers:${slug}`);
+      setRestoredAnswers(JSON.parse(raw) as AnswerMap);
+      setFormDialogOpen(true);
+    } catch {
+      // ignore unparseable/unavailable storage — student just re-enters answers
+    }
+  }, [user, slug]);
+
   // Active registration form (validated). When present, register must collect answers first.
   const registrationForm: FormSchema | null = event ? extractEventForm(event) : null;
 
@@ -89,6 +109,16 @@ export default function EventDetailPage() {
   async function submit(action: "register" | "waitlist", answers?: AnswerMap) {
     if (!event) return;
     if (!user) {
+      // Mid-session expiry: don't silently drop typed answers — stash them so we could restore on return,
+      // warn the student, and keep `next` so login bounces them straight back to this event.
+      if (answers && Object.keys(answers).length > 0) {
+        try {
+          sessionStorage.setItem(`register-answers:${slug}`, JSON.stringify(answers));
+        } catch {
+          // sessionStorage may be unavailable (private mode) — fall through to the warning only.
+        }
+        toast.warning("เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง คำตอบที่กรอกไว้จะถูกเก็บไว้ชั่วคราว");
+      }
       router.push(`/login?next=/events/${slug}`);
       return;
     }
@@ -114,7 +144,10 @@ export default function EventDetailPage() {
         return;
       }
       toast.error(err instanceof ApiError ? err.message : "เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง");
-      void load(); // refresh capacity/window state
+      // Capacity may have shifted under us — snapshot the current count so the dialog can flag a change after reload.
+      const before = event.registeredCount;
+      await load(); // refresh capacity/window state
+      setCapacityBeforeRetry(before);
     } finally {
       setSubmitting(false);
     }
@@ -140,10 +173,20 @@ export default function EventDetailPage() {
           {registrationForm ? (
             <RegisterFormDialog
               open={formDialogOpen}
-              onOpenChange={setFormDialogOpen}
+              onOpenChange={(o) => {
+                if (!o) setCapacityBeforeRetry(null); // clear stale notice when the dialog closes
+                setFormDialogOpen(o);
+              }}
               schema={registrationForm}
               eventTitle={event.title}
               submitting={submitting}
+              initialValues={restoredAnswers ?? undefined}
+              // Tell the student the seat count moved while they were filling the form.
+              notice={
+                capacityBeforeRetry !== null && capacityBeforeRetry !== event.registeredCount
+                  ? "จำนวนผู้ลงทะเบียนมีการเปลี่ยนแปลงระหว่างที่คุณกรอกแบบฟอร์ม กรุณาตรวจสอบที่นั่งคงเหลือก่อนส่งอีกครั้ง"
+                  : undefined
+              }
               onSubmit={(answers) => void submit("register", answers)}
             />
           ) : null}
@@ -164,9 +207,19 @@ function EventDetail({
 }) {
   const action = registrationAction(event);
   const cap = capacityLabel(event);
+  const remaining = seatsRemaining(event);
 
   return (
     <div className="grid gap-8 lg:grid-cols-3">
+      {/* Back link to the public list — present in the ready state so visitors aren't stranded. */}
+      <div className="lg:col-span-3 -mb-2">
+        <Button asChild variant="ghost" size="sm" className="px-2">
+          <Link href="/events">
+            <ArrowLeft className="size-4" />
+            กลับไปหน้ากิจกรรม
+          </Link>
+        </Button>
+      </div>
       <div className="lg:col-span-2">
         <div className="relative mb-6 aspect-[16/7] w-full overflow-hidden rounded-xl bg-muted">
           <Image
@@ -213,7 +266,20 @@ function EventDetail({
           <CardContent className="space-y-4 p-5">
             <InfoRow label="วันและเวลา" value={eventTimeRange(event)} />
             {event.location ? <InfoRow label="สถานที่" value={event.location} /> : null}
-            {cap ? <InfoRow label="จำนวนที่รับ" value={cap} /> : null}
+            {cap ? (
+              <InfoRow
+                label="จำนวนที่รับ"
+                value={cap}
+                // Scarcity framing: surface remaining seats; flag in amber when running low (≤10).
+                note={
+                  remaining === null
+                    ? undefined
+                    : remaining > 0
+                      ? { text: `เหลือ ${remaining} ที่นั่ง`, urgent: remaining <= 10 }
+                      : { text: "เต็มแล้ว", urgent: true }
+                }
+              />
+            ) : null}
             <InfoRow
               label="การลงทะเบียน"
               value={registrationWindowText(event)}
@@ -321,11 +387,24 @@ function registrationWindowText(e: EventPublic): string {
   return "เปิดรับ";
 }
 
-function InfoRow({ label, value }: { label: string; value: string }) {
+function InfoRow({
+  label,
+  value,
+  note,
+}: {
+  label: string;
+  value: string;
+  note?: { text: string; urgent?: boolean };
+}) {
   return (
     <div className="space-y-0.5">
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
       <p className="text-sm">{value}</p>
+      {note ? (
+        <p className={`text-xs font-medium ${note.urgent ? "text-amber-600" : "text-muted-foreground"}`}>
+          {note.text}
+        </p>
+      ) : null}
     </div>
   );
 }

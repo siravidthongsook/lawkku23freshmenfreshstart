@@ -45,6 +45,8 @@ export type RegistrationDetailResponse = {
   registration: StudentRegistration;
   answers: AnswerMap;
   fileIds: string[];
+  // OPTIONAL: rich file metadata (filename + mime) so downloads show real names; fileIds kept for back-compat.
+  files?: { id: string; filename: string; mimeType: string }[];
   qr: RegistrationQr;
   // OPTIONAL: event info for display (title/time/status) + whether edit/cancel are allowed right now.
   event?: {

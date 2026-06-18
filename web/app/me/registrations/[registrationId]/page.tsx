@@ -24,7 +24,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { QrTicket } from "@/components/student/qr-ticket";
-import { canOfferCancel, canOfferEdit, displayTitle } from "@/components/student/detail-helpers";
+import {
+  canOfferCancel,
+  canOfferEdit,
+  displayTitle,
+  extractFormSchema,
+} from "@/components/student/detail-helpers";
+import { ErrorState } from "@/components/ui/error-state";
 import type { RegistrationDetailResponse } from "@/components/student/types";
 
 // Render a single stored answer value (string/number/bool/array) in a readable form.
@@ -33,6 +39,29 @@ function renderAnswerValue(value: unknown): string {
   if (Array.isArray(value)) return value.length ? value.join(", ") : "—";
   if (typeof value === "boolean") return value ? "ใช่" : "ไม่ใช่";
   return String(value);
+}
+
+// Humanize a raw answer key for display when no schema label is available (e.g. q_phone → "Phone").
+function humanizeKey(key: string): string {
+  const stripped = key.replace(/^(q|field)[_-]/i, "").replace(/[_-]+/g, " ").trim();
+  return stripped ? stripped.charAt(0).toUpperCase() + stripped.slice(1) : key;
+}
+
+// Open a download in a new tab, but guard against popup blockers / failures so we don't strand the user.
+function openDownload(id: string) {
+  const w = window.open(`/api/files/${id}/download`, "_blank", "noopener");
+  if (!w) {
+    toast.error("ไม่สามารถเปิดไฟล์ได้ กรุณาอนุญาตป๊อปอัพแล้วลองอีกครั้ง");
+  }
+}
+
+// Why the QR ticket isn't shown — so the student isn't left wondering where their ticket is.
+function ticketAbsentReason(detail: RegistrationDetailResponse): string {
+  const s = detail.registration.status;
+  if (s === "cancelled") return "การลงทะเบียนนี้ถูกยกเลิกแล้ว จึงไม่มีบัตรเข้างาน";
+  if (s === "waitlisted") return "คุณอยู่ในรายชื่อสำรอง บัตรเข้างานจะออกให้เมื่อได้รับการยืนยันที่นั่ง";
+  if (detail.event?.status === "cancelled") return "กิจกรรมนี้ถูกยกเลิกแล้ว จึงไม่มีบัตรเข้างาน";
+  return "บัตรเข้างานยังไม่พร้อมใช้งานในขณะนี้";
 }
 
 function DetailInner({ registrationId }: { registrationId: string }) {
@@ -57,7 +86,12 @@ function DetailInner({ registrationId }: { registrationId: string }) {
     setCancelling(true);
     try {
       await apiPost(`/registrations/${registrationId}/cancel`);
-      toast.success("ยกเลิกการลงทะเบียนแล้ว");
+      // status is captured before the reload; branch the confirmation copy to match the action.
+      toast.success(
+        detail?.registration.status === "waitlisted"
+          ? "ออกจากรายชื่อสำรองแล้ว"
+          : "ยกเลิกการลงทะเบียนแล้ว",
+      );
       setCancelOpen(false);
       load();
     } catch (e) {
@@ -68,11 +102,7 @@ function DetailInner({ registrationId }: { registrationId: string }) {
   }
 
   if (error) {
-    return (
-      <Card>
-        <CardContent className="py-10 text-center text-sm text-muted-foreground">{error}</CardContent>
-      </Card>
-    );
+    return <ErrorState message={error} onRetry={load} />;
   }
   if (!detail) {
     return (
@@ -84,10 +114,17 @@ function DetailInner({ registrationId }: { registrationId: string }) {
     );
   }
 
-  const { registration, answers, fileIds, qr } = detail;
+  const { registration, answers, fileIds, files, qr } = detail;
   const answerEntries = Object.entries(answers ?? {});
   const showEdit = canOfferEdit(detail);
   const showCancel = canOfferCancel(detail);
+  // Resolve answer keys → human question labels via the registration's frozen form schema
+  // (/me/registrations/:id returns `form: { schema }`). Falls back to humanizing the raw key
+  // (q_phone → "Phone") when the reg predates forms or the schema is absent.
+  const schema = extractFormSchema(detail);
+  const labelByKey = new Map((schema?.fields ?? []).map((f) => [f.key, f.label] as const));
+  // Cancel copy differs by status: a confirmed seat is "released"; a waitlist spot is just "left".
+  const isWaitlisted = registration.status === "waitlisted";
 
   return (
     <div className="space-y-6">
@@ -117,13 +154,25 @@ function DetailInner({ registrationId }: { registrationId: string }) {
           {showCancel && (
             <Button variant="destructive" size="sm" onClick={() => setCancelOpen(true)}>
               <XCircle className="size-4" />
-              ยกเลิก
+              {isWaitlisted ? "ออกจากรายชื่อสำรอง" : "ยกเลิกการลงทะเบียน"}
             </Button>
           )}
         </div>
       </div>
 
-      <QrTicket qr={qr} />
+      {/* Show the ticket when eligible/available; otherwise explain why it's absent (no silent gap). */}
+      {qr.eligible && qr.available ? (
+        <QrTicket qr={qr} />
+      ) : (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">บัตรของคุณ</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">{ticketAbsentReason(detail)}</p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Event + registration info */}
       <Card>
@@ -177,7 +226,9 @@ function DetailInner({ registrationId }: { registrationId: string }) {
             <dl className="space-y-3 text-sm">
               {answerEntries.map(([key, value]) => (
                 <div key={key} className="space-y-0.5">
-                  <dt className="text-xs font-medium text-muted-foreground">{key}</dt>
+                  <dt className="text-xs font-medium text-muted-foreground">
+                    {labelByKey.get(key) ?? humanizeKey(key)}
+                  </dt>
                   <dd>{renderAnswerValue(value)}</dd>
                 </div>
               ))}
@@ -193,19 +244,19 @@ function DetailInner({ registrationId }: { registrationId: string }) {
             <CardTitle className="text-base">ไฟล์ที่อัปโหลด</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {fileIds.map((id, i) => (
-              <div key={id}>
-                {i > 0 && <Separator className="mb-2" />}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => window.open(`/api/files/${id}/download`, "_blank")}
-                >
-                  <Download className="size-4" />
-                  ดาวน์โหลดไฟล์ {fileIds.length > 1 ? i + 1 : ""}
-                </Button>
-              </div>
-            ))}
+            {fileIds.map((id, i) => {
+              // Prefer the real filename when the backend sends it; fall back to a numbered label.
+              const name = files?.find((f) => f.id === id)?.filename;
+              return (
+                <div key={id}>
+                  {i > 0 && <Separator className="mb-2" />}
+                  <Button variant="outline" size="sm" onClick={() => openDownload(id)}>
+                    <Download className="size-4" />
+                    {name ?? (fileIds.length > 1 ? `ดาวน์โหลดไฟล์ที่ ${i + 1}` : "ดาวน์โหลดไฟล์")}
+                  </Button>
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
       )}
@@ -213,17 +264,25 @@ function DetailInner({ registrationId }: { registrationId: string }) {
       <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>ยกเลิกการลงทะเบียน?</DialogTitle>
+            <DialogTitle>
+              {isWaitlisted ? "ออกจากรายชื่อสำรอง?" : "ยกเลิกการลงทะเบียน?"}
+            </DialogTitle>
             <DialogDescription>
-              การดำเนินการนี้จะคืนสิทธิ์ที่นั่งของคุณ คุณอาจลงทะเบียนใหม่ได้หากยังอยู่ในช่วงเวลาที่เปิดรับ
+              {isWaitlisted
+                ? "คุณจะถูกนำออกจากรายชื่อสำรองของกิจกรรมนี้ และจะไม่ได้รับการเลื่อนขึ้นหากมีที่นั่งว่าง คุณอาจเข้าร่วมรายชื่อสำรองใหม่ได้หากยังอยู่ในช่วงเวลาที่เปิดรับ"
+                : "การดำเนินการนี้จะคืนสิทธิ์ที่นั่งของคุณ คุณอาจลงทะเบียนใหม่ได้หากยังอยู่ในช่วงเวลาที่เปิดรับ"}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCancelOpen(false)} disabled={cancelling}>
-              เก็บการลงทะเบียนไว้
+              {isWaitlisted ? "อยู่ในรายชื่อสำรองต่อ" : "เก็บการลงทะเบียนไว้"}
             </Button>
             <Button variant="destructive" onClick={handleCancel} disabled={cancelling}>
-              {cancelling ? "กำลังยกเลิก..." : "ยกเลิกการลงทะเบียน"}
+              {cancelling
+                ? "กำลังดำเนินการ..."
+                : isWaitlisted
+                  ? "ออกจากรายชื่อสำรอง"
+                  : "ยกเลิกการลงทะเบียน"}
             </Button>
           </DialogFooter>
         </DialogContent>

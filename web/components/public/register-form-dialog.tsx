@@ -25,6 +25,10 @@ type Props = {
   eventTitle: string;
   submitting: boolean;
   onSubmit: (answers: AnswerMap) => void;
+  // Optional seed — used to restore answers preserved across a mid-session login redirect.
+  initialValues?: AnswerMap;
+  // Optional banner — e.g. "capacity changed while you were filling the form" after a failed submit.
+  notice?: string;
 };
 
 export function RegisterFormDialog({
@@ -34,8 +38,10 @@ export function RegisterFormDialog({
   eventTitle,
   submitting,
   onSubmit,
+  initialValues,
+  notice,
 }: Props) {
-  const [values, setValues] = useState<AnswerMap>({});
+  const [values, setValues] = useState<AnswerMap>(initialValues ?? {});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   // Sorted fields; file fields can't be uploaded pre-registration (no registrationId yet).
@@ -69,6 +75,11 @@ export function RegisterFormDialog({
           <DialogTitle>ลงทะเบียนกิจกรรม {eventTitle}</DialogTitle>
           <DialogDescription>กรุณากรอกแบบฟอร์มการลงทะเบียนด้านล่าง</DialogDescription>
         </DialogHeader>
+
+        {/* Capacity/state changed under the student between opening the form and submitting. */}
+        {notice ? (
+          <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">{notice}</p>
+        ) : null}
 
         {/* Backend gap: file uploads require a registration to exist first. */}
         {blockedByFile ? (

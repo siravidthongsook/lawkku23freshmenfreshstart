@@ -2,11 +2,13 @@
 
 // /me — account page. User edits own email + contact info (PATCH /auth/me).
 // student_id/role are admin-only, so shown read-only here. Password change lives at /change-password.
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { KeyRound } from "lucide-react";
 import { apiPatch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { RequireRole } from "@/components/guards";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
@@ -14,6 +16,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
+
+// Pragmatic email check — mirrors the browser's native validity without a heavyweight regex.
+function isValidEmail(v: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+}
 
 function AccountForm() {
   const { user, refetch } = useAuth();
@@ -26,6 +33,7 @@ function AccountForm() {
   const [phone, setPhone] = useState(user?.phone ?? "");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [emailConfirmOpen, setEmailConfirmOpen] = useState(false);
 
   // Re-seed if the context user changes (e.g. after refetch).
   useEffect(() => {
@@ -37,10 +45,27 @@ function AccountForm() {
     setPhone(user.phone ?? "");
   }, [user]);
 
+  // Dirty = any field differs from the loaded user. Drives the leave-warning + disables the save button.
+  const dirty = useMemo(() => {
+    if (!user) return false;
+    return (
+      email.trim() !== user.email ||
+      fullName.trim() !== user.fullName ||
+      faculty.trim() !== (user.faculty ?? "") ||
+      department.trim() !== (user.department ?? "") ||
+      phone.trim() !== (user.phone ?? "")
+    );
+  }, [user, email, fullName, faculty, department, phone]);
+
+  useUnsavedChanges(dirty);
+
+  // Email is the login credential — changing it can lock the user out, so confirm before persisting.
+  const emailChanged = user ? email.trim() !== user.email : false;
+
   if (!user) return null;
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  // Persist the profile. Separated from the submit handler so the email-change confirm can call it directly.
+  async function persist() {
     setError(null);
     setSubmitting(true);
     try {
@@ -61,6 +86,22 @@ function AccountForm() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    // Client-side email validation — avoid a round-trip with an obviously bad address.
+    if (!isValidEmail(email.trim())) {
+      setError("กรุณากรอกอีเมลให้ถูกต้อง");
+      return;
+    }
+    // Email change → confirm first (it changes the login credential).
+    if (emailChanged) {
+      setEmailConfirmOpen(true);
+      return;
+    }
+    void persist();
   }
 
   return (
@@ -136,12 +177,22 @@ function AccountForm() {
               </p>
             ) : null}
 
-            <Button type="submit" className="w-full" disabled={submitting}>
+            <Button type="submit" className="w-full" disabled={submitting || !dirty}>
               {submitting ? "กำลังบันทึก…" : "บันทึก"}
             </Button>
           </form>
         </CardContent>
       </Card>
+
+      {/* Confirm email (login credential) changes — clearing this risk of self-lockout. */}
+      <ConfirmDialog
+        open={emailConfirmOpen}
+        onOpenChange={setEmailConfirmOpen}
+        title="ยืนยันการเปลี่ยนอีเมล?"
+        description={`อีเมลนี้ใช้สำหรับเข้าสู่ระบบ หลังบันทึก คุณจะต้องใช้ "${email.trim()}" ในการเข้าสู่ระบบครั้งถัดไป`}
+        confirmLabel="ยืนยันและบันทึก"
+        onConfirm={persist}
+      />
 
       <Card>
         <CardContent className="flex items-center justify-between gap-4 p-6">
