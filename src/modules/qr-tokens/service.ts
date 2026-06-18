@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import type { Tx } from "../../db/client";
 import { db } from "../../db/client";
 import { registrationQrTokens } from "../../db/schema/qr";
-import { generateToken, hashToken } from "../../lib/crypto";
+import { generateToken, hashToken, encryptSecret, decryptSecret } from "../../lib/crypto";
 
 // Shared QR-token logic used by registration (issue on register / admin regen) + check-in (lookup).
 // Invariants: opaque token only, store hash not plaintext, max 1 active token per registration.
@@ -39,7 +39,8 @@ export async function issueQrToken(
   const token = generateToken();
   await exec.insert(registrationQrTokens).values({
     registrationId,
-    tokenHash: hashToken(token),
+    tokenHash: hashToken(token), // for scan lookup
+    tokenEnc: encryptSecret(token), // for owner re-display
     status: "active",
     createdByUserId,
   });
@@ -59,4 +60,25 @@ export async function hasActiveQrToken(exec: Exec, registrationId: string): Prom
     )
     .limit(1);
   return !!row;
+}
+
+// Decrypted active token plaintext for OWNER re-display (QR). Returns null when no active token, or
+// when it's a legacy row with no tokenEnc (pre-redisplay) — caller then falls back to the event URL.
+// Only ever call this for the registration's owner; the plaintext is the scan secret.
+export async function getActiveQrTokenForOwner(
+  exec: Exec,
+  registrationId: string,
+): Promise<string | null> {
+  const [row] = await exec
+    .select({ tokenEnc: registrationQrTokens.tokenEnc })
+    .from(registrationQrTokens)
+    .where(
+      and(
+        eq(registrationQrTokens.registrationId, registrationId),
+        eq(registrationQrTokens.status, "active"),
+      ),
+    )
+    .limit(1);
+  if (!row?.tokenEnc) return null;
+  return decryptSecret(row.tokenEnc);
 }

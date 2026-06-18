@@ -11,7 +11,12 @@ import { canManageEvents } from "../../lib/permissions";
 import { badRequest, conflict, forbidden, notFound } from "../../lib/errors";
 import { writeAudit } from "../../lib/audit";
 import { isWithinWindow } from "../../lib/time";
-import { issueQrToken, revokeActiveQrToken, hasActiveQrToken } from "../qr-tokens/service";
+import {
+  issueQrToken,
+  revokeActiveQrToken,
+  hasActiveQrToken,
+  getActiveQrTokenForOwner,
+} from "../qr-tokens/service";
 import {
   countActiveRegistrations,
   getActiveFormVersion,
@@ -349,7 +354,9 @@ router.get("/me/registrations/:registrationId", requireAuth, async (c) => {
     }
   }
   const eligible = qrEligible(reg.status, event.status);
-  const qrAvailable = eligible && (await hasActiveQrToken(db, reg.id));
+  // Owner-only: decrypt the active token so the QR encodes the real scan secret (not the event URL).
+  const qrToken = eligible ? await getActiveQrTokenForOwner(db, reg.id) : null;
+  const qrAvailable = eligible && qrToken != null;
 
   return c.json({
     registration: serializeRegistration(reg),
@@ -372,7 +379,7 @@ router.get("/me/registrations/:registrationId", requireAuth, async (c) => {
     // Rich file metadata (filename + mime) so the detail page can label downloads; fileIds kept for back-compat.
     files,
     form,
-    qr: { eligible, available: qrAvailable, publicEventId: event.publicId },
+    qr: { eligible, available: qrAvailable, publicEventId: event.publicId, token: qrToken },
   });
 });
 

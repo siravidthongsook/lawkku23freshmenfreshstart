@@ -4,7 +4,8 @@ import { qrTokenStatus } from "./enums";
 import { registrations } from "./registrations";
 import { users } from "./users";
 
-// Opaque token only (no PII). Store hash. Max 1 active token per registration.
+// Opaque token only (no PII). Store hash for scan lookup + encrypted plaintext for owner re-display.
+// Max 1 active token per registration.
 export const registrationQrTokens = pgTable(
   "registration_qr_tokens",
   {
@@ -13,6 +14,10 @@ export const registrationQrTokens = pgTable(
       .notNull()
       .references(() => registrations.id),
     tokenHash: text("token_hash").notNull().unique(),
+    // Encrypted-at-rest plaintext token (AES-GCM) so the OWNER can re-display the QR on any device.
+    // Scan still verifies via tokenHash; decrypted only for the owning student. Nullable for legacy
+    // rows issued before re-display existed (reissued via backfill).
+    tokenEnc: text("token_enc"),
     status: qrTokenStatus("status").notNull().default("active"),
     createdByUserId: uuid("created_by_user_id").references(() => users.id),
     revokedByUserId: uuid("revoked_by_user_id").references(() => users.id),

@@ -1,0 +1,1 @@
+ALTER TABLE "registration_qr_tokens" ADD COLUMN "token_enc" text;

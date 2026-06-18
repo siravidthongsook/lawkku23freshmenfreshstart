@@ -19,7 +19,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx --env-file-if-exists=.env src/db/migrate.ts",
     "db:push": "drizzle-kit push",
-    "db:seed": "tsx --env-file-if-exists=.env src/db/seed.ts"
+    "db:seed": "tsx --env-file-if-exists=.env src/db/seed.ts",
+    "db:backfill-qr": "tsx --env-file-if-exists=.env src/db/backfill-qr-token-enc.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
