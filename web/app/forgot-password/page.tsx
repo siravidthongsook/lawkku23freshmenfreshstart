@@ -58,7 +58,7 @@ export default function ForgotPasswordPage() {
               </li>
             </ul>
             {/* Ask users to leave a reachable contact so the admin can follow up. */}
-            <p className="mt-2 text-xs text-muted-foreground">
+            <p className="mt-2 text-xs font-medium text-red-600">
               สำคัญ: เมื่อติดต่อ กรุณาแจ้งช่องทางติดต่อกลับของคุณ (เช่น เบอร์โทร/อีเมล/Facebook)
               เพื่อให้ผู้ดูแลระบบติดต่อกลับได้
             </p>
