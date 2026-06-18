@@ -143,6 +143,7 @@ export default function ClaimPage() {
                 inputMode="text"
                 autoComplete="username"
                 autoCapitalize="none"
+                placeholder="693270XXX-X"
                 value={identifier}
                 onChange={(e) => {
                   setIdentifier(e.target.value);
