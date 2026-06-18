@@ -13,6 +13,8 @@ const ibmPlexSansThai = IBM_Plex_Sans_Thai({
 });
 
 export const metadata: Metadata = {
+  // metadataBase makes auto opengraph-image.png resolve to an absolute URL (FB/LINE need absolute).
+  metadataBase: new URL("https://lawkku23freshmenfreshstart.space"),
   title: "LawKKUFreshmenFreshStart23",
   description: "ระบบลงทะเบียนและเช็คอินกิจกรรมนักศึกษา",
 };

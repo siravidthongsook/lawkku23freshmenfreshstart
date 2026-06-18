@@ -103,7 +103,7 @@ export default function ChangePasswordPage() {
     <div className="flex min-h-dvh flex-col items-center justify-center bg-muted/30 px-4 py-12">
       <div className="mb-6 flex flex-col items-center gap-3">
         <Link href="/events" aria-label="หน้าแรก LawKKUFreshmenFreshStart23">
-          <Image src="/brand/platformlogo.png" alt="LawKKUFreshmenFreshStart23" width={56} height={56} className="rounded-xl" priority />
+          <Image src="/brand/platformlogo.png" alt="LawKKUFreshmenFreshStart23" width={112} height={56} className="h-14 w-auto" priority />
         </Link>
         <h1 className="text-xl font-bold tracking-tight">
           {forced ? "ตั้งรหัสผ่านใหม่" : "เปลี่ยนรหัสผ่าน"}

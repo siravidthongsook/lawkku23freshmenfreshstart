@@ -15,12 +15,13 @@ export function SiteHeader() {
           className="flex min-w-0 items-center gap-2.5"
           aria-label="หน้าแรก LawKKUFreshmenFreshStart23"
         >
+          {/* Wide wordmark logo (~2:1) — keep aspect, don't force square. */}
           <Image
             src="/brand/platformlogo.png"
             alt="LawKKUFreshmenFreshStart23"
-            width={32}
+            width={64}
             height={32}
-            className="shrink-0 rounded-md"
+            className="h-8 w-auto shrink-0"
             priority
           />
           <span className="truncate text-base font-semibold tracking-tight">LawKKUFreshmenFreshStart23</span>
