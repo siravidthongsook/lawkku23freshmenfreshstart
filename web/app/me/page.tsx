@@ -38,7 +38,7 @@ function AccountForm() {
   // Re-seed if the context user changes (e.g. after refetch).
   useEffect(() => {
     if (!user) return;
-    setEmail(user.email);
+    setEmail(user.email ?? ""); // imported users have no email → empty string, not null
     setFullName(user.fullName);
     setFaculty(user.faculty ?? "");
     setDepartment(user.department ?? "");
@@ -49,7 +49,7 @@ function AccountForm() {
   const dirty = useMemo(() => {
     if (!user) return false;
     return (
-      email.trim() !== user.email ||
+      email.trim() !== (user.email ?? "") ||
       fullName.trim() !== user.fullName ||
       faculty.trim() !== (user.faculty ?? "") ||
       department.trim() !== (user.department ?? "") ||
@@ -60,7 +60,7 @@ function AccountForm() {
   useUnsavedChanges(dirty);
 
   // Email is the login credential — changing it can lock the user out, so confirm before persisting.
-  const emailChanged = user ? email.trim() !== user.email : false;
+  const emailChanged = user ? email.trim() !== (user.email ?? "") : false;
 
   if (!user) return null;
 
@@ -69,14 +69,16 @@ function AccountForm() {
     setError(null);
     setSubmitting(true);
     try {
-      // Send empty contact fields as null (clears them); email/full_name required non-empty.
-      await apiPatch("/auth/me", {
-        email: email.trim(),
+      // Send empty contact fields as null (clears them); full_name required non-empty.
+      // Email is optional (imported users have none) — omit when blank; backend rejects "".
+      const body: Record<string, unknown> = {
         full_name: fullName.trim(),
         faculty: faculty.trim() || null,
         department: department.trim() || null,
         phone: phone.trim() || null,
-      });
+      };
+      if (email.trim()) body.email = email.trim();
+      await apiPatch("/auth/me", body);
       await refetch();
       toast.success("บันทึกข้อมูลเรียบร้อยแล้ว");
     } catch (err) {
@@ -91,8 +93,8 @@ function AccountForm() {
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    // Client-side email validation — avoid a round-trip with an obviously bad address.
-    if (!isValidEmail(email.trim())) {
+    // Email is optional (imported users have none); only validate format if one was entered.
+    if (email.trim() && !isValidEmail(email.trim())) {
       setError("กรุณากรอกอีเมลให้ถูกต้อง");
       return;
     }

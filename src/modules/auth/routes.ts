@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
-import { and, eq, ne, or, sql } from "drizzle-orm";
+import { and, eq, isNull, ne, or, sql } from "drizzle-orm";
 import type { AppVariables } from "../../lib/context";
 import { db } from "../../db/client";
 import { users, temporaryPasswords } from "../../db/schema/users";
@@ -14,7 +14,7 @@ import {
   revokeSession,
 } from "../../lib/session";
 import { writeAudit } from "../../lib/audit";
-import { changePasswordSchema, loginSchema, updateOwnProfileSchema } from "./schema";
+import { changePasswordSchema, claimSchema, loginSchema, updateOwnProfileSchema } from "./schema";
 import { checkRateLimit, recordAttempt } from "./service";
 
 const router = new Hono<{ Variables: AppVariables }>();
@@ -30,16 +30,17 @@ router.post("/auth/login", zValidator("json", loginSchema), async (c) => {
   const log = c.get("log");
   log.set("identifier", identifier); // who is trying (not a secret); password never logged
 
-  // Resolve by email OR student_id. Lookup is cheap; password work still gated behind rate-limit below.
+  // Resolve by email OR student_id OR username. Lookup is cheap; password work still gated behind rate-limit below.
   const [user] = await db
     .select()
     .from(users)
     // Email match is case-insensitive (emails are case-insensitive in practice);
-    // student_id stays exact. Fixes login failing when typed email casing != stored.
+    // student_id + username (e.g. staff-01) stay exact. Fixes login failing when typed email casing != stored.
     .where(
       or(
         sql`lower(${users.email}) = lower(${identifier})`,
         eq(users.studentId, identifier),
+        eq(users.username, identifier),
       ),
     )
     .limit(1);
@@ -61,8 +62,13 @@ router.post("/auth/login", zValidator("json", loginSchema), async (c) => {
     throw new AppError(429, "rate_limited", "Too many attempts. Try again later.");
   }
 
-  // Same generic path whether user is missing, disabled, or password wrong.
-  const ok = user && user.status === "active" && (await verifyPassword(user.passwordHash, password));
+  // Same generic path whether user is missing, disabled, unclaimed (null hash), or password wrong.
+  // Null passwordHash = account not yet claimed — never reveal that, falls through to generic error.
+  const ok =
+    user &&
+    user.status === "active" &&
+    user.passwordHash !== null &&
+    (await verifyPassword(user.passwordHash, password));
   log.event("credential_check", { ok: !!ok });
   if (!ok) {
     const { justLocked } = await recordAttempt(rlKey, meta.ipAddress, false);
@@ -81,6 +87,102 @@ router.post("/auth/login", zValidator("json", loginSchema), async (c) => {
   await recordAttempt(rlKey, meta.ipAddress, true);
   await createSession(c, user);
   log.set("userId", user.id).set("role", user.role);
+  return c.json({
+    user: publicUser(user),
+    password_must_change: user.passwordMustChange,
+  });
+});
+
+// POST /auth/claim — imported (email-less) user proves identity (identifier + group) and sets first password.
+// identifier = student_id (students) OR username e.g. staff-01 (staff). Only unclaimed accounts (null hash) match.
+// Every mismatch (not found / wrong group / already claimed) returns the SAME generic error — no enumeration.
+router.post("/auth/claim", zValidator("json", claimSchema), async (c) => {
+  const { identifier, group_number, new_password } = c.req.valid("json");
+  const meta = requestMeta(c);
+  const log = c.get("log");
+  log.set("identifier", identifier); // who is claiming (not a secret); password never logged
+
+  // These users have no email — rate-limit key is the identifier itself (shares login's lockout machinery).
+  const rlKey = identifier.toLowerCase();
+
+  // Rate-limit / lockout gate runs before any DB work or hashing.
+  const rl = await checkRateLimit(rlKey, meta.ipAddress);
+  if (rl.blocked) {
+    await writeAudit({
+      action: rl.lockedUntil ? "account_temporarily_locked" : "login_failed_rate_limited",
+      entityType: "auth",
+      metadata: { identifier, locked_until: rl.lockedUntil?.toISOString() ?? null },
+      ...meta,
+    });
+    throw new AppError(429, "rate_limited", "Too many attempts. Try again later.");
+  }
+
+  // Validate password policy BEFORE the identity lookup — identity-independent so a weak password
+  // returns the same 400 whether or not the (identifier, group) tuple exists. Avoids enumeration:
+  // a post-lookup-only 400 would distinguish a valid unclaimed account from an invalid one.
+  const policyErr = validatePasswordPolicy(new_password);
+  if (policyErr) throw badRequest("weak_password", policyErr);
+
+  // Match unclaimed account by (student_id OR username) + group + active status. Null hash = not yet claimed.
+  const [user] = await db
+    .select()
+    .from(users)
+    .where(
+      and(
+        or(eq(users.studentId, identifier), eq(users.username, identifier)),
+        eq(users.groupNumber, group_number),
+        isNull(users.passwordHash),
+        eq(users.status, "active"),
+      ),
+    )
+    .limit(1);
+  log.event("claim_lookup", { found: !!user });
+
+  // Any mismatch → same generic invalid-credentials path as login (counts toward lockout). No enumeration.
+  if (!user) {
+    const { justLocked } = await recordAttempt(rlKey, meta.ipAddress, false);
+    if (justLocked) {
+      await writeAudit({
+        action: "account_temporarily_locked",
+        entityType: "auth",
+        metadata: { identifier },
+        ...meta,
+      });
+    }
+    throw invalidCredentials();
+  }
+
+  const passwordHash = await hashPassword(new_password);
+
+  // Set the hash + audit atomically. Null-hash filter makes a concurrent re-claim match 0 rows;
+  // if we lost that race the password was NOT persisted, so bail to the same generic error
+  // (rolls back the audit) rather than mint a session / write a spurious account_claimed row.
+  await db.transaction(async (tx) => {
+    const updated = await tx
+      .update(users)
+      .set({ passwordHash, updatedAt: new Date() })
+      .where(and(eq(users.id, user.id), isNull(users.passwordHash)))
+      .returning({ id: users.id });
+    if (updated.length === 0) throw invalidCredentials();
+    await writeAudit(
+      {
+        actorUserId: user.id,
+        actorRole: user.role,
+        action: "account_claimed",
+        entityType: "user",
+        entityId: user.id,
+        targetUserId: user.id,
+        metadata: { identifier },
+        ...meta,
+      },
+      tx,
+    );
+  });
+
+  await recordAttempt(rlKey, meta.ipAddress, true);
+  await createSession(c, user);
+  log.set("userId", user.id).set("role", user.role);
+  // Same shape as login. Claimed users set their own password → no forced change.
   return c.json({
     user: publicUser(user),
     password_must_change: user.passwordMustChange,
@@ -106,7 +208,8 @@ router.post(
     const { current_password, new_password } = c.req.valid("json");
     const meta = requestMeta(c);
 
-    if (!(await verifyPassword(user.passwordHash, current_password))) {
+    // Unclaimed users (null hash) have no current password to verify — they must use /auth/claim instead.
+    if (user.passwordHash === null || !(await verifyPassword(user.passwordHash, current_password))) {
       throw badRequest("invalid_current_password", "Current password is incorrect");
     }
     const policyErr = validatePasswordPolicy(new_password);

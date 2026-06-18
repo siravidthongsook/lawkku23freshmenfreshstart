@@ -6,6 +6,14 @@ export const loginSchema = z.object({
   password: z.string().min(1),
 });
 
+// Claim: imported (email-less) users prove identity with identifier + group, then set first password.
+// identifier = student_id (students) OR username e.g. staff-01 (staff). Policy enforced in handler.
+export const claimSchema = z.object({
+  identifier: z.string().trim().min(1),
+  group_number: z.coerce.number().int(), // accept "1" or 1; must match users.group_number
+  new_password: z.string().min(1),
+});
+
 // Change-password: only need the new password; policy enforced via validatePasswordPolicy.
 export const changePasswordSchema = z.object({
   current_password: z.string().min(1),
@@ -25,5 +33,6 @@ export const updateOwnProfileSchema = z
   .refine((v) => Object.keys(v).length > 0, { message: "No fields to update" });
 
 export type LoginInput = z.infer<typeof loginSchema>;
+export type ClaimInput = z.infer<typeof claimSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 export type UpdateOwnProfileInput = z.infer<typeof updateOwnProfileSchema>;

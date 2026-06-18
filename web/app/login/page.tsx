@@ -90,7 +90,8 @@ function LoginForm() {
         <CardContent className="p-6">
           <form onSubmit={onSubmit} className="space-y-4" noValidate>
             <div className="space-y-1.5">
-              <Label htmlFor="identifier">อีเมล หรือ รหัสนักศึกษา</Label>
+              {/* Identifier is generic: email / student_id / username (mentors) — backend accepts any. */}
+              <Label htmlFor="identifier">อีเมล / รหัสนักศึกษา / ชื่อผู้ใช้</Label>
               <Input
                 id="identifier"
                 type="text"
@@ -139,7 +140,11 @@ function LoginForm() {
             </Button>
           </form>
 
-          <div className="mt-4 text-center text-sm text-muted-foreground">
+          <div className="mt-4 flex flex-col items-center gap-2 text-center text-sm text-muted-foreground">
+            {/* First-time users (freshmen/mentors) set their own password via /claim, not a temp-pw hand-out. */}
+            <Link href="/claim" className="font-medium text-foreground underline-offset-4 hover:underline">
+              รับบัญชีผู้ใช้ โดยการกรอกข้อมูล
+            </Link>
             <Link href="/forgot-password" className="underline-offset-4 hover:underline">
               ลืมรหัสผ่าน?
             </Link>

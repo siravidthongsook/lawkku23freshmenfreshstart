@@ -29,6 +29,13 @@
       "when": 1781765413037,
       "tag": "0003_new_hex",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1781787520841,
+      "tag": "0004_purple_skreet",
+      "breakpoints": true
     }
   ]
 }

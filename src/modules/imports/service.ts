@@ -56,13 +56,14 @@ export async function buildPreviewRows(
 
   // Existing users lookup — used to decide create vs update.
   const existingByEmail = new Map<string, { id: string; studentId: string | null }>();
-  const existingByStudentId = new Map<string, { id: string; email: string }>();
+  // email is nullable now (imported users have none); these maps only hold rows that actually have one.
+  const existingByStudentId = new Map<string, { id: string; email: string | null }>();
   if (emails.length) {
     const found = await db
       .select({ id: users.id, email: users.email, studentId: users.studentId })
       .from(users)
       .where(inArray(users.email, emails));
-    for (const u of found) existingByEmail.set(u.email.toLowerCase(), { id: u.id, studentId: u.studentId });
+    for (const u of found) if (u.email) existingByEmail.set(u.email.toLowerCase(), { id: u.id, studentId: u.studentId });
   }
   if (studentIds.length) {
     const found = await db

@@ -189,7 +189,8 @@ router.get("/admin/users/:userId", async (c) => {
     .where(eq(temporaryPasswords.userId, user.id))
     .limit(1);
   // Lockout state so the UI can show a lock badge + enable Unlock only when actually locked.
-  const lockout = await getLockoutState(user.email);
+  // Lockout is keyed by the rate-limit key, which is the email when present else the login identifier.
+  const lockout = await getLockoutState(lockoutKey(user));
   return c.json({
     user: publicUser(user),
     has_pending_temp_password: Boolean(pending),
@@ -387,7 +388,7 @@ router.post("/admin/users/:userId/unlock", async (c) => {
   const admin = c.get("user");
   const meta = requestMeta(c);
   const target = await getUserOr404(c.req.param("userId"));
-  await clearLockout(target.email);
+  await clearLockout(lockoutKey(target));
   await writeAudit({
     actorUserId: admin.id,
     actorRole: admin.role,
@@ -395,7 +396,7 @@ router.post("/admin/users/:userId/unlock", async (c) => {
     entityType: "user",
     entityId: target.id,
     targetUserId: target.id,
-    metadata: { email: target.email },
+    metadata: { email: target.email, identifier: lockoutKey(target) },
     ...meta,
   });
   return c.json({ ok: true });
@@ -441,6 +442,12 @@ router.post(
 );
 
 // ---- helpers ----
+
+// Rate-limit/lockout key for a user. Mirrors login's `user?.email ?? identifier`:
+// email when present, else the login identifier (student_id or username) — email-less imported users.
+function lockoutKey(u: User): string {
+  return (u.email ?? u.studentId ?? u.username ?? u.id).toLowerCase();
+}
 
 async function getUserOr404(id: string): Promise<User> {
   const [row] = await db.select().from(users).where(eq(users.id, id)).limit(1);

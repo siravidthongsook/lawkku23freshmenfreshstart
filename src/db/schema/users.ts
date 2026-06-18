@@ -1,17 +1,24 @@
-import { boolean, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { userRole, userStatus } from "./enums";
 
 // Internal identity + profile + auth state. Referenced everywhere by id (uuid) only.
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
-  email: text("email").notNull().unique(),
+  email: text("email").unique(), // nullable: imported users have no email (PG allows multiple NULLs)
   studentId: text("student_id").unique(), // business id for students; null for staff/admin
+  username: text("username").unique(), // staff login id (e.g. staff-01); null for students/admins
   role: userRole("role").notNull(),
   fullName: text("full_name").notNull(),
+  title: text("title"), // student honorific (e.g. นางสาว)
+  nickname: text("nickname"), // mentor nickname
+  year: integer("year"), // mentor study year
+  mentorRole: text("mentor_role"), // mentor role free text (Thai)
+  category: text("category"), // mentor raw category (group_mentor|staff); role is derived
+  groupNumber: integer("group_number"), // group 1..16; null for admins. claim 2nd factor
   faculty: text("faculty"),
   department: text("department"),
   phone: text("phone"),
-  passwordHash: text("password_hash").notNull(),
+  passwordHash: text("password_hash"), // nullable: NULL = account not yet claimed
   passwordMustChange: boolean("password_must_change").notNull().default(false),
   status: userStatus("status").notNull().default("active"),
   createdByAdminId: uuid("created_by_admin_id"), // self-ref → users.id (nullable for seed admin)

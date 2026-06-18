@@ -3,3 +3,6 @@ dist
 .env
 .storage
 *.log
+
+# local + prod DB backups (contain hashes/PII)
+backups/
