@@ -21,7 +21,7 @@ import { toast } from "sonner";
 import type { AnswerMap, FormSchema } from "@/lib/schemas";
 import { RegisterFormDialog } from "@/components/public/register-form-dialog";
 import {
-  galleryImage,
+  eventThumbnail,
   eventTimeRange,
   capacityLabel,
   seatsRemaining,
@@ -223,7 +223,7 @@ function EventDetail({
       <div className="lg:col-span-2">
         <div className="relative mb-6 aspect-[16/7] w-full overflow-hidden rounded-xl bg-muted">
           <Image
-            src={galleryImage(event.publicId || event.publicSlug || event.id)}
+            src={eventThumbnail(event)}
             alt=""
             fill
             sizes="(max-width: 1024px) 100vw, 66vw"

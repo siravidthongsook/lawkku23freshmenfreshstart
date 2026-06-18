@@ -4,7 +4,7 @@ import Image from "next/image";
 import { Card, CardContent } from "@/components/ui/card";
 import { EventStatusBadge } from "@/components/badges";
 import type { EventPublic } from "@/lib/types";
-import { galleryImage, eventTimeRange, capacityLabel, isFull } from "@/components/public/event-helpers";
+import { eventThumbnail, eventTimeRange, capacityLabel, isFull } from "@/components/public/event-helpers";
 
 export function EventCard({ event }: { event: EventPublic }) {
   const cap = capacityLabel(event);
@@ -15,7 +15,7 @@ export function EventCard({ event }: { event: EventPublic }) {
       <Card className="overflow-hidden transition-shadow group-hover:shadow-md group-focus-visible:ring-2 group-focus-visible:ring-ring">
         <div className="relative aspect-[16/9] w-full overflow-hidden bg-muted">
           <Image
-            src={galleryImage(event.publicId || event.publicSlug || event.id)}
+            src={eventThumbnail(event)}
             alt=""
             fill
             sizes="(max-width: 768px) 100vw, 33vw"

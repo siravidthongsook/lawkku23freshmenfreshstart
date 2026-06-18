@@ -32,6 +32,8 @@ export type EventPublic = {
   title: string;
   description: string | null;
   location: string | null;
+  // Uploaded poster path WITHOUT /api prefix (e.g. "/events/{publicId}/poster"); null → fall back to gallery image.
+  posterImageUrl: string | null;
   status: EventStatus;
   visibility: EventVisibility;
   registrationMode: RegistrationMode;

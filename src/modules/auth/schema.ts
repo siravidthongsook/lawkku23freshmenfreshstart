@@ -6,11 +6,10 @@ export const loginSchema = z.object({
   password: z.string().min(1),
 });
 
-// Claim: imported (email-less) users prove identity with identifier + group, then set first password.
+// Claim: imported (email-less) users prove identity with identifier alone, then set first password.
 // identifier = student_id (students) OR username e.g. staff-01 (staff). Policy enforced in handler.
 export const claimSchema = z.object({
   identifier: z.string().trim().min(1),
-  group_number: z.coerce.number().int(), // accept "1" or 1; must match users.group_number
   new_password: z.string().min(1),
 });
 

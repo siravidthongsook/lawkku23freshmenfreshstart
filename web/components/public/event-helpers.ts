@@ -10,6 +10,12 @@ export function galleryImage(key: string): string {
   return `/gallery/event-${(hash % 16) + 1}.jpg`;
 }
 
+// Event hero/thumbnail src: uploaded poster (served via /api proxy) when set, else a stable gallery photo.
+export function eventThumbnail(e: Pick<EventPublic, "posterImageUrl" | "publicId" | "publicSlug" | "id">): string {
+  if (e.posterImageUrl) return `/api${e.posterImageUrl}`;
+  return galleryImage(e.publicId || e.publicSlug || e.id);
+}
+
 // Human event-time range in Bangkok. Falls back gracefully when start/end missing.
 export function eventTimeRange(e: Pick<EventPublic, "eventStartAt" | "eventEndAt">): string {
   const start = formatBangkok(e.eventStartAt);

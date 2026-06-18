@@ -93,11 +93,11 @@ router.post("/auth/login", zValidator("json", loginSchema), async (c) => {
   });
 });
 
-// POST /auth/claim — imported (email-less) user proves identity (identifier + group) and sets first password.
+// POST /auth/claim — imported (email-less) user proves identity (identifier) and sets first password.
 // identifier = student_id (students) OR username e.g. staff-01 (staff). Only unclaimed accounts (null hash) match.
-// Every mismatch (not found / wrong group / already claimed) returns the SAME generic error — no enumeration.
+// Every mismatch (not found / already claimed) returns the SAME generic error — no enumeration.
 router.post("/auth/claim", zValidator("json", claimSchema), async (c) => {
-  const { identifier, group_number, new_password } = c.req.valid("json");
+  const { identifier, new_password } = c.req.valid("json");
   const meta = requestMeta(c);
   const log = c.get("log");
   log.set("identifier", identifier); // who is claiming (not a secret); password never logged
@@ -123,14 +123,13 @@ router.post("/auth/claim", zValidator("json", claimSchema), async (c) => {
   const policyErr = validatePasswordPolicy(new_password);
   if (policyErr) throw badRequest("weak_password", policyErr);
 
-  // Match unclaimed account by (student_id OR username) + group + active status. Null hash = not yet claimed.
+  // Match unclaimed account by (student_id OR username) + active status. Null hash = not yet claimed.
   const [user] = await db
     .select()
     .from(users)
     .where(
       and(
         or(eq(users.studentId, identifier), eq(users.username, identifier)),
-        eq(users.groupNumber, group_number),
         isNull(users.passwordHash),
         eq(users.status, "active"),
       ),

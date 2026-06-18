@@ -1,9 +1,9 @@
 "use client";
 
 // First-time account claim for freshmen (student_id) and mentors (username).
-// 2nd factor = group number. Sets the user's own password + a session, then redirects
+// Identity = identifier only. Sets the user's own password + a session, then redirects
 // like login success. GENERIC error only on any mismatch (no enumeration).
-// POST /auth/claim { identifier, group_number, new_password } → { user, password_must_change }.
+// POST /auth/claim { identifier, new_password } → { user, password_must_change }.
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BrandLogo } from "@/components/brand-logo";
@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils";
 const MIN = 10;
 const MAX = 128;
 // Single generic message for all claim failures — mirrors login (no enumeration).
-const GENERIC_ERROR = "ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบรหัสนักศึกษา/ชื่อผู้ใช้ และบรรพของคุณ";
+const GENERIC_ERROR = "ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบรหัสนักศึกษา/ชื่อผู้ใช้ของคุณ";
 
 // Claim response mirrors login: wrapped + snake_case (see src/modules/auth/routes.ts).
 type ClaimResponse = { user: { role: Role }; password_must_change: boolean };
@@ -44,7 +44,6 @@ export default function ClaimPage() {
 
   // identifier = student_id (freshmen) OR username (mentors); backend looks up by either.
   const [identifier, setIdentifier] = useState("");
-  const [groupNumber, setGroupNumber] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   // PDPA consent — required to submit. Mock text for now; gate blocks submit until checked.
@@ -61,11 +60,10 @@ export default function ClaimPage() {
   }, [loading, user, router]);
 
   // Live rule checks drive both the upfront checklist and the submit-enabled gate.
-  const groupOk = groupNumber.trim().length > 0 && Number.isFinite(Number(groupNumber));
   const lengthOk = newPassword.length >= MIN && newPassword.length <= MAX;
   const matchOk = confirm.length > 0 && newPassword === confirm;
   const canSubmit =
-    !submitting && identifier.trim().length > 0 && groupOk && lengthOk && matchOk && pdpaAgreed;
+    !submitting && identifier.trim().length > 0 && lengthOk && matchOk && pdpaAgreed;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -84,7 +82,6 @@ export default function ClaimPage() {
       // Claim sets the session cookie like login; read role from the response for redirect.
       const res = await apiPost<ClaimResponse>("/auth/claim", {
         identifier: identifier.trim(),
-        group_number: Number(groupNumber),
         new_password: newPassword,
       });
       await refetch(); // populate auth context from the new session
@@ -127,7 +124,7 @@ export default function ClaimPage() {
           <span className="block">ตั้งรหัสผ่านครั้งแรก</span>
         </h1>
         <p className="max-w-sm text-center text-sm text-muted-foreground">
-          สำหรับการเข้าใช้งานครั้งแรก กรอกรหัสนักศึกษา/ชื่อผู้ใช้ บรรพของคุณ และตั้งรหัสผ่านใหม่
+          สำหรับการเข้าใช้งานครั้งแรก กรอกรหัสนักศึกษา/ชื่อผู้ใช้ของคุณ และตั้งรหัสผ่านใหม่
         </p>
       </div>
 
@@ -150,21 +147,6 @@ export default function ClaimPage() {
                 }}
                 required
                 autoFocus
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="group">บรรพ</Label>
-              <Input
-                id="group"
-                type="number"
-                inputMode="numeric"
-                min={1}
-                value={groupNumber}
-                onChange={(e) => {
-                  setGroupNumber(e.target.value);
-                  if (error) setError(null);
-                }}
-                required
               />
             </div>
             <div className="space-y-1.5">

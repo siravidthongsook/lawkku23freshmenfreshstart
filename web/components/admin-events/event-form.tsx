@@ -4,8 +4,9 @@
 // Validates with createEventSchema/updateEventSchema before sending; sends ISO-UTC strings (backend coerces).
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { toast } from "sonner";
-import { apiPost, apiPatch, ApiError } from "@/lib/api";
+import { apiPost, apiPatch, apiPostForm, ApiError } from "@/lib/api";
 import {
   createEventSchema,
   updateEventSchema,
@@ -26,6 +27,7 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { eventThumbnail } from "@/components/public/event-helpers";
 import { isoToBangkokInput, bangkokInputToIso } from "./datetime";
 
 type Mode = "create" | "edit";
@@ -97,8 +99,45 @@ export function EventForm({ mode, eventId, initial }: Props) {
   );
   const [editCloseAt, setEditCloseAt] = useState(isoToBangkokInput(initial?.editRegistrationCloseAt));
 
+  // Poster upload state — self-contained (uploads instantly, not part of bind/dirty form machinery).
+  const posterInputRef = useRef<HTMLInputElement>(null);
+  const [posterUrl, setPosterUrl] = useState<string | null>(initial?.posterImageUrl ?? null);
+  const [uploading, setUploading] = useState(false);
+
   // Warn before leaving with unsaved edits (tab close / in-app link). See use-unsaved-changes.
   useUnsavedChanges(dirty);
+
+  // Upload the selected poster immediately (independent of the main form submit — intended).
+  async function handlePosterChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !eventId) return;
+    // Client-side guards mirror the backend allow-list (JPG/PNG, max 5MB).
+    if (!["image/png", "image/jpeg"].includes(file.type)) {
+      toast.error("รองรับเฉพาะไฟล์ PNG หรือ JPG เท่านั้น");
+      if (posterInputRef.current) posterInputRef.current.value = "";
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("ขนาดไฟล์ต้องไม่เกิน 5MB");
+      if (posterInputRef.current) posterInputRef.current.value = "";
+      return;
+    }
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await apiPostForm<{ event: EventAdmin }>(`/admin/events/${eventId}/poster`, form);
+      // Poster URL is stable per event → cache-bust so the browser shows the new image, not the old cached one.
+      const next = res.event.posterImageUrl ? `${res.event.posterImageUrl}?t=${Date.now()}` : null;
+      setPosterUrl(next);
+      toast.success("อัปโหลดรูปภาพแล้ว");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "อัปโหลดไม่สำเร็จ");
+    } finally {
+      setUploading(false);
+      if (posterInputRef.current) posterInputRef.current.value = "";
+    }
+  }
 
   // Wrap a setter so any edit marks the form dirty + clears that field's inline error.
   function bind<T>(setter: (v: T) => void, field?: string) {
@@ -236,6 +275,53 @@ export function EventForm({ mode, eventId, initial }: Props) {
 
   return (
     <form ref={formRef} onSubmit={handleSubmit} className="space-y-6">
+      {/* Poster upload — edit mode only (needs an existing eventId; create has none yet). Uploads instantly. */}
+      {mode === "edit" && eventId ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>รูปภาพปก / ภาพกิจกรรม</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="relative aspect-[16/9] w-full max-w-md overflow-hidden rounded-lg border bg-muted">
+              <Image
+                src={
+                  posterUrl
+                    ? `/api${posterUrl}`
+                    : eventThumbnail({
+                        posterImageUrl: null,
+                        publicId: initial?.publicId ?? "",
+                        publicSlug: initial?.publicSlug ?? "",
+                        id: initial?.id ?? eventId,
+                      })
+                }
+                alt="ภาพปกกิจกรรม"
+                fill
+                sizes="(max-width: 768px) 100vw, 28rem"
+                className="object-cover"
+              />
+            </div>
+            <input
+              ref={posterInputRef}
+              type="file"
+              accept="image/png,image/jpeg"
+              className="hidden"
+              onChange={handlePosterChange}
+            />
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={uploading}
+                onClick={() => posterInputRef.current?.click()}
+              >
+                {uploading ? "กำลังอัปโหลด…" : "อัปโหลดรูปภาพ"}
+              </Button>
+              <span className="text-xs text-muted-foreground">PNG หรือ JPG • สูงสุด 5MB</span>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle>ข้อมูลพื้นฐาน</CardTitle>
