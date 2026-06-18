@@ -12,5 +12,18 @@ export const changePasswordSchema = z.object({
   new_password: z.string().min(1),
 });
 
+// Self-edit own profile (PATCH /auth/me). All optional; email stays unique.
+// student_id + role deliberately excluded — those stay admin-only (identity/privilege).
+export const updateOwnProfileSchema = z
+  .object({
+    email: z.string().trim().toLowerCase().email().optional(), // normalize -> case-insensitive login match
+    full_name: z.string().trim().min(1).optional(),
+    faculty: z.string().trim().nullable().optional(),
+    department: z.string().trim().nullable().optional(),
+    phone: z.string().trim().nullable().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: "No fields to update" });
+
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+export type UpdateOwnProfileInput = z.infer<typeof updateOwnProfileSchema>;

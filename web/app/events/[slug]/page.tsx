@@ -181,7 +181,8 @@ function EventDetail({
           </div>
         </div>
 
-        <h1 className="text-3xl font-bold tracking-tight">{event.title}</h1>
+        {/* Thai stacks vowels/tone marks: drop tracking-tight, give breathing room via leading + balanced wrap */}
+        <h1 className="text-3xl font-bold leading-snug text-balance">{event.title}</h1>
 
         {/* Cancelled/archived banners make state unmistakable. */}
         {event.status === "cancelled" ? (

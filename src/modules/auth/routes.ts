@@ -1,11 +1,11 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
-import { eq, or } from "drizzle-orm";
+import { and, eq, ne, or, sql } from "drizzle-orm";
 import type { AppVariables } from "../../lib/context";
 import { db } from "../../db/client";
 import { users, temporaryPasswords } from "../../db/schema/users";
 import { requireAuth, requestMeta } from "../../lib/auth-middleware";
-import { AppError, badRequest } from "../../lib/errors";
+import { AppError, badRequest, conflict } from "../../lib/errors";
 import { hashPassword, validatePasswordPolicy, verifyPassword } from "../../lib/password";
 import {
   clearSessionCookie,
@@ -14,7 +14,7 @@ import {
   revokeSession,
 } from "../../lib/session";
 import { writeAudit } from "../../lib/audit";
-import { changePasswordSchema, loginSchema } from "./schema";
+import { changePasswordSchema, loginSchema, updateOwnProfileSchema } from "./schema";
 import { checkRateLimit, recordAttempt } from "./service";
 
 const router = new Hono<{ Variables: AppVariables }>();
@@ -34,7 +34,14 @@ router.post("/auth/login", zValidator("json", loginSchema), async (c) => {
   const [user] = await db
     .select()
     .from(users)
-    .where(or(eq(users.email, identifier), eq(users.studentId, identifier)))
+    // Email match is case-insensitive (emails are case-insensitive in practice);
+    // student_id stays exact. Fixes login failing when typed email casing != stored.
+    .where(
+      or(
+        sql`lower(${users.email}) = lower(${identifier})`,
+        eq(users.studentId, identifier),
+      ),
+    )
     .limit(1);
 
   // Canonical rate-limit key = the user's email when resolved, else the raw identifier typed.
@@ -138,6 +145,60 @@ router.get("/auth/me", requireAuth, async (c) => {
     user: publicUser(user),
     password_must_change: user.passwordMustChange,
   });
+});
+
+// PATCH /auth/me — self-edit own profile (email + contact info). student_id/role stay admin-only.
+router.patch("/auth/me", requireAuth, zValidator("json", updateOwnProfileSchema), async (c) => {
+  const user = c.get("user");
+  const meta = requestMeta(c);
+  const body = c.req.valid("json");
+
+  // Email is the login credential + unique; block taking another user's email.
+  if (body.email && body.email !== user.email) {
+    const [hit] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.email, body.email), ne(users.id, user.id)))
+      .limit(1);
+    if (hit) throw conflict("email_taken", "Email already in use");
+  }
+
+  // Build patch from provided keys only (null clears nullable contact fields).
+  const patch: Partial<typeof users.$inferInsert> = { updatedAt: new Date() };
+  if (body.email !== undefined) patch.email = body.email;
+  if (body.full_name !== undefined) patch.fullName = body.full_name;
+  if (body.faculty !== undefined) patch.faculty = body.faculty;
+  if (body.department !== undefined) patch.department = body.department;
+  if (body.phone !== undefined) patch.phone = body.phone;
+
+  const snapshot = (u: typeof users.$inferSelect) => ({
+    email: u.email,
+    full_name: u.fullName,
+    faculty: u.faculty,
+    department: u.department,
+    phone: u.phone,
+  });
+
+  const updated = await db.transaction(async (tx) => {
+    const [row] = await tx.update(users).set(patch).where(eq(users.id, user.id)).returning();
+    if (!row) throw new Error("expected one row from returning()");
+    await writeAudit(
+      {
+        actorUserId: user.id,
+        actorRole: user.role,
+        action: "user_self_profile_updated",
+        entityType: "user",
+        entityId: user.id,
+        targetUserId: user.id,
+        oldValue: snapshot(user),
+        newValue: snapshot(row),
+        ...meta,
+      },
+      tx,
+    );
+    return row;
+  });
+  return c.json({ user: publicUser(updated) });
 });
 
 // Shape of user we return over the wire — never includes password_hash.

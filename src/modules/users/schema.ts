@@ -14,7 +14,7 @@ export const listUsersQuery = z.object({
 // Students MUST have a student_id (they log in with email OR student_id).
 export const createUserSchema = z
   .object({
-    email: z.string().email(),
+    email: z.string().trim().toLowerCase().email(), // normalize -> case-insensitive login match
     student_id: z.string().trim().min(1).optional(),
     role: roleEnum,
     full_name: z.string().trim().min(1),
@@ -30,7 +30,7 @@ export const createUserSchema = z
 // Edit profile — all optional; email/student_id must stay unique.
 export const updateUserSchema = z
   .object({
-    email: z.string().email().optional(),
+    email: z.string().trim().toLowerCase().email().optional(), // normalize -> case-insensitive login match
     student_id: z.string().trim().min(1).nullable().optional(),
     full_name: z.string().trim().min(1).optional(),
     faculty: z.string().trim().nullable().optional(),
