@@ -27,6 +27,12 @@ export function EventCard({ event }: { event: EventPublic }) {
               <EventStatusBadge status={event.status} />
             </div>
           ) : null}
+          {/* Pre-click signal: viewer already holds a (non-cancelled) reg for this event → don't make them re-open to find out. */}
+          {event.myRegistrationId ? (
+            <div className="absolute right-2 top-2 rounded-full bg-emerald-600 px-2 py-0.5 text-xs font-medium text-white shadow">
+              {event.myRegistrationStatus === "waitlisted" ? "อยู่ในรายชื่อสำรอง" : "ลงทะเบียนแล้ว"}
+            </div>
+          ) : null}
         </div>
         <CardContent className="space-y-2 p-4">
           <h3 className="line-clamp-2 text-base font-semibold leading-snug">{event.title}</h3>

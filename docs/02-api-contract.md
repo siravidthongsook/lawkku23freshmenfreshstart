@@ -48,8 +48,8 @@ Forgot-password: no endpoint in V1 → UI shows "contact admin".
 ### Public
 | method | path | notes |
 |---|---|---|
-| GET | `/events` | public list (published+listed; cancelled+listed w/ badge) |
-| GET | `/events/:slug` | public event page by slug |
+| GET | `/events` | public list (published+listed; cancelled+listed w/ badge). Optional auth: authed viewer's cards also carry `myRegistrationId` + `myRegistrationStatus` (non-cancelled), drives "registered" card badge. |
+| GET | `/events/:slug` | public event page by slug. Optional auth: an authed viewer with a non-cancelled reg also gets `myRegistrationId` + `myRegistrationStatus` (drives "already registered → view" CTA; cancelled omitted so they can re-register). Anonymous still served. |
 | GET | `/e/:publicId` | permanent QR URL → resolve, redirect to current `/events/:slug`, fallback render here |
 
 ### Admin

@@ -41,8 +41,41 @@ router.get("/events", async (c) => {
 
   const now = new Date();
   const out = await Promise.all(
-    rows.map(async (e) => publicEventView(e, await computeEventStatus(e, { now }))),
+    rows.map(async (e) => ({
+      ...publicEventView(e, await computeEventStatus(e, { now })),
+      // Populated below for an authed viewer; null/absent for anonymous.
+      myRegistrationId: null as string | null,
+      myRegistrationStatus: null as (typeof registrations.$inferSelect)["status"] | null,
+    })),
   );
+
+  // Optional auth: surface the viewer's own (non-cancelled) reg per card so the list can show a
+  // "registered → view" badge pre-click, same signal as the detail page. Anonymous → no extra fields.
+  const session = await resolveSession(c);
+  if (session && out.length) {
+    const myRegs = await db
+      .select({ eventId: registrations.eventId, id: registrations.id, status: registrations.status })
+      .from(registrations)
+      .where(
+        and(
+          eq(registrations.userId, session.userId),
+          inArray(
+            registrations.eventId,
+            rows.map((e) => e.id),
+          ),
+        ),
+      );
+    // Cancelled regs excluded → that card still shows the plain register CTA.
+    const byEvent = new Map(myRegs.filter((r) => r.status !== "cancelled").map((r) => [r.eventId, r]));
+    for (const e of out) {
+      const reg = byEvent.get(e.id);
+      if (reg) {
+        e.myRegistrationId = reg.id;
+        e.myRegistrationStatus = reg.status;
+      }
+    }
+  }
+
   return c.json({ events: out });
 });
 
