@@ -3,12 +3,20 @@
 // Registration List (dashboard L2). GET /admin/events/:id/registrations.
 // NOTE: backend serializeRegistration currently returns reg-level fields only (no user profile / checked_in_by
 // label / form_version label). We render those columns from the row when present and fall back to "—".
-import { use, useCallback, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { apiGet, apiPost, ApiError } from "@/lib/api";
 import type { RegistrationListItem } from "@/lib/types";
+import {
+  formSchema,
+  isFileField,
+  validateAnswers,
+  type AnswerMap,
+  type FormSchema,
+} from "@/lib/schemas";
+import { FormFieldInput } from "@/components/student/form-fields";
 import { formatBangkok } from "@/lib/time";
 import { RegistrationStatusBadge } from "@/components/badges";
 import { Button } from "@/components/ui/button";
@@ -146,6 +154,8 @@ export default function EventRegistrationsPage({ params }: { params: Promise<{ i
 }
 
 // Manual register (override window/capacity). userId + reason REQUIRED. POST /admin/events/:id/registrations.
+// Renders the event's active form fields so the admin can answer on behalf of the user — backend
+// validates answers against the active form (required fields enforced), so {} fails for forms w/ required fields.
 function ManualRegisterDialog({
   eventId,
   open,
@@ -161,22 +171,94 @@ function ManualRegisterDialog({
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  // Both fields required — reason is mandatory (audited override).
-  const valid = userId.trim() !== "" && reason.trim() !== "";
+  // Active form (null = formless event). loadingForm guards the initial fetch on open.
+  const [schema, setSchema] = useState<FormSchema | null>(null);
+  const [loadingForm, setLoadingForm] = useState(false);
+  const [values, setValues] = useState<AnswerMap>({});
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  // Fetch the active form whenever the dialog opens; parse with the shared validator.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setLoadingForm(true);
+    (async () => {
+      try {
+        const { form } = await apiGet<{ form: { schemaJson: unknown } | null }>(
+          `/admin/events/${eventId}/form`,
+        );
+        if (cancelled) return;
+        const parsed = form ? formSchema.safeParse(form.schemaJson) : null;
+        // Treat null form / parse failure / zero fields as a formless event (submit answers: {}).
+        setSchema(parsed?.success && parsed.data.fields.length > 0 ? parsed.data : null);
+      } catch (err) {
+        if (cancelled) return;
+        setSchema(null);
+        toast.error(
+          err instanceof ApiError ? err.message : "ไม่สามารถโหลดแบบฟอร์มของกิจกรรมได้",
+        );
+      } finally {
+        if (!cancelled) setLoadingForm(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, eventId]);
+
+  // Sorted non-file fields + file-field handling mirrors the public register dialog.
+  const fields = useMemo(
+    () => (schema ? [...schema.fields].sort((a, b) => a.sort - b.sort) : []),
+    [schema],
+  );
+  const requiredFileFields = useMemo(
+    () => (schema ? schema.fields.filter((f) => isFileField(f) && f.required) : []),
+    [schema],
+  );
+  const hasFileField = useMemo(
+    () => (schema ? schema.fields.some(isFileField) : false),
+    [schema],
+  );
+  // Required file fields can't be satisfied pre-registration (no registrationId yet) — block submit.
+  const blockedByFile = requiredFileFields.length > 0;
+
+  // Both fields required — reason is mandatory (audited override). File-blocked forms can't submit.
+  const valid =
+    userId.trim() !== "" && reason.trim() !== "" && !loadingForm && !blockedByFile;
+
+  function setValue(key: string, value: unknown) {
+    setValues((prev) => ({ ...prev, [key]: value }));
+  }
 
   function reset() {
     setUserId("");
     setReason("");
+    setSchema(null);
+    setValues({});
+    setFieldErrors({});
   }
 
   async function submit() {
     if (!valid || submitting) return;
+
+    // Validate answers locally first (only when the event has a form).
+    let answers: AnswerMap = {};
+    if (schema) {
+      setFieldErrors({});
+      const result = validateAnswers(schema, values);
+      if (!result.ok) {
+        setFieldErrors(result.errors);
+        return;
+      }
+      answers = result.values;
+    }
+
     setSubmitting(true);
     try {
       await apiPost(`/admin/events/${eventId}/registrations`, {
         userId: userId.trim(),
         reason: reason.trim(),
-        answers: {}, // admins may leave answers empty; backend validates against active form
+        answers, // real answer map (or {} for formless events); backend validates against active form
       });
       toast.success("ลงทะเบียนผู้ใช้แล้ว");
       reset();
@@ -197,7 +279,7 @@ function ManualRegisterDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent>
+      <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>ลงทะเบียนด้วยตนเอง</DialogTitle>
           <DialogDescription>
@@ -225,6 +307,48 @@ function ManualRegisterDialog({
               rows={3}
             />
           </div>
+
+          {/* Form answers (only when the event has an active form). */}
+          {loadingForm ? (
+            <Skeleton className="h-24 w-full" />
+          ) : schema ? (
+            <div className="space-y-4 border-t pt-3">
+              <p className="text-sm font-medium">แบบฟอร์มการลงทะเบียน</p>
+
+              {/* Backend gap: file uploads require a registration to exist first. */}
+              {blockedByFile ? (
+                <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  แบบฟอร์มนี้ต้องการอัปโหลดไฟล์ ซึ่งยังไม่รองรับในระหว่างการลงทะเบียน
+                  ผู้ใช้ต้องแนบไฟล์เองหลังลงทะเบียน
+                </p>
+              ) : null}
+
+              {fields.map((field) =>
+                isFileField(field) ? (
+                  // Optional file field: shown but not collectable here; user attaches after registering.
+                  <div key={field.key} className="space-y-1">
+                    <p className="text-sm font-medium">{field.label}</p>
+                    <p className="text-xs text-muted-foreground">
+                      ผู้ใช้สามารถแนบไฟล์นี้ได้หลังจากลงทะเบียน
+                    </p>
+                  </div>
+                ) : (
+                  <FormFieldInput
+                    key={field.key}
+                    field={field}
+                    value={values[field.key]}
+                    error={fieldErrors[field.key]}
+                    onChange={setValue}
+                  />
+                ),
+              )}
+              {hasFileField && !blockedByFile ? (
+                <p className="text-xs text-muted-foreground">
+                  สามารถเพิ่มไฟล์อัปโหลดได้หลังจากลงทะเบียน
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
