@@ -3,7 +3,7 @@
 // Within-event manual search + manual check-in / undo check-in. Minimal info only (no email/phone/answers).
 // Undo requires a reason (prompted via dialog) per the audit-log contract.
 import { useState } from "react";
-import { Search, UserCheck, Undo2 } from "lucide-react";
+import { Search, UserCheck, Undo2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { apiGet, apiPost, ApiError } from "@/lib/api";
 import { reasonSchema } from "@/lib/schemas";
@@ -20,9 +20,15 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { RegistrationStatusBadge } from "@/components/badges";
+import { regStatusLabel } from "@/lib/labels";
 import { formatBangkok } from "@/lib/time";
-import type { CheckinSearchResponse, CheckinSearchResult } from "./types";
+import type {
+  CheckinSearchResponse,
+  CheckinSearchResult,
+  ManualCheckinResponse,
+} from "./types";
 
 export function ManualSearch({
   eventId,
@@ -36,6 +42,9 @@ export function ManualSearch({
   const [results, setResults] = useState<CheckinSearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  // Confirm-before-check-in target (same-name / missing student_id risk — staff must eyeball identity first).
+  const [confirmTarget, setConfirmTarget] = useState<CheckinSearchResult | null>(null);
 
   // Undo dialog state.
   const [undoTarget, setUndoTarget] = useState<CheckinSearchResult | null>(null);
@@ -64,13 +73,15 @@ export function ManualSearch({
   async function manualCheckin(r: CheckinSearchResult) {
     setBusyId(r.registrationId);
     try {
-      await apiPost(`/registrations/${r.registrationId}/manual-checkin`);
+      const res = await apiPost<ManualCheckinResponse>(
+        `/registrations/${r.registrationId}/manual-checkin`,
+      );
       toast.success(`เช็คอิน ${r.fullName} แล้ว`);
-      // Reflect new status locally without a re-search.
+      // Reflect new status locally without a re-search. Use the AUTHORITATIVE server time (:73), not new Date().
       setResults((prev) =>
         prev?.map((x) =>
           x.registrationId === r.registrationId
-            ? { ...x, status: "checked_in", checkedInAt: new Date().toISOString() }
+            ? { ...x, status: "checked_in", checkedInAt: res.checkedInAt }
             : x,
         ) ?? null,
       );
@@ -78,6 +89,7 @@ export function ManualSearch({
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : "เช็คอินไม่สำเร็จ";
       toast.error(msg);
+      throw err; // let ConfirmDialog keep itself open so staff can retry
     } finally {
       setBusyId(null);
     }
@@ -129,13 +141,20 @@ export function ManualSearch({
         </Button>
       </form>
 
-      {results !== null && results.length === 0 && (
-        <p className="py-4 text-center text-sm text-muted-foreground">
-          {searching ? "กำลังค้นหา…" : "ไม่พบการลงทะเบียนที่ตรงกันในกิจกรรมนี้"}
+      {/* List spinner during a slow search — prior results stay dimmed so staff know a refresh is in flight (:45). */}
+      {searching && (
+        <p className="flex items-center justify-center gap-2 py-3 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" /> กำลังค้นหา…
         </p>
       )}
 
-      <div className="space-y-2">
+      {!searching && results !== null && results.length === 0 && (
+        <p className="py-4 text-center text-sm text-muted-foreground">
+          ไม่พบการลงทะเบียนที่ตรงกันในกิจกรรมนี้
+        </p>
+      )}
+
+      <div className={searching ? "space-y-2 opacity-50" : "space-y-2"}>
         {results?.map((r) => (
           <Card key={r.registrationId} className="p-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -178,7 +197,7 @@ export function ManualSearch({
                       r.status === "cancelled" ||
                       r.status === "waitlisted"
                     }
-                    onClick={() => manualCheckin(r)}
+                    onClick={() => setConfirmTarget(r)}
                   >
                     <UserCheck className="size-4" />
                     {busyId === r.registrationId ? "กำลังเช็คอิน…" : "เช็คอิน"}
@@ -189,6 +208,28 @@ export function ManualSearch({
           </Card>
         ))}
       </div>
+
+      {/* Confirm-before-check-in: show full identity so staff don't check in the wrong same-name person (:172). */}
+      <ConfirmDialog
+        open={confirmTarget !== null}
+        onOpenChange={(open) => !open && setConfirmTarget(null)}
+        title="ยืนยันการเช็คอิน"
+        description={
+          confirmTarget
+            ? `ยืนยันเช็คอิน: ${confirmTarget.fullName} · รหัสนักศึกษา ${
+                confirmTarget.studentId ?? "ไม่มี"
+              }${
+                confirmTarget.faculty || confirmTarget.department
+                  ? ` · ${[confirmTarget.faculty, confirmTarget.department].filter(Boolean).join(" / ")}`
+                  : ""
+              } · สถานะ ${regStatusLabel(confirmTarget.status)}`
+            : undefined
+        }
+        confirmLabel="เช็คอิน"
+        onConfirm={async () => {
+          if (confirmTarget) await manualCheckin(confirmTarget);
+        }}
+      />
 
       {/* Undo reason dialog — reason is mandatory (audit). */}
       <Dialog open={undoTarget !== null} onOpenChange={(open) => !open && setUndoTarget(null)}>

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { and, eq, ilike, or, sql } from "drizzle-orm";
+import { and, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { AppVariables } from "../../lib/context";
 import { db } from "../../db/client";
@@ -53,15 +53,41 @@ router.get("/staff/events", requireAuth, requirePermission(canScanCheckin), asyn
     .from(events)
     .where(eq(events.status, "published"));
   const capable = rows.filter((e) => hasCheckinWindow(e.checkinOpenAt, e.checkinCloseAt));
+
+  // Per-event registered/checked-in counts so the staff list can show progress (and distinguish 0 vs unknown).
+  const countRows = capable.length
+    ? await db
+        .select({
+          eventId: registrations.eventId,
+          registered: sql<number>`count(*) filter (where ${registrations.status} = 'registered')::int`,
+          checkedIn: sql<number>`count(*) filter (where ${registrations.status} = 'checked_in')::int`,
+        })
+        .from(registrations)
+        .where(
+          inArray(
+            registrations.eventId,
+            capable.map((e) => e.id),
+          ),
+        )
+        .groupBy(registrations.eventId)
+    : [];
+  const countByEvent = new Map(countRows.map((r) => [r.eventId, r]));
+
   return c.json({
-    events: capable.map((e) => ({
-      id: e.id,
-      title: e.title,
-      location: e.location,
-      checkinOpenAt: e.checkinOpenAt?.toISOString() ?? null,
-      checkinCloseAt: e.checkinCloseAt?.toISOString() ?? null,
-      checkinOpen: isWithinWindow(new Date(), e.checkinOpenAt, e.checkinCloseAt),
-    })),
+    events: capable.map((e) => {
+      const ct = countByEvent.get(e.id);
+      return {
+        id: e.id,
+        title: e.title,
+        location: e.location,
+        checkinOpenAt: e.checkinOpenAt?.toISOString() ?? null,
+        checkinCloseAt: e.checkinCloseAt?.toISOString() ?? null,
+        checkinOpen: isWithinWindow(new Date(), e.checkinOpenAt, e.checkinCloseAt),
+        // Always present (0 when no regs) so the UI can distinguish a real zero from a missing field.
+        registeredCount: ct?.registered ?? 0,
+        checkedInCount: ct?.checkedIn ?? 0,
+      };
+    }),
   });
 });
 
@@ -256,6 +282,8 @@ router.post(
     const { registrationId } = regIdParam.parse(c.req.param());
     const staff = c.get("user");
     const meta = requestMeta(c);
+    // Authoritative server time — returned so the client renders this instead of its own clock.
+    const now = new Date();
 
     await db.transaction(async (tx) => {
       const [reg] = await tx
@@ -270,7 +298,7 @@ router.post(
       if (!event) throw notFound("Event not found");
       if (event.status !== "published")
         throw badRequest("event_not_published", "Event is not published");
-      if (!isWithinWindow(new Date(), event.checkinOpenAt, event.checkinCloseAt))
+      if (!isWithinWindow(now, event.checkinOpenAt, event.checkinCloseAt))
         throw badRequest("checkin_not_open", "Check-in window is not open");
 
       if (reg.status === "cancelled")
@@ -280,7 +308,6 @@ router.post(
       if (reg.status === "checked_in")
         throw badRequest("already_checked_in", "Already checked in");
 
-      const now = new Date();
       await tx
         .update(registrations)
         .set({
@@ -310,7 +337,7 @@ router.post(
       );
     });
 
-    return c.json({ result: "checked_in_success" });
+    return c.json({ result: "checked_in_success", checkedInAt: now.toISOString() });
   },
 );
 

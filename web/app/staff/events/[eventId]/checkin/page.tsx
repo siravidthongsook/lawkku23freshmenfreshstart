@@ -21,7 +21,13 @@ import { formatBangkok } from "@/lib/time";
 import { QrScanner } from "@/components/staff/qr-scanner";
 import { ScanResultPanel } from "@/components/staff/scan-result-panel";
 import { ManualSearch } from "@/components/staff/manual-search";
+import { primeAudio } from "@/components/staff/feedback";
 import type { ScanResponse, StaffCheckinContext } from "@/components/staff/types";
+
+// How long a scan result stays on screen before auto-clearing back to the idle "ready to scan" panel.
+const RESULT_AUTO_CLEAR_MS = 6000;
+// Periodic ctx refresh so the open/closed badge + counts don't go stale on a phone left open.
+const CTX_REFRESH_MS = 30000;
 
 const STAFF_ROLES = ["checkin_staff", "admin"] as const;
 
@@ -32,6 +38,9 @@ function ScannerContent({ eventId }: { eventId: string }) {
   // Guard against overlapping scans (camera can fire repeatedly). Token of the last in-flight scan.
   const inFlightRef = useRef(false);
   const lastTokenRef = useRef<string | null>(null);
+
+  // Auto-clear timer for the last scan result (reset panel to "พร้อมสแกน" idle).
+  const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadCtx = useCallback(async () => {
     try {
@@ -47,28 +56,54 @@ function ScannerContent({ eventId }: { eventId: string }) {
     void loadCtx();
   }, [loadCtx]);
 
+  // Periodically refresh ctx so the open/closed badge + counts stay fresh on a long-open phone (:36).
+  useEffect(() => {
+    const id = setInterval(() => void loadCtx(), CTX_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [loadCtx]);
+
+  // Show a result and (re)arm the auto-clear so a stale success card can't be mistaken for a fresh scan (:58).
+  const showResult = useCallback((res: ScanResponse) => {
+    setResult(res);
+    if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
+    // network_error keeps its retry button on screen — don't auto-dismiss it.
+    if (res.result !== "network_error") {
+      clearTimerRef.current = setTimeout(() => setResult(null), RESULT_AUTO_CLEAR_MS);
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
+    };
+  }, []);
+
   // Single choke-point for a scan. Online-only: any failure → network_error, never success.
   const handleToken = useCallback(
     async (token: string) => {
       if (inFlightRef.current) return;
       inFlightRef.current = true;
       lastTokenRef.current = token;
+      primeAudio(); // a scan is a user gesture — unlock the AudioContext for the result beep
       try {
         const res = await apiPost<ScanResponse>(`/events/${eventId}/checkins/scan`, {
           qr_token: token,
         });
         // Trust ONLY the server's explicit result code.
-        setResult(res);
-        // Refresh counts after any successful round-trip (count may have changed).
-        if (res.result === "checked_in_success") void loadCtx();
+        showResult(res);
+        // Refresh ctx after EVERY round-trip (:36): counts may have changed and the window may have just
+        // opened/closed server-side (e.g. a checkin_not_open/closed result should re-sync the badge).
+        void loadCtx();
       } catch {
         // Thrown ApiError / network failure / non-2xx — surface retry, NEVER a success.
-        setResult({ result: "network_error", registrationId: undefined });
+        // OFFLINE NOTE (:64): by design there is NO offline queue (V1 non-goal). Each failed scan is a
+        // per-person network_error with retry; venue wifi must be online to check anyone in.
+        showResult({ result: "network_error", registrationId: undefined });
       } finally {
         inFlightRef.current = false;
       }
     },
-    [eventId, loadCtx],
+    [eventId, loadCtx, showResult],
   );
 
   const retry = useCallback(() => {
@@ -132,7 +167,8 @@ function ScannerContent({ eventId }: { eventId: string }) {
       <ScanResultPanel result={result} onRetry={retry} />
 
       <Tabs defaultValue="scan">
-        <TabsList className="grid w-full grid-cols-2">
+        {/* h-auto so list grows to fit the taller h-11 triggers (else active box overflows) */}
+        <TabsList className="grid h-auto w-full grid-cols-2">
           <TabsTrigger value="scan" className="h-11 text-base">
             สแกน QR
           </TabsTrigger>

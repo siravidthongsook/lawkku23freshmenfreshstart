@@ -67,23 +67,26 @@ export type EventAdmin = EventPublic & {
   updatedAt: string;
 };
 
-// Row in a registration list (GET /me/registrations, GET /admin/events/:id/registrations).
+// Row in the admin event registration list (GET /admin/events/:id/registrations).
+// Enriched server-side with user identity, the check-in actor's name, and the form version number.
 export type RegistrationListItem = {
   id: string;
   eventId: string;
-  eventTitle: string;
-  eventStartAt: string | null;
+  userId: string;
+  status: RegistrationStatus;
+  formVersionId: string | null;
   studentId: string | null;
-  fullName: string;
+  fullName: string | null;
+  email: string | null;
   faculty: string | null;
   department: string | null;
-  status: RegistrationStatus;
   registeredAt: string | null;
-  checkedInAt: string | null;
-  checkedInBy: string | null;
-  cancelledAt: string | null;
   waitlistedAt: string | null;
-  formVersion: string | null;
+  checkedInAt: string | null;
+  cancelledAt: string | null;
+  checkinMethod: string | null;
+  checkedInBy: string | null; // full name of staff/admin who checked them in
+  formVersion: number | null; // human-friendly version number
 };
 
 // User row (GET /admin/users).

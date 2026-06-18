@@ -2,22 +2,26 @@
 
 // Renders the most recent scan outcome. Every ScanResultCode (+ network_error) has an explicit treatment.
 // SAFETY: only `checked_in_success` is a success (green). Everything else is a denial/error — never green.
+import { useEffect } from "react";
 import {
   CheckCircle2,
   XCircle,
   AlertTriangle,
   WifiOff,
   Clock,
+  CalendarClock,
   RotateCcw,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatBangkok } from "@/lib/time";
+import { feedbackSuccess, feedbackWarn, feedbackDeny } from "./feedback";
 import type { ScanResultCode } from "@/lib/types";
 import type { ScanResponse } from "./types";
 
-type Tone = "success" | "warn" | "deny" | "error";
+// `info` is a distinct tone for "window not open / closed" so it doesn't look like already-checked-in (warn).
+type Tone = "success" | "warn" | "info" | "deny" | "error";
 
 // Per-code presentation. `manualHint` shows the "try manual search" nudge for invalid/revoked tokens.
 const PRESENTATION: Record<
@@ -46,12 +50,12 @@ const PRESENTATION: Record<
     hint: "ผู้ที่อยู่ในรายชื่อสำรองไม่สามารถเช็คอินได้",
   },
   checkin_not_open: {
-    tone: "warn",
+    tone: "info",
     title: "ยังไม่เปิดเช็คอิน",
     hint: "ยังไม่ถึงช่วงเวลาเช็คอิน",
   },
   checkin_closed: {
-    tone: "warn",
+    tone: "info",
     title: "ปิดเช็คอินแล้ว",
     hint: "ช่วงเวลาเช็คอินสิ้นสุดแล้ว",
   },
@@ -84,6 +88,7 @@ const PRESENTATION: Record<
 const TONE_STYLE: Record<Tone, string> = {
   success: "border-green-300 bg-green-50 text-green-900",
   warn: "border-amber-300 bg-amber-50 text-amber-900",
+  info: "border-blue-300 bg-blue-50 text-blue-900",
   deny: "border-red-300 bg-red-50 text-red-900",
   error: "border-orange-400 bg-orange-50 text-orange-900",
 };
@@ -92,8 +97,16 @@ function ToneIcon({ tone }: { tone: Tone }) {
   const cls = "size-7 shrink-0";
   if (tone === "success") return <CheckCircle2 className={cls} />;
   if (tone === "warn") return <Clock className={cls} />;
+  if (tone === "info") return <CalendarClock className={cls} />; // window timing — distinct from already-checked-in
   if (tone === "error") return <WifiOff className={cls} />;
   return <XCircle className={cls} />;
+}
+
+// Map a tone to its audio+haptic feedback. success=chirp, warn/info=soft double-beep, deny/error=buzzer.
+function playFeedback(tone: Tone): void {
+  if (tone === "success") return feedbackSuccess();
+  if (tone === "warn" || tone === "info") return feedbackWarn();
+  return feedbackDeny(); // deny + error → clearly-bad buzzer
 }
 
 export function ScanResultPanel({
@@ -103,6 +116,12 @@ export function ScanResultPanel({
   result: ScanResponse | null;
   onRetry?: () => void;
 }) {
+  // Fire audio+haptic feedback on every new result (parent passes a fresh object per scan, so each scan plays).
+  useEffect(() => {
+    if (!result) return;
+    playFeedback(PRESENTATION[result.result].tone);
+  }, [result]);
+
   if (!result) {
     return (
       <Card className="flex min-h-[7rem] items-center justify-center p-6 text-center text-sm text-muted-foreground">

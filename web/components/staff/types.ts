@@ -61,3 +61,6 @@ export type CheckinSearchResult = {
 };
 
 export type CheckinSearchResponse = { results: CheckinSearchResult[] };
+
+// POST /api/registrations/:id/manual-checkin — returns authoritative server check-in time.
+export type ManualCheckinResponse = { result: "checked_in_success"; checkedInAt: string };

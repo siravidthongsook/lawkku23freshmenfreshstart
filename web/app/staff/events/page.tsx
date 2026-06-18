@@ -1,9 +1,9 @@
 "use client";
 
 // Check-in Staff landing: all check-in-capable events (global). Links each to its scanner.
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { CalendarClock, MapPin, ScanLine } from "lucide-react";
+import { CalendarClock, MapPin, ScanLine, RefreshCw } from "lucide-react";
 import { apiGet, ApiError } from "@/lib/api";
 import { RequireRole } from "@/components/guards";
 import { AppShell } from "@/components/app-shell";
@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/ui/error-state";
 import { formatBangkok } from "@/lib/time";
 import type { StaffEventListItem, StaffEventListResponse } from "@/components/staff/types";
 
@@ -30,25 +31,30 @@ function CheckinWindow({ e }: { e: StaffEventListItem }) {
 function EventsList() {
   const [events, setEvents] = useState<StaffEventListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const res = await apiGet<StaffEventListResponse>("/staff/events");
-        if (alive) setEvents(res.events ?? []);
-      } catch (err) {
-        if (!alive) return;
-        setError(err instanceof ApiError ? err.message : "ไม่สามารถโหลดกิจกรรมได้");
-        setEvents([]);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
+  const load = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const res = await apiGet<StaffEventListResponse>("/staff/events");
+      // Sort check-in-open events first so staff don't hunt for the active one (:74).
+      const sorted = [...(res.events ?? [])].sort(
+        (a, b) => Number(b.checkinOpen) - Number(a.checkinOpen),
+      );
+      setEvents(sorted);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "ไม่สามารถโหลดกิจกรรมได้");
+    } finally {
+      setRefreshing(false);
+    }
   }, []);
 
-  if (events === null) {
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (events === null && !error) {
     return (
       <div className="space-y-3">
         <Skeleton className="h-28 w-full" />
@@ -57,13 +63,12 @@ function EventsList() {
     );
   }
 
+  // Retry on error — flaky venue wifi shouldn't strand staff on a dead screen (:60).
   if (error) {
-    return (
-      <Card className="p-6 text-center text-sm text-muted-foreground">{error}</Card>
-    );
+    return <ErrorState message={error} onRetry={load} />;
   }
 
-  if (events.length === 0) {
+  if (!events || events.length === 0) {
     return (
       <Card className="p-8 text-center text-sm text-muted-foreground">
         ขณะนี้ไม่มีกิจกรรมที่เปิดให้เช็คอิน
@@ -72,7 +77,15 @@ function EventsList() {
   }
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className="space-y-3">
+      {/* Manual refresh — counts/open-state can go stale on a phone left open all day. */}
+      <div className="flex justify-end">
+        <Button variant="outline" size="sm" onClick={() => void load()} disabled={refreshing}>
+          <RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />
+          รีเฟรช
+        </Button>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
       {events.map((e) => (
         <Card key={e.id} className="flex flex-col">
           <CardHeader className="pb-3">
@@ -101,7 +114,8 @@ function EventsList() {
               </p>
             </div>
 
-            {/* Counts only render when the backend provides them. */}
+            {/* Backend always sends counts now (0 when none) — render only when present so a real 0 shows
+                as "0" but a missing field (older backend) stays hidden rather than a misleading "0" (:105). */}
             {(e.checkedInCount != null || e.registeredCount != null) && (
               <div className="flex gap-4 text-sm">
                 <span>
@@ -123,6 +137,7 @@ function EventsList() {
           </CardContent>
         </Card>
       ))}
+      </div>
     </div>
   );
 }
