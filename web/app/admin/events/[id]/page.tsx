@@ -2,9 +2,18 @@
 
 // Event Overview (dashboard L1). GET /admin/events/:id → { event, computed }.
 // Counts/capacity status, window statuses, status + visibility changers, links to form/registrations/export.
+// Also fetches GET /admin/events/:id/form to surface form readiness.
 import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, FileText, Users, Download, Pencil } from "lucide-react";
+import {
+  ArrowLeft,
+  FileText,
+  Users,
+  Download,
+  Pencil,
+  AlertTriangle,
+  ChevronRight,
+} from "lucide-react";
 import { toast } from "sonner";
 import { apiGet, apiPost, ApiError } from "@/lib/api";
 import {
@@ -14,6 +23,8 @@ import {
 import type { EventAdmin, EventStatus, EventVisibility } from "@/lib/types";
 import { formatBangkok } from "@/lib/time";
 import { EventStatusBadge } from "@/components/badges";
+import { EventReadiness } from "@/components/admin-events/event-readiness";
+import { ReasonDialog } from "@/components/admin-events/reason-dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,6 +44,9 @@ type EventComputed = {
   capacity: { enabled: boolean; limit: number | null; used: number; full: boolean };
 };
 
+// Active form version (subset of GET /admin/events/:id/form → { form }).
+type ActiveForm = { versionNumber: number } | null;
+
 const STATUS_LABEL: Record<EventStatus, string> = {
   draft: "ฉบับร่าง",
   published: "เผยแพร่แล้ว",
@@ -40,20 +54,39 @@ const STATUS_LABEL: Record<EventStatus, string> = {
   archived: "เก็บถาวรแล้ว",
 };
 
+const VISIBILITY_LABEL: Record<EventVisibility, string> = {
+  listed: "แสดงในรายการสาธารณะ",
+  unlisted: "เข้าถึงผ่านลิงก์โดยตรงเท่านั้น",
+};
+
+// Transitions that need a confirmation + audit reason (destructive / hides the event).
+function isDestructiveStatus(from: EventStatus, to: EventStatus): boolean {
+  if (to === "cancelled" || to === "archived") return true;
+  if (from === "published" && to === "draft") return true; // un-publishing pulls it from students
+  return false;
+}
+
 export default function EventOverviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [event, setEvent] = useState<EventAdmin | null>(null);
   const [computed, setComputed] = useState<EventComputed | null>(null);
+  const [form, setForm] = useState<ActiveForm>(null);
+  const [formLoaded, setFormLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Pending destructive status change awaiting reason confirmation.
+  const [pendingStatus, setPendingStatus] = useState<EventStatus | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const res = await apiGet<{ event: EventAdmin; computed: EventComputed }>(
-        `/admin/events/${id}`,
-      );
-      setEvent(res.event);
-      setComputed(res.computed ?? null);
+      const [detail, formRes] = await Promise.all([
+        apiGet<{ event: EventAdmin; computed: EventComputed }>(`/admin/events/${id}`),
+        apiGet<{ form: ActiveForm }>(`/admin/events/${id}/form`).catch(() => ({ form: null })),
+      ]);
+      setEvent(detail.event);
+      setComputed(detail.computed ?? null);
+      setForm(formRes.form ?? null);
+      setFormLoaded(true);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "ไม่สามารถโหลดกิจกรรมได้");
     }
@@ -63,18 +96,28 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
     void load();
   }, [load]);
 
-  async function changeStatus(status: EventStatus) {
-    if (!event || status === event.status) return;
+  // Apply a status change. Destructive ones route through the reason dialog first.
+  async function applyStatus(status: EventStatus, reason?: string) {
     setBusy(true);
     try {
-      await apiPost(`/admin/events/${id}/status`, { status });
+      await apiPost(`/admin/events/${id}/status`, { status, ...(reason ? { reason } : {}) });
       toast.success(`เปลี่ยนสถานะเป็น ${STATUS_LABEL[status]} แล้ว`);
       await load();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "ไม่สามารถเปลี่ยนสถานะได้");
+      throw err; // let the dialog stay open on failure
     } finally {
       setBusy(false);
     }
+  }
+
+  function onStatusChange(status: EventStatus) {
+    if (!event || status === event.status) return;
+    if (isDestructiveStatus(event.status, status)) {
+      setPendingStatus(status); // open ReasonDialog
+      return;
+    }
+    void applyStatus(status); // non-destructive → instant
   }
 
   async function changeVisibility(visibility: EventVisibility) {
@@ -82,7 +125,7 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
     setBusy(true);
     try {
       await apiPost(`/admin/events/${id}/visibility`, { visibility });
-      toast.success(`เปลี่ยนการมองเห็นเป็น ${visibility} แล้ว`);
+      toast.success(`เปลี่ยนการมองเห็นเป็น ${VISIBILITY_LABEL[visibility]} แล้ว`);
       await load();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "ไม่สามารถเปลี่ยนการมองเห็นได้");
@@ -102,9 +145,25 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
   }
 
   const cap = computed?.capacity;
+  const hasForm = form != null;
+  // Published self-register with no form → students cannot actually register.
+  const formWarning = event.registrationMode === "public_self_register" && formLoaded && !hasForm;
+  // Fresh draft with no form yet → nudge toward the next step.
+  const draftNextStep = event.status === "draft" && formLoaded && !hasForm;
 
   return (
     <div className="space-y-6">
+      {/* Breadcrumb trail: Events › title › ภาพรวม */}
+      <nav className="flex items-center gap-1 text-xs text-muted-foreground">
+        <Link href="/admin/events" className="hover:underline">
+          กิจกรรม
+        </Link>
+        <ChevronRight className="size-3" />
+        <span className="max-w-[16rem] truncate text-foreground">{event.title}</span>
+        <ChevronRight className="size-3" />
+        <span>ภาพรวม</span>
+      </nav>
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Button asChild variant="ghost" size="sm">
@@ -147,6 +206,36 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
         </div>
       </div>
 
+      {/* Effective-state card (top, prominent) — what students see right now + checklist. */}
+      <EventReadiness
+        event={event}
+        computed={computed}
+        form={formLoaded ? { hasForm, version: form?.versionNumber ?? null } : null}
+      />
+
+      {/* No-form warning when self-register is on but no form exists yet. */}
+      {formWarning ? (
+        <p className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          <span>
+            รูปแบบการลงทะเบียนเป็น &quot;ลงทะเบียนเอง&quot; แต่ยังไม่ได้สร้างฟอร์ม นักศึกษาจะลงทะเบียนไม่ได้ —{" "}
+            <Link href={`/admin/events/${id}/form`} className="font-medium underline">
+              สร้างฟอร์มลงทะเบียน
+            </Link>
+          </span>
+        </p>
+      ) : null}
+
+      {/* Next-step nudge for a fresh draft without a form. */}
+      {draftNextStep && !formWarning ? (
+        <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+          ขั้นตอนถัดไป:{" "}
+          <Link href={`/admin/events/${id}/form`} className="font-medium text-foreground underline">
+            สร้างฟอร์มลงทะเบียน
+          </Link>
+        </p>
+      ) : null}
+
       {/* Status + visibility controls */}
       <div className="grid gap-4 sm:grid-cols-2">
         <Card>
@@ -156,7 +245,7 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
           <CardContent>
             <Select
               value={event.status}
-              onValueChange={(v) => changeStatus(v as EventStatus)}
+              onValueChange={(v) => onStatusChange(v as EventStatus)}
               disabled={busy}
             >
               <SelectTrigger>
@@ -176,7 +265,7 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
           <CardHeader>
             <CardTitle className="text-sm">การมองเห็น</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-2">
             <Select
               value={event.visibility}
               onValueChange={(v) => changeVisibility(v as EventVisibility)}
@@ -188,14 +277,38 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
               <SelectContent>
                 {eventVisibilityEnum.options.map((v) => (
                   <SelectItem key={v} value={v}>
-                    {v}
+                    {VISIBILITY_LABEL[v as EventVisibility]}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            {/* Visibility only takes effect once the event is published. */}
+            <p className="text-xs text-muted-foreground">มีผลเฉพาะเมื่อเผยแพร่แล้ว</p>
           </CardContent>
         </Card>
       </div>
+
+      {/* Form status row (near the ฟอร์ม button concept). */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">ฟอร์มลงทะเบียน</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center justify-between gap-2 text-sm">
+          <span className={hasForm ? "" : "text-muted-foreground"}>
+            {!formLoaded
+              ? "กำลังโหลด…"
+              : hasForm
+                ? `ฟอร์ม: เวอร์ชัน ${form?.versionNumber ?? "—"}`
+                : "ยังไม่ได้สร้างฟอร์ม"}
+          </span>
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/admin/events/${id}/form`}>
+              <FileText className="size-4" />
+              {hasForm ? "แก้ไขฟอร์ม" : "สร้างฟอร์ม"}
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
 
       {/* Count tiles. Per-status counts come from the row when present; else "—". */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -250,6 +363,22 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
           </CardContent>
         </Card>
       </div>
+
+      {/* Confirmation + mandatory reason for destructive status changes. */}
+      <ReasonDialog
+        open={pendingStatus !== null}
+        onOpenChange={(next) => {
+          if (!next) setPendingStatus(null);
+        }}
+        title={pendingStatus ? `ยืนยันเปลี่ยนสถานะเป็น ${STATUS_LABEL[pendingStatus]}` : ""}
+        description="การเปลี่ยนแปลงนี้ส่งผลต่อสิ่งที่นักศึกษาเห็น โปรดระบุเหตุผล"
+        confirmLabel="ยืนยันเปลี่ยนสถานะ"
+        destructive
+        onConfirm={async (reason) => {
+          if (pendingStatus) await applyStatus(pendingStatus, reason);
+          setPendingStatus(null);
+        }}
+      />
     </div>
   );
 }

@@ -47,6 +47,12 @@ export function validateAnswers(
   const errors: Record<string, string> = {};
   const values: AnswerMap = {};
 
+  // Reject answer keys that aren't defined in the schema (prevents silent drop of stray/spoofed fields).
+  const knownKeys = new Set(schema.fields.map((f) => f.key));
+  for (const key of Object.keys(answers)) {
+    if (!knownKeys.has(key)) errors[key] = "Unknown field";
+  }
+
   for (const f of schema.fields) {
     const raw = answers[f.key];
     const missing = raw === undefined || raw === null || raw === "";
@@ -72,7 +78,9 @@ export function validateAnswers(
         break;
       }
       case "checkbox": {
-        values[f.key] = Boolean(raw);
+        // Explicit truthy set — avoids Boolean("false") === true coercion bug. Everything else is false.
+        values[f.key] =
+          raw === true || raw === 1 || raw === "true" || raw === "1" || raw === "on";
         break;
       }
       case "single_choice":

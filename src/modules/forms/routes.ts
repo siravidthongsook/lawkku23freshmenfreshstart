@@ -10,7 +10,12 @@ import { notFound } from "../../lib/errors";
 import { formSchema, type FormSchema } from "../../lib/form-schema";
 import { canManageEvents } from "../../lib/permissions";
 import { eventIdParam, createVersionSchema, updateFormSchema } from "./schema";
-import { createNewVersion, getActiveVersion, hasSubmissions, isStructuralChange } from "./service";
+import {
+  createNewVersion,
+  getActiveVersion,
+  isStructuralChange,
+  versionIsReferenced,
+} from "./service";
 
 const router = new Hono<{ Variables: AppVariables }>();
 
@@ -47,11 +52,10 @@ router.patch("/admin/events/:eventId/form", async (c) => {
 
   // No active version yet → bootstrap version 1 (always allowed; no submissions can reference it).
   if (!active) {
-    const created = await createNewVersion(db, {
-      eventId,
-      schema: body.schema,
-      adminId: user.id,
-    });
+    // Tx so deactivate+max+insert is atomic (DB partial-unique index also guards races).
+    const created = await db.transaction((tx) =>
+      createNewVersion(tx, { eventId, schema: body.schema, adminId: user.id }),
+    );
     await writeAudit({
       actorUserId: user.id,
       actorRole: user.role,
@@ -67,15 +71,16 @@ router.patch("/admin/events/:eventId/form", async (c) => {
 
   const oldSchema = formSchema.parse(active.schemaJson) as FormSchema;
   const structural = isStructuralChange(oldSchema, body.schema);
-  const submissionsExist = await hasSubmissions(eventId);
+  // Fork if ANY stored data references the active version (answers/regs), even cancelled ones —
+  // an in-place structural edit would silently corrupt those existing answers.
+  const referenced = await versionIsReferenced(db, active.id);
 
-  // Structural change WITH existing submissions → must create a new version (old regs keep old).
-  if (structural && submissionsExist) {
-    const created = await createNewVersion(db, {
-      eventId,
-      schema: body.schema,
-      adminId: user.id,
-    });
+  // Structural change while the active version is referenced → fork a new version (old refs keep old schema).
+  if (structural && referenced) {
+    // Tx so deactivate+max+insert is atomic (DB partial-unique index also guards races).
+    const created = await db.transaction((tx) =>
+      createNewVersion(tx, { eventId, schema: body.schema, adminId: user.id }),
+    );
     await writeAudit({
       actorUserId: user.id,
       actorRole: user.role,
@@ -90,7 +95,7 @@ router.patch("/admin/events/:eventId/form", async (c) => {
     return c.json({ form: created, versioned: true });
   }
 
-  // Safe edit, OR structural-but-no-submissions → edit active version in place.
+  // Safe edit (label/help/sort), OR structural change on a version nothing references yet → edit in place.
   const [updated] = await db
     .update(eventFormVersions)
     .set({ schemaJson: body.schema })
@@ -109,11 +114,10 @@ router.post("/admin/events/:eventId/form/version", async (c) => {
   await loadEvent(eventId);
 
   const prev = await getActiveVersion(eventId);
-  const created = await createNewVersion(db, {
-    eventId,
-    schema: body.schema,
-    adminId: user.id,
-  });
+  // Tx so deactivate+max+insert is atomic (DB partial-unique index also guards races).
+  const created = await db.transaction((tx) =>
+    createNewVersion(tx, { eventId, schema: body.schema, adminId: user.id }),
+  );
 
   await writeAudit({
     actorUserId: user.id,

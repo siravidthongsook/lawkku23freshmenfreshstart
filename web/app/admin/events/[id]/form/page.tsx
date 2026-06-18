@@ -5,18 +5,14 @@ import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { apiGet, ApiError } from "@/lib/api";
-import type { FormField, FormSchema } from "@/lib/schemas";
-import { FormBuilder } from "@/components/admin-events/form-builder";
+import type { FormField } from "@/lib/schemas";
+import { FormBuilder, type SavedForm } from "@/components/admin-events/form-builder";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // Stored form version shape (forms service returns the row): schemaJson holds the FormSchema.
-type FormVersion = {
-  id: string;
-  versionNumber: number;
-  schemaJson: FormSchema;
-  isActive: boolean;
-};
+// Reuses SavedForm so GET and the save handlers agree on the row shape.
+type FormVersion = SavedForm;
 
 export default function FormBuilderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -66,7 +62,11 @@ export default function FormBuilderPage({ params }: { params: Promise<{ id: stri
           eventId={id}
           initialFields={initialFields}
           versionNumber={form?.versionNumber ?? null}
-          onSaved={() => setReloadKey((k) => k + 1)}
+          onSaved={(saved) => {
+            // Set state from the just-saved row (never refetch-to-empty, which would let a later PATCH wipe fields).
+            setForm(saved);
+            setReloadKey((k) => k + 1); // remount builder so initialFields re-baselines to the saved schema
+          }}
         />
       )}
     </div>
