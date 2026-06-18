@@ -69,7 +69,6 @@ export function eventStateLabel(s: string | null | undefined): string {
 // ---- registration mode (registration_mode enum) ----
 const REG_MODE: Record<string, string> = {
   public_self_register: "ลงทะเบียนเองแบบสาธารณะ",
-  admin_import_only: "นำเข้าโดยผู้ดูแลเท่านั้น",
   closed: "ปิดรับลงทะเบียน",
 };
 export function regModeLabel(m: string | null | undefined): string {

@@ -39,9 +39,9 @@ type Props = {
   initial?: Partial<EventAdmin> | null;
 };
 
+// public_self_register = self-register, but only existing (admin-provisioned + claimed) accounts; no public signup exists.
 const REG_MODE_LABEL: Record<string, string> = {
-  public_self_register: "เปิดให้ลงทะเบียนเองแบบสาธารณะ",
-  admin_import_only: "นำเข้าโดยผู้ดูแลเท่านั้น",
+  public_self_register: "เปิดให้ผู้มีบัญชีลงทะเบียนเอง",
   closed: "ปิด",
 };
 

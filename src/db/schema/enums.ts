@@ -6,9 +6,9 @@ export const userStatus = pgEnum("user_status", ["active", "disabled"]);
 
 export const eventStatus = pgEnum("event_status", ["draft", "published", "cancelled", "archived"]);
 export const eventVisibility = pgEnum("event_visibility", ["listed", "unlisted"]);
+// admin_import_only removed: accounts are admin-provisioned, so self-register already implies "DB account only".
 export const registrationMode = pgEnum("registration_mode", [
   "public_self_register",
-  "admin_import_only",
   "closed",
 ]);
 

@@ -7,7 +7,7 @@ import type { FormSchema } from "@/lib/schemas";
 export type Role = "student" | "checkin_staff" | "admin";
 export type EventStatus = "draft" | "published" | "cancelled" | "archived";
 export type EventVisibility = "listed" | "unlisted";
-export type RegistrationMode = "public_self_register" | "admin_import_only" | "closed";
+export type RegistrationMode = "public_self_register" | "closed";
 export type RegistrationStatus = "registered" | "waitlisted" | "checked_in" | "cancelled";
 
 // GET /auth/me — current user + forced-change flag.

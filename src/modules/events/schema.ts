@@ -6,7 +6,6 @@ export const eventStatusEnum = z.enum(["draft", "published", "cancelled", "archi
 export const eventVisibilityEnum = z.enum(["listed", "unlisted"]);
 export const registrationModeEnum = z.enum([
   "public_self_register",
-  "admin_import_only",
   "closed",
 ]);
 
