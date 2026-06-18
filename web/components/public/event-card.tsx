@@ -21,9 +21,12 @@ export function EventCard({ event }: { event: EventPublic }) {
             sizes="(max-width: 768px) 100vw, 33vw"
             className="object-cover transition-transform duration-300 group-hover:scale-105"
           />
-          <div className="absolute left-2 top-2">
-            <EventStatusBadge status={event.status} />
-          </div>
+          {/* Students only ever see published events — "เผยแพร่แล้ว" is admin noise. Flag only exceptional states (e.g. cancelled). */}
+          {event.status !== "published" ? (
+            <div className="absolute left-2 top-2">
+              <EventStatusBadge status={event.status} />
+            </div>
+          ) : null}
         </div>
         <CardContent className="space-y-2 p-4">
           <h3 className="line-clamp-2 text-base font-semibold leading-snug">{event.title}</h3>

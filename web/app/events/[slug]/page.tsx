@@ -176,9 +176,12 @@ function EventDetail({
             className="object-cover"
             priority
           />
-          <div className="absolute left-3 top-3">
-            <EventStatusBadge status={event.status} />
-          </div>
+          {/* Hide "เผยแพร่แล้ว" — student-facing only ever sees published. Keep badge for exceptional states (cancelled/archived), which also get a banner below. */}
+          {event.status !== "published" ? (
+            <div className="absolute left-3 top-3">
+              <EventStatusBadge status={event.status} />
+            </div>
+          ) : null}
         </div>
 
         {/* Thai stacks vowels/tone marks: drop tracking-tight, give breathing room via leading + balanced wrap */}
