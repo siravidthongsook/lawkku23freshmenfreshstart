@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, ilike, ne, or } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, ne, or, sql } from "drizzle-orm";
 import type { AppVariables } from "../../lib/context";
 import { db } from "../../db/client";
 import { temporaryPasswords, users, type User } from "../../db/schema/users";
@@ -11,7 +11,7 @@ import { generateTempPassword, hashPassword } from "../../lib/password";
 import { decryptSecret, encryptSecret } from "../../lib/crypto";
 import { revokeAllSessions } from "../../lib/session";
 import { writeAudit } from "../../lib/audit";
-import { clearLockout } from "../auth/service";
+import { clearLockout, getLockoutState } from "../auth/service";
 import {
   changeRoleSchema,
   createUserSchema,
@@ -33,9 +33,10 @@ function one<T>(rows: T[]): T {
 router.use("/admin/users/*", requireAuth, requirePermission(canManageUsers));
 router.use("/admin/users", requireAuth, requirePermission(canManageUsers));
 
-// GET /admin/users — list/search/filter.
+// GET /admin/users — list/search/filter + limit/offset pagination (returns total for the pager).
+// Each row carries has_pending_temp_password so the list can badge users awaiting first login.
 router.get("/admin/users", zValidator("query", listUsersQuery), async (c) => {
-  const { q, role, status } = c.req.valid("query");
+  const { q, role, status, limit, offset } = c.req.valid("query");
   const conds = [];
   if (role) conds.push(eq(users.role, role));
   if (status) conds.push(eq(users.status, status));
@@ -43,12 +44,36 @@ router.get("/admin/users", zValidator("query", listUsersQuery), async (c) => {
     const pat = `%${q}%`;
     conds.push(or(ilike(users.email, pat), ilike(users.studentId, pat), ilike(users.fullName, pat)));
   }
+  const where = conds.length ? and(...conds) : undefined;
+
+  const [countRow] = await db.select({ c: sql<number>`count(*)::int` }).from(users).where(where);
+  const total = countRow?.c ?? 0;
+
   const rows = await db
     .select()
     .from(users)
-    .where(conds.length ? and(...conds) : undefined)
-    .orderBy(desc(users.createdAt));
-  return c.json({ users: rows.map(publicUser) });
+    .where(where)
+    .orderBy(desc(users.createdAt))
+    .limit(limit)
+    .offset(offset);
+
+  // Resolve pending temp-pw flags in one query for the visible page only.
+  const ids = rows.map((r) => r.id);
+  const pendingIds = new Set<string>();
+  if (ids.length) {
+    const pendingRows = await db
+      .select({ userId: temporaryPasswords.userId })
+      .from(temporaryPasswords)
+      .where(inArray(temporaryPasswords.userId, ids));
+    for (const p of pendingRows) pendingIds.add(p.userId);
+  }
+
+  return c.json({
+    users: rows.map((u) => ({ ...publicUser(u), has_pending_temp_password: pendingIds.has(u.id) })),
+    total,
+    limit,
+    offset,
+  });
 });
 
 // POST /admin/users — create + generate temp password (stored encrypted), must_change=true.
@@ -105,6 +130,16 @@ router.post("/admin/users", zValidator("json", createUserSchema), async (c) => {
   return c.json({ user: publicUser(created) }, 201);
 });
 
+// GET /admin/users/temp-passwords/count — pending temp-pw count, so the export page can show
+// how many will be exported BEFORE downloading the plaintext file. No PII, no passwords.
+// NOTE: registered before the `/:userId` route so the literal path isn't captured as a param.
+router.get("/admin/users/temp-passwords/count", async (c) => {
+  const [row] = await db
+    .select({ c: sql<number>`count(*)::int` })
+    .from(temporaryPasswords);
+  return c.json({ count: row?.c ?? 0 });
+});
+
 // GET /admin/users/temp-passwords/export — decrypt + return ONLY pending users; audit count only.
 // NOTE: registered before the `/:userId` route so the literal path isn't captured as a param.
 router.get("/admin/users/temp-passwords/export", async (c) => {
@@ -145,7 +180,7 @@ router.get("/admin/users/temp-passwords/export", async (c) => {
   return c.json({ users: exported });
 });
 
-// GET /admin/users/:userId — detail (also surfaces pending temp-password flag).
+// GET /admin/users/:userId — detail (also surfaces pending temp-password flag + lockout state).
 router.get("/admin/users/:userId", async (c) => {
   const user = await getUserOr404(c.req.param("userId"));
   const [pending] = await db
@@ -153,7 +188,14 @@ router.get("/admin/users/:userId", async (c) => {
     .from(temporaryPasswords)
     .where(eq(temporaryPasswords.userId, user.id))
     .limit(1);
-  return c.json({ user: publicUser(user), has_pending_temp_password: Boolean(pending) });
+  // Lockout state so the UI can show a lock badge + enable Unlock only when actually locked.
+  const lockout = await getLockoutState(user.email);
+  return c.json({
+    user: publicUser(user),
+    has_pending_temp_password: Boolean(pending),
+    locked: lockout.locked,
+    locked_until: lockout.lockedUntil,
+  });
 });
 
 // PATCH /admin/users/:userId — edit profile; email/student_id stay unique; audit old/new.
@@ -197,10 +239,11 @@ router.patch("/admin/users/:userId", zValidator("json", updateUserSchema), async
   return c.json({ user: publicUser(updated) });
 });
 
-// POST /admin/users/:userId/disable — disable + revoke all sessions.
-router.post("/admin/users/:userId/disable", async (c) => {
+// POST /admin/users/:userId/disable — disable + revoke all sessions. Reason required (sensitive: logs user out everywhere).
+router.post("/admin/users/:userId/disable", zValidator("json", reasonSchema), async (c) => {
   const admin = c.get("user");
   const meta = requestMeta(c);
+  const { reason } = c.req.valid("json");
   const target = await getUserOr404(c.req.param("userId"));
   if (target.status === "disabled") return c.json({ user: publicUser(target) });
 
@@ -221,6 +264,7 @@ router.post("/admin/users/:userId/disable", async (c) => {
         entityType: "user",
         entityId: target.id,
         targetUserId: target.id,
+        reason,
         ...meta,
       },
       tx,

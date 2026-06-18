@@ -83,7 +83,8 @@ export default function EventsPage() {
         sorted.sort((a, b) => a.title.localeCompare(b.title, "th"));
         break;
       case "registered_desc":
-        sorted.sort((a, b) => b.registeredCount - a.registeredCount);
+        // Guard missing counts → treat as 0 so a stray undefined never produces NaN ordering.
+        sorted.sort((a, b) => (b.registeredCount ?? 0) - (a.registeredCount ?? 0));
         break;
       case "date_asc":
       default:
@@ -100,8 +101,13 @@ export default function EventsPage() {
         <p className="text-sm text-muted-foreground">เลือกชมและลงทะเบียนกิจกรรมนักศึกษา</p>
       </div>
 
-      {/* Search + sort controls. Hidden while loading/errored — nothing to filter yet. */}
-      {!loading && !error && events && events.length > 0 ? (
+      {/* Controls: show a disabled skeleton bar while loading so the layout doesn't shift when results land. */}
+      {loading ? (
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center">
+          <Skeleton className="h-9 flex-1" />
+          <Skeleton className="h-9 w-full sm:w-56" />
+        </div>
+      ) : !error && events && events.length > 0 ? (
         <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -148,9 +154,16 @@ export default function EventsPage() {
         </div>
       ) : visibleEvents && visibleEvents.length > 0 ? (
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {visibleEvents.map((e) => (
-            <EventCard key={e.id} event={e} />
-          ))}
+          {visibleEvents.map((e) =>
+            // De-emphasize cancelled events: dim + desaturate so they read as inactive next to live ones.
+            e.status === "cancelled" ? (
+              <div key={e.id} className="opacity-60 grayscale transition hover:opacity-100 hover:grayscale-0">
+                <EventCard event={e} />
+              </div>
+            ) : (
+              <EventCard key={e.id} event={e} />
+            ),
+          )}
         </div>
       ) : events && events.length > 0 ? (
         // List has events but the search query matched none.

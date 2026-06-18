@@ -3,8 +3,8 @@
 // Client auth context. Single source for current user across the app.
 // Wraps the tree in app/layout.tsx; pages read via useAuth(). Session is the HttpOnly cookie.
 
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
-import { apiGet, apiPost, ApiError } from "@/lib/api";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { apiGet, apiPost, ApiError, setUnauthorizedHandler } from "@/lib/api";
 import type { Me } from "@/lib/types";
 
 type AuthState = {
@@ -58,6 +58,24 @@ async function fetchMe(): Promise<Me> {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
+  // Guards against firing multiple redirects when several in-flight calls all 401 at once.
+  const redirectingRef = useRef(false);
+
+  // Global session-expiry handler: api.ts calls this on an unexpected 401 (not /auth/me or /auth/login).
+  // Clears the user and bounces to login with a `next` param so we return here after re-auth.
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      setUser(null);
+      if (typeof window === "undefined") return;
+      // Already on /login → no redirect (avoids loops on the login page's own failed calls).
+      if (window.location.pathname === "/login") return;
+      if (redirectingRef.current) return;
+      redirectingRef.current = true;
+      const next = window.location.pathname + window.location.search;
+      window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+    });
+    return () => setUnauthorizedHandler(null);
+  }, []);
 
   const refetch = useCallback(async () => {
     setLoading(true);

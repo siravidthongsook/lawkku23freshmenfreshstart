@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { db } from "../../db/client";
 import { events } from "../../db/schema/events";
 import { eventFormVersions } from "../../db/schema/forms";
@@ -29,6 +29,24 @@ async function loadEvent(eventId: string) {
   if (!event) throw notFound("Event not found");
   return event;
 }
+
+// GET /admin/events/:eventId/form/versions — list every form version (newest first) for an event.
+// Powers the export page's form-version filter dropdown (id used as form_version filter value).
+router.get("/admin/events/:eventId/form/versions", async (c) => {
+  const { eventId } = eventIdParam.parse(c.req.param());
+  await loadEvent(eventId);
+  const versions = await db
+    .select({
+      id: eventFormVersions.id,
+      versionNumber: eventFormVersions.versionNumber,
+      isActive: eventFormVersions.isActive,
+      createdAt: eventFormVersions.createdAt,
+    })
+    .from(eventFormVersions)
+    .where(eq(eventFormVersions.eventId, eventId))
+    .orderBy(desc(eventFormVersions.versionNumber));
+  return c.json({ versions });
+});
 
 // GET /admin/events/:eventId/form — active form schema (is_active version).
 router.get("/admin/events/:eventId/form", async (c) => {

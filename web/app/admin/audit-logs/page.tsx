@@ -2,7 +2,7 @@
 
 // Admin > Audit Log Viewer. Global, filterable, read-only. Secrets are already redacted by the
 // backend at write-time — render as-is. Times shown in Asia/Bangkok. Paginated via limit/offset.
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { apiGet, ApiError } from "@/lib/api";
 import { formatBangkok } from "@/lib/time";
@@ -14,6 +14,13 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -21,9 +28,29 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { auditActionLabel, auditEntityLabel } from "@/lib/labels";
 import type { AuditLogListResponse, AuditLogWire } from "@/components/admin-tools/wire";
 
 const PAGE_SIZE = 50;
+
+// Known action/entity values (mirrors labels.ts maps) → dropdowns instead of typo-prone free text.
+// "all" is a UI-only sentinel; we omit the param when selected.
+const ACTION_OPTIONS = [
+  "account_temporarily_locked", "admin_unlocked_account", "admin_password_reset",
+  "password_changed", "temp_password_revealed", "temp_password_exported",
+  "user_created", "user_disabled", "user_enabled", "user_role_changed",
+  "user_profile_updated", "user_self_profile_updated", "users_imported",
+  "event_status_changed", "event_visibility_changed", "event_slug_changed",
+  "event_poster_uploaded", "form_version_created",
+  "registration_created", "registration_cancelled", "registration_promoted",
+  "registration_demoted", "registration_answers_edited", "admin_edit_registration_answer",
+  "admin_register_over_capacity", "registration_exported",
+  "qr_scan_checkin", "manual_checkin", "manual_checkin_undo", "qr_regenerated", "qr_revoked",
+  "uploaded_file_added", "uploaded_file_downloaded",
+];
+const ENTITY_OPTIONS = [
+  "auth", "user", "user_import", "event", "event_form_version", "registration", "uploaded_file",
+];
 
 // Compact one-line preview of a jsonb value for the table cell.
 function preview(value: unknown): string {
@@ -45,8 +72,10 @@ export default function AuditLogsPage() {
   const [offset, setOffset] = useState(0);
 
   const [logs, setLogs] = useState<AuditLogWire[]>([]);
+  const [total, setTotal] = useState<number | null>(null); // null when backend omits it (fallback to short-page heuristic)
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null); // id of the row whose details are open
 
   // datetime-local → ISO UTC. Input is Bangkok wall-clock (spec), not browser-local.
   function localToIso(local: string): string | undefined {
@@ -69,9 +98,11 @@ export default function AuditLogsPage() {
     try {
       const res = await apiGet<AuditLogListResponse>(`/admin/audit-logs?${sp.toString()}`);
       setLogs(res.logs ?? []);
+      setTotal(typeof res.total === "number" ? res.total : null);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "ไม่สามารถโหลดบันทึกการตรวจสอบได้");
       setLogs([]);
+      setTotal(null);
     } finally {
       setLoading(false);
     }
@@ -81,8 +112,9 @@ export default function AuditLogsPage() {
     load();
   }, [load]);
 
-  // Apply filters → reset to first page (load runs via the offset effect dep).
+  // Apply filters → reset to first page (load runs via the offset effect dep). Toast so it's clear it ran.
   function applyFilters() {
+    toast.success("ใช้ตัวกรองแล้ว");
     if (offset === 0) load();
     else setOffset(0);
   }
@@ -98,22 +130,42 @@ export default function AuditLogsPage() {
         <CardContent className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <div className="space-y-1.5">
-              <Label htmlFor="action">การกระทำ</Label>
-              <Input
-                id="action"
-                value={action}
-                onChange={(e) => setAction(e.target.value)}
-                placeholder="เช่น user_role_changed"
-              />
+              <Label>การกระทำ</Label>
+              <Select
+                value={action || "all"}
+                onValueChange={(v) => setAction(v === "all" ? "" : v)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="ทุกการกระทำ" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">ทุกการกระทำ</SelectItem>
+                  {ACTION_OPTIONS.map((a) => (
+                    <SelectItem key={a} value={a}>
+                      {auditActionLabel(a)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="entity">ประเภทเอนทิตี</Label>
-              <Input
-                id="entity"
-                value={entityType}
-                onChange={(e) => setEntityType(e.target.value)}
-                placeholder="เช่น user, event"
-              />
+              <Label>ประเภทเอนทิตี</Label>
+              <Select
+                value={entityType || "all"}
+                onValueChange={(v) => setEntityType(v === "all" ? "" : v)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="ทุกประเภท" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">ทุกประเภท</SelectItem>
+                  {ENTITY_OPTIONS.map((e) => (
+                    <SelectItem key={e} value={e}>
+                      {auditEntityLabel(e)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="actor">รหัสผู้ใช้เป้าหมาย</Label>
@@ -125,7 +177,7 @@ export default function AuditLogsPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="afrom">ตั้งแต่</Label>
+              <Label htmlFor="afrom">ตั้งแต่ (เวลาไทย)</Label>
               <Input
                 id="afrom"
                 type="datetime-local"
@@ -134,7 +186,7 @@ export default function AuditLogsPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="ato">ถึง</Label>
+              <Label htmlFor="ato">ถึง (เวลาไทย)</Label>
               <Input
                 id="ato"
                 type="datetime-local"
@@ -179,41 +231,70 @@ export default function AuditLogsPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {logs.map((l) => (
-                      <TableRow key={l.id}>
-                        <TableCell className="whitespace-nowrap text-muted-foreground">
-                          {formatBangkok(l.created_at)}
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">{l.action}</TableCell>
-                        <TableCell className="text-xs">
-                          {l.actor_role ? <Badge variant="secondary">{l.actor_role}</Badge> : null}
-                          <span className="ml-1 break-all text-muted-foreground">
-                            {l.actor_user_id ?? "system"}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {l.entity_type ?? "—"}
-                          {l.entity_id ? `:${l.entity_id.slice(0, 8)}` : ""}
-                        </TableCell>
-                        <TableCell className="max-w-[16rem] truncate text-xs" title={l.reason ?? ""}>
-                          {l.reason ?? ""}
-                        </TableCell>
-                        <TableCell
-                          className="max-w-[20rem] truncate text-xs text-muted-foreground"
-                          title={preview(l.metadata)}
-                        >
-                          {preview(l.metadata)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {logs.map((l) => {
+                      const isOpen = expanded === l.id;
+                      // Row carries readable details when there's reason or metadata to show.
+                      const hasDetails = !!l.reason || l.metadata != null;
+                      return (
+                        <Fragment key={l.id}>
+                          <TableRow
+                            className={hasDetails ? "cursor-pointer" : undefined}
+                            onClick={() => hasDetails && setExpanded(isOpen ? null : l.id)}
+                          >
+                            <TableCell className="whitespace-nowrap text-muted-foreground">
+                              {formatBangkok(l.created_at)}
+                            </TableCell>
+                            <TableCell className="text-xs">{auditActionLabel(l.action)}</TableCell>
+                            <TableCell className="text-xs">
+                              {l.actor_role ? <Badge variant="secondary">{l.actor_role}</Badge> : null}
+                              <span className="ml-1 break-all text-muted-foreground">
+                                {l.actor_user_id ?? "system"}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {auditEntityLabel(l.entity_type)}
+                              {l.entity_id ? `:${l.entity_id.slice(0, 8)}` : ""}
+                            </TableCell>
+                            <TableCell className="max-w-[16rem] truncate text-xs">
+                              {l.reason ?? ""}
+                            </TableCell>
+                            <TableCell className="max-w-[20rem] truncate text-xs text-muted-foreground">
+                              {hasDetails ? (isOpen ? "ซ่อนรายละเอียด" : preview(l.metadata) || "ดูรายละเอียด") : ""}
+                            </TableCell>
+                          </TableRow>
+                          {/* Expandable details row — full reason + metadata, readable on mobile. */}
+                          {isOpen ? (
+                            <TableRow>
+                              <TableCell colSpan={6} className="bg-muted/40">
+                                <div className="space-y-2 py-1 text-xs">
+                                  {l.reason ? (
+                                    <div>
+                                      <span className="font-medium">เหตุผล: </span>
+                                      {l.reason}
+                                    </div>
+                                  ) : null}
+                                  {l.metadata != null ? (
+                                    <pre className="overflow-x-auto rounded-md bg-background p-2">
+                                      {preview(l.metadata)}
+                                    </pre>
+                                  ) : null}
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ) : null}
+                        </Fragment>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>
 
-              {/* Pagination — offset based; backend has no total, so Next disables on short pages. */}
+              {/* Pagination — prefer the backend total (fixes the exact-page-size empty-Next bug);
+                  fall back to the short-page heuristic only when total is absent. */}
               <div className="mt-4 flex items-center justify-between">
                 <span className="text-xs text-muted-foreground">
                   กำลังแสดง {offset + 1}–{offset + logs.length}
+                  {total != null ? ` จาก ${total}` : ""}
                 </span>
                 <div className="flex gap-2">
                   <Button
@@ -227,7 +308,9 @@ export default function AuditLogsPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    disabled={logs.length < PAGE_SIZE}
+                    disabled={
+                      total != null ? offset + logs.length >= total : logs.length < PAGE_SIZE
+                    }
                     onClick={() => setOffset((o) => o + PAGE_SIZE)}
                   >
                     ถัดไป

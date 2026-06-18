@@ -65,6 +65,15 @@ export const visibilityChangeSchema = z.object({
   reason: z.string().max(1000).optional(),
 });
 
+// Admin list query: free-text title/slug search + status filter + pagination. All optional.
+export const adminEventsQuerySchema = z.object({
+  q: z.string().trim().max(300).optional(),
+  status: eventStatusEnum.optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+export type AdminEventsQuery = z.infer<typeof adminEventsQuerySchema>;
+
 export const eventIdParam = z.object({ eventId: z.string().uuid() });
 export const slugParam = z.object({ slug: z.string().min(1) });
 export const publicIdParam = z.object({ publicId: z.string().uuid() });

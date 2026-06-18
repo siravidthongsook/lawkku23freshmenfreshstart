@@ -5,9 +5,10 @@
 // version once submissions exist; we surface that with a warning and a "Save as new version" action.
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { ArrowDown, ArrowUp, GripVertical, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 import { apiPatch, apiPost, ApiError } from "@/lib/api";
 import { FIELD_TYPES, formSchema, type FormField, type FormSchema } from "@/lib/schemas";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 import {
   Select,
   SelectContent,
@@ -22,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ReasonDialog } from "./reason-dialog";
 
 // Field types that carry an options list.
@@ -89,11 +92,23 @@ export function FormBuilder({ eventId, initialFields, versionNumber, onSaved }: 
   const [fields, setFields] = useState<FormField[]>(initialFields);
   const [saving, setSaving] = useState(false);
   const [reasonOpen, setReasonOpen] = useState(false);
+  // Field keys flagged invalid by the last save attempt → highlight their cards.
+  const [invalidKeys, setInvalidKeys] = useState<Set<string>>(new Set());
+  // Field index pending delete confirmation (null = no dialog open).
+  const [pendingDelete, setPendingDelete] = useState<number | null>(null);
 
   const structural = useMemo(
     () => isStructural(initialFields, fields),
     [initialFields, fields],
   );
+
+  // Dirty = any difference from the loaded baseline. Drives the unsaved-changes guard.
+  // Cheap deep-equality via JSON (field count is small for this internal system).
+  const dirty = useMemo(
+    () => JSON.stringify(fields) !== JSON.stringify(initialFields),
+    [fields, initialFields],
+  );
+  useUnsavedChanges(dirty);
 
   function update(idx: number, patch: Partial<FormField>) {
     setFields((prev) => prev.map((f, i) => (i === idx ? { ...f, ...patch } : f)));
@@ -127,20 +142,40 @@ export function FormBuilder({ eventId, initialFields, versionNumber, onSaved }: 
   }
 
   // Build + validate the schema payload before any save.
+  // Normalizes option lists here (trim + drop blank lines) so live typing isn't fought (see :341).
   function buildSchema(): FormSchema | null {
-    const candidate: FormSchema = { fields: fields.map((f, i) => ({ ...f, sort: i })) };
+    const normalized = fields.map((f, i) => ({
+      ...f,
+      sort: i,
+      options: f.options
+        ? f.options.map((o) => o.trim()).filter((o) => o !== "")
+        : f.options,
+    }));
+    const candidate: FormSchema = { fields: normalized };
     const parsed = formSchema.safeParse(candidate);
     if (!parsed.success) {
+      // Map issues back to their field key so we can highlight the offending cards.
+      const bad = new Set<string>();
+      for (const issue of parsed.error.issues) {
+        const idx = issue.path[1]; // path = ["fields", index, ...]
+        if (typeof idx === "number" && normalized[idx]) bad.add(normalized[idx].key);
+      }
+      setInvalidKeys(bad);
       toast.error(parsed.error.issues[0]?.message ?? "ฟอร์มมีฟิลด์ที่ไม่ถูกต้อง");
       return null;
     }
-    // Choice fields must carry at least one option.
+    // Choice fields must carry at least one (non-blank) option.
+    const bad = new Set<string>();
     for (const f of parsed.data.fields) {
-      if (CHOICE_TYPES.has(f.type) && (!f.options || f.options.length === 0)) {
-        toast.error(`"${f.label}" ต้องมีตัวเลือกอย่างน้อยหนึ่งข้อ`);
-        return null;
-      }
+      if (CHOICE_TYPES.has(f.type) && (!f.options || f.options.length === 0)) bad.add(f.key);
     }
+    if (bad.size > 0) {
+      setInvalidKeys(bad);
+      const first = parsed.data.fields.find((f) => bad.has(f.key));
+      toast.error(`"${first?.label}" ต้องมีตัวเลือกอย่างน้อยหนึ่งข้อ`);
+      return null;
+    }
+    setInvalidKeys(new Set()); // valid → clear highlights
     return parsed.data;
   }
 
@@ -199,11 +234,17 @@ export function FormBuilder({ eventId, initialFields, versionNumber, onSaved }: 
             <Plus className="size-4" />
             เพิ่มฟิลด์
           </Button>
+          {/* Primary action. New-version is demoted to a low-emphasis link so the two aren't confused. */}
           <Button onClick={handleSave} disabled={saving}>
             {saving ? "กำลังบันทึก…" : "บันทึก"}
           </Button>
-          <Button variant="secondary" onClick={() => setReasonOpen(true)}>
-            บันทึกเป็นเวอร์ชันใหม่
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground"
+            onClick={() => setReasonOpen(true)}
+          >
+            บันทึกเป็นเวอร์ชันใหม่…
           </Button>
         </div>
       </div>
@@ -243,8 +284,9 @@ export function FormBuilder({ eventId, initialFields, versionNumber, onSaved }: 
               field={f}
               index={idx}
               total={fields.length}
+              invalid={invalidKeys.has(f.key)}
               onChange={(patch) => update(idx, patch)}
-              onRemove={() => removeField(idx)}
+              onRemove={() => setPendingDelete(idx)}
               onMove={(dir) => move(idx, dir)}
             />
           ))}
@@ -259,6 +301,26 @@ export function FormBuilder({ eventId, initialFields, versionNumber, onSaved }: 
         confirmLabel="สร้างเวอร์ชัน"
         onConfirm={handleNewVersion}
       />
+
+      {/* Delete-field confirm — instant delete was easy to misfire. */}
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onOpenChange={(next) => {
+          if (!next) setPendingDelete(null);
+        }}
+        title="ลบฟิลด์นี้?"
+        description={
+          pendingDelete !== null
+            ? `ฟิลด์ "${fields[pendingDelete]?.label ?? ""}" จะถูกลบออกจากฟอร์ม (ยังไม่บันทึกจนกว่าจะกดบันทึก)`
+            : undefined
+        }
+        confirmLabel="ลบฟิลด์"
+        variant="danger"
+        onConfirm={() => {
+          if (pendingDelete !== null) removeField(pendingDelete);
+          setPendingDelete(null);
+        }}
+      />
     </div>
   );
 }
@@ -267,6 +329,7 @@ function FieldEditor({
   field,
   index,
   total,
+  invalid,
   onChange,
   onRemove,
   onMove,
@@ -274,6 +337,7 @@ function FieldEditor({
   field: FormField;
   index: number;
   total: number;
+  invalid?: boolean;
   onChange: (patch: Partial<FormField>) => void;
   onRemove: () => void;
   onMove: (dir: -1 | 1) => void;
@@ -282,10 +346,10 @@ function FieldEditor({
   const optionsText = (field.options ?? []).join("\n");
 
   return (
-    <Card>
+    <Card className={cn(invalid && "border-destructive ring-1 ring-destructive")}>
       <CardContent className="space-y-3 pt-4">
+        {/* Grip icon removed — no DnD wired (only the up/down arrows reorder), so it implied a gesture that doesn't work. */}
         <div className="flex items-start gap-2">
-          <GripVertical className="mt-2 size-4 shrink-0 text-muted-foreground" />
           <div className="grid flex-1 gap-3 sm:grid-cols-[1fr_200px]">
             <div className="space-y-1.5">
               <Label>ป้ายกำกับคำถาม</Label>
@@ -324,7 +388,7 @@ function FieldEditor({
           </div>
         </div>
 
-        <div className="space-y-1.5 pl-6">
+        <div className="space-y-1.5">
           <Label>ข้อความช่วยเหลือ (ไม่บังคับ)</Label>
           <Input
             value={field.help ?? ""}
@@ -334,18 +398,12 @@ function FieldEditor({
         </div>
 
         {isChoice ? (
-          <div className="space-y-1.5 pl-6">
+          <div className="space-y-1.5">
             <Label>ตัวเลือก (หนึ่งบรรทัดต่อหนึ่งตัวเลือก)</Label>
+            {/* Split only — don't trim/filter live (that fights typing). buildSchema normalizes on save. */}
             <Textarea
               value={optionsText}
-              onChange={(e) =>
-                onChange({
-                  options: e.target.value
-                    .split("\n")
-                    .map((s) => s.trim())
-                    .filter((s) => s !== ""),
-                })
-              }
+              onChange={(e) => onChange({ options: e.target.value.split("\n") })}
               rows={3}
               placeholder={"ตัวเลือก 1\nตัวเลือก 2"}
             />
@@ -354,13 +412,13 @@ function FieldEditor({
 
         <Separator />
 
-        <div className="flex items-center justify-between pl-6">
+        <div className="flex items-center justify-between">
           <label className="flex cursor-pointer items-center gap-2 text-sm">
             <input
               type="checkbox"
               checked={field.required}
               onChange={(e) => onChange({ required: e.target.checked })}
-              className="size-4 rounded border-input"
+              className="size-4 rounded border-input accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             />
             จำเป็น
           </label>

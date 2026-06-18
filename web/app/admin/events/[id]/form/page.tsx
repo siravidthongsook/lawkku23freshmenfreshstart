@@ -9,6 +9,7 @@ import type { FormField } from "@/lib/schemas";
 import { FormBuilder, type SavedForm } from "@/components/admin-events/form-builder";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/ui/error-state";
 
 // Stored form version shape (forms service returns the row): schemaJson holds the FormSchema.
 // Reuses SavedForm so GET and the save handlers agree on the row shape.
@@ -22,12 +23,14 @@ export default function FormBuilderPage({ params }: { params: Promise<{ id: stri
   const [reloadKey, setReloadKey] = useState(0);
 
   const load = useCallback(async () => {
+    setError(null);
     try {
       const res = await apiGet<{ form: FormVersion | null }>(`/admin/events/${id}/form`);
       setForm(res.form);
     } catch (err) {
+      // Keep form as undefined on error → we show a retry, NOT an editable empty builder that could
+      // overwrite a real (but failed-to-load) form on save.
       setError(err instanceof ApiError ? err.message : "ไม่สามารถโหลดฟอร์มได้");
-      setForm(null);
     }
   }, [id]);
 
@@ -49,9 +52,9 @@ export default function FormBuilderPage({ params }: { params: Promise<{ id: stri
         <h1 className="text-xl font-semibold">เครื่องมือสร้างฟอร์ม</h1>
       </div>
 
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-
-      {form === undefined ? (
+      {error ? (
+        <ErrorState message={error} onRetry={() => void load()} />
+      ) : form === undefined ? (
         <div className="space-y-3">
           <Skeleton className="h-24 w-full" />
           <Skeleton className="h-24 w-full" />

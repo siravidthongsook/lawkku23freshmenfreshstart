@@ -17,7 +17,7 @@ export function displayTitle(detail: RegistrationDetailResponse): string {
   return (
     detail.event?.title ??
     detail.registration.eventTitle ??
-    "Registration"
+    "การลงทะเบียนกิจกรรม"
   );
 }
 
@@ -31,6 +31,21 @@ export function canOfferEdit(detail: RegistrationDetailResponse): boolean {
   if (ev?.allowStudentEditRegistration === false) return false;
   if (ev?.editRegistrationCloseAt && new Date() > new Date(ev.editRegistrationCloseAt)) return false;
   return true;
+}
+
+// Human reason the edit action is unavailable — so the edit page can explain instead of a generic message.
+// Returns null when editing IS allowed. Mirrors canOfferEdit's checks, in the same precedence order.
+export function editDisallowedReason(detail: RegistrationDetailResponse): string | null {
+  const s = detail.registration.status;
+  if (s === "checked_in") return "คุณเช็คอินกิจกรรมนี้แล้ว จึงไม่สามารถแก้ไขคำตอบได้";
+  if (s === "cancelled") return "การลงทะเบียนนี้ถูกยกเลิกแล้ว จึงไม่สามารถแก้ไขคำตอบได้";
+  if (s === "waitlisted") return "คุณอยู่ในรายชื่อสำรอง จึงยังแก้ไขคำตอบไม่ได้ในขณะนี้";
+  const ev = detail.event;
+  if (ev?.allowStudentEditRegistration === false)
+    return "ผู้จัดกิจกรรมไม่อนุญาตให้แก้ไขคำตอบหลังลงทะเบียน";
+  if (ev?.editRegistrationCloseAt && new Date() > new Date(ev.editRegistrationCloseAt))
+    return "หมดเวลาที่อนุญาตให้แก้ไขคำตอบแล้ว";
+  return null;
 }
 
 // Whether the student cancel action should be offered. Same conservative philosophy as edit.

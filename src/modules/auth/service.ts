@@ -91,6 +91,18 @@ export async function recordAttempt(
   return { justLocked: willCross };
 }
 
+// Active-lockout state for an email (used by user detail to show a lock badge + gate unlock).
+export async function getLockoutState(email: string): Promise<{ locked: boolean; lockedUntil: string | null }> {
+  const now = new Date();
+  const [row] = await db
+    .select({ lockedUntil: loginAttempts.lockedUntil })
+    .from(loginAttempts)
+    .where(and(eq(loginAttempts.email, email), gt(loginAttempts.lockedUntil, now)))
+    .orderBy(desc(loginAttempts.lockedUntil))
+    .limit(1);
+  return { locked: !!row?.lockedUntil, lockedUntil: row?.lockedUntil?.toISOString() ?? null };
+}
+
 // Admin unlock: clear active lockouts for an email (used by /admin/users/:id/unlock).
 export async function clearLockout(email: string): Promise<void> {
   await db

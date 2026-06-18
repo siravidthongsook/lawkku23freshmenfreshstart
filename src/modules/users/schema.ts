@@ -3,11 +3,13 @@ import { z } from "zod";
 const roleEnum = z.enum(["student", "checkin_staff", "admin"]);
 const statusEnum = z.enum(["active", "disabled"]);
 
-// List/search filter for GET /admin/users.
+// List/search filter for GET /admin/users. limit/offset paginate like audit-logs.
 export const listUsersQuery = z.object({
   q: z.string().trim().min(1).optional(), // matches email / student_id / full_name
   role: roleEnum.optional(),
   status: statusEnum.optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
 });
 
 // Create user — temp password is generated server-side, never accepted from client.

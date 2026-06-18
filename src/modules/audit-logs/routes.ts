@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, gte, lte, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import type { AppVariables } from "../../lib/context";
 import { db } from "../../db/client";
@@ -58,15 +58,21 @@ router.get("/admin/audit-logs", ...adminOnly, zValidator("query", listFiltersSch
   if (f.from) conds.push(gte(auditLogs.createdAt, new Date(f.from)));
   if (f.to) conds.push(lte(auditLogs.createdAt, new Date(f.to)));
 
+  const where = conds.length ? and(...conds) : undefined;
+
+  // Return total so the pager can disable Next on the exact-page-size final page (no empty page).
+  const [countRow] = await db.select({ c: sql<number>`count(*)::int` }).from(auditLogs).where(where);
+  const total = countRow?.c ?? 0;
+
   const rows = await db
     .select()
     .from(auditLogs)
-    .where(conds.length ? and(...conds) : undefined)
+    .where(where)
     .orderBy(desc(auditLogs.createdAt))
     .limit(f.limit)
     .offset(f.offset);
 
-  return c.json({ logs: rows.map(toWire), limit: f.limit, offset: f.offset });
+  return c.json({ logs: rows.map(toWire), total, limit: f.limit, offset: f.offset });
 });
 
 // GET /admin/registrations/:registrationId/audit-logs — per-registration history (newest first).

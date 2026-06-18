@@ -72,9 +72,12 @@ function auditExport(c: AppCtx, eventId: string, kind: string, count: number) {
   });
 }
 
-function csvResponse(c: AppCtx, filename: string, csv: string) {
+function csvResponse(c: AppCtx, filename: string, csv: string, rowCount: number) {
   c.header("Content-Type", "text/csv; charset=utf-8");
   c.header("Content-Disposition", `attachment; filename="${filename}"`);
+  // Surface the matched data-row count so the client can warn on zero-match / show how many rows.
+  c.header("X-Row-Count", String(rowCount));
+  c.header("Access-Control-Expose-Headers", "X-Row-Count, Content-Disposition");
   return c.body(csv);
 }
 
@@ -119,7 +122,7 @@ router.get(
       "cancelled_at_bangkok",
     ]);
     await auditExport(c, eventId, "registrations_summary", records.length);
-    return csvResponse(c, `event-${eventId}-registrations-summary.csv`, csv);
+    return csvResponse(c, `event-${eventId}-registrations-summary.csv`, csv, records.length);
   },
 );
 
@@ -219,7 +222,7 @@ router.get(
     const columns = [...baseCols, ...Array.from(fieldKeys).sort()];
     const csv = toCsv(records, columns);
     await auditExport(c, eventId, "registrations_full", records.length);
-    return csvResponse(c, `event-${eventId}-registrations-full.csv`, csv);
+    return csvResponse(c, `event-${eventId}-registrations-full.csv`, csv, records.length);
   },
 );
 
@@ -264,7 +267,7 @@ router.get(
       "manual_checkin_reason",
     ]);
     await auditExport(c, eventId, "checkin_attendance", records.length);
-    return csvResponse(c, `event-${eventId}-checkin-attendance.csv`, csv);
+    return csvResponse(c, `event-${eventId}-checkin-attendance.csv`, csv, records.length);
   },
 );
 

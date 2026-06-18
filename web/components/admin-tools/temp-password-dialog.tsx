@@ -5,6 +5,7 @@
 // a clear "won't be shown again" warning.
 import { useState } from "react";
 import { Check, Copy } from "lucide-react";
+import { copyText } from "@/lib/clipboard";
 import {
   Dialog,
   DialogContent,
@@ -30,7 +31,9 @@ export function TempPasswordDialog({
 
   async function copy() {
     if (!password) return;
-    await navigator.clipboard.writeText(password);
+    // copyText handles insecure-context (HTTP LAN) fallback + toasts on failure — this is a one-shot secret.
+    const ok = await copyText(password, { successMsg: "คัดลอกรหัสผ่านชั่วคราวแล้ว" });
+    if (!ok) return;
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }

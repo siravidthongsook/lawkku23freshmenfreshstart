@@ -22,9 +22,18 @@ export type UserWire = {
   updated_at: string;
 };
 
-export type UserListResponse = { users: UserWire[] };
-export type UserDetailResponse = { user: UserWire; has_pending_temp_password: boolean };
+// List rows carry the pending temp-pw flag so the table can badge users awaiting first login.
+export type UserListRow = UserWire & { has_pending_temp_password?: boolean };
+export type UserListResponse = { users: UserListRow[]; total: number; limit: number; offset: number };
+// Detail also surfaces lockout state so the UI can show a lock badge + gate the Unlock button.
+export type UserDetailResponse = {
+  user: UserWire;
+  has_pending_temp_password: boolean;
+  locked?: boolean;
+  locked_until?: string | null;
+};
 export type UserMutationResponse = { user: UserWire };
+export type TempPasswordCountResponse = { count: number };
 
 // POST /admin/users — create may (optionally) surface a generated temp pw. Backend currently returns
 // only { user }, but we read temp_password defensively in case it is added — shown once if present.
@@ -84,4 +93,19 @@ export type AuditLogWire = {
   user_agent: string | null;
   created_at: string;
 };
-export type AuditLogListResponse = { logs: AuditLogWire[]; limit: number; offset: number };
+export type AuditLogListResponse = {
+  logs: AuditLogWire[];
+  total?: number; // present on newer backend; used to fix the exact-page-size Next-page bug
+  limit: number;
+  offset: number;
+};
+
+// User typeahead row (GET /admin/events/:id/user-search) for the manual-register picker.
+export type UserSearchRow = {
+  id: string;
+  studentId: string | null;
+  fullName: string | null;
+  email: string | null;
+  faculty: string | null;
+  department: string | null;
+};

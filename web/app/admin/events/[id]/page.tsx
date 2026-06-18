@@ -5,6 +5,7 @@
 // Also fetches GET /admin/events/:id/form to surface form readiness.
 import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   FileText,
@@ -13,18 +14,21 @@ import {
   Pencil,
   AlertTriangle,
   ChevronRight,
+  Loader2,
+  Send,
+  Ban,
+  Archive,
+  Undo2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiGet, apiPost, ApiError } from "@/lib/api";
-import {
-  eventStatusEnum,
-  eventVisibilityEnum,
-} from "@/lib/schemas";
+import { eventVisibilityEnum } from "@/lib/schemas";
 import type { EventAdmin, EventStatus, EventVisibility } from "@/lib/types";
 import { formatBangkok } from "@/lib/time";
 import { EventStatusBadge } from "@/components/badges";
 import { EventReadiness } from "@/components/admin-events/event-readiness";
 import { ReasonDialog } from "@/components/admin-events/reason-dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -59,23 +63,19 @@ const VISIBILITY_LABEL: Record<EventVisibility, string> = {
   unlisted: "เข้าถึงผ่านลิงก์โดยตรงเท่านั้น",
 };
 
-// Transitions that need a confirmation + audit reason (destructive / hides the event).
-function isDestructiveStatus(from: EventStatus, to: EventStatus): boolean {
-  if (to === "cancelled" || to === "archived") return true;
-  if (from === "published" && to === "draft") return true; // un-publishing pulls it from students
-  return false;
-}
-
 export default function EventOverviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
   const [event, setEvent] = useState<EventAdmin | null>(null);
   const [computed, setComputed] = useState<EventComputed | null>(null);
   const [form, setForm] = useState<ActiveForm>(null);
   const [formLoaded, setFormLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // Pending destructive status change awaiting reason confirmation.
+  // Pending destructive status change awaiting reason confirmation (cancel/archive/un-publish).
   const [pendingStatus, setPendingStatus] = useState<EventStatus | null>(null);
+  // Publish confirm dialog (draft → published) — no reason, but a readiness gate.
+  const [publishOpen, setPublishOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -96,6 +96,13 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
     void load();
   }, [load]);
 
+  // Refetch when the tab regains focus so form-readiness/counts stay fresh after edits in another tab.
+  useEffect(() => {
+    const onFocus = () => void load();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [load]);
+
   // Apply a status change. Destructive ones route through the reason dialog first.
   async function applyStatus(status: EventStatus, reason?: string) {
     setBusy(true);
@@ -109,15 +116,6 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
     } finally {
       setBusy(false);
     }
-  }
-
-  function onStatusChange(status: EventStatus) {
-    if (!event || status === event.status) return;
-    if (isDestructiveStatus(event.status, status)) {
-      setPendingStatus(status); // open ReasonDialog
-      return;
-    }
-    void applyStatus(status); // non-destructive → instant
   }
 
   async function changeVisibility(visibility: EventVisibility) {
@@ -150,6 +148,15 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
   const formWarning = event.registrationMode === "public_self_register" && formLoaded && !hasForm;
   // Fresh draft with no form yet → nudge toward the next step.
   const draftNextStep = event.status === "draft" && formLoaded && !hasForm;
+
+  // Readiness gate for publishing: a self-register event with no form would be broken for students.
+  // Returns a blocking reason (string) or null when safe to publish.
+  const publishBlockReason =
+    event.registrationMode === "public_self_register" && formLoaded && !hasForm
+      ? "ยังไม่ได้สร้างฟอร์มลงทะเบียน — นักศึกษาจะลงทะเบียนไม่ได้"
+      : event.registrationMode === "closed"
+        ? null // allowed, but warned in the dialog (publishing a non-registerable event is valid)
+        : null;
 
   return (
     <div className="space-y-6">
@@ -242,23 +249,69 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
           <CardHeader>
             <CardTitle className="text-sm">สถานะ</CardTitle>
           </CardHeader>
-          <CardContent>
-            <Select
-              value={event.status}
-              onValueChange={(v) => onStatusChange(v as EventStatus)}
-              disabled={busy}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {eventStatusEnum.options.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {STATUS_LABEL[s as EventStatus]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <CardContent className="space-y-2">
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-muted-foreground">สถานะปัจจุบัน:</span>
+              <EventStatusBadge status={event.status} />
+              {busy ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
+            </div>
+
+            {/* Explicit, intent-revealing actions instead of an ambiguous dropdown.
+                Publish = confirm + readiness gate; cancel/archive/un-publish = red + reason-gated. */}
+            <div className="flex flex-wrap gap-2">
+              {event.status === "draft" ? (
+                <Button size="sm" disabled={busy} onClick={() => setPublishOpen(true)}>
+                  <Send className="size-4" />
+                  เผยแพร่
+                </Button>
+              ) : null}
+
+              {event.status === "published" ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => setPendingStatus("draft")}
+                >
+                  <Undo2 className="size-4" />
+                  ยกเลิกการเผยแพร่ (กลับเป็นฉบับร่าง)
+                </Button>
+              ) : null}
+
+              {/* Cancel + Archive are destructive — red, reason required. Cancelled/archived can be re-published. */}
+              {event.status !== "cancelled" && event.status !== "archived" ? (
+                <>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    disabled={busy}
+                    onClick={() => setPendingStatus("cancelled")}
+                  >
+                    <Ban className="size-4" />
+                    ยกเลิกกิจกรรม
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    disabled={busy}
+                    onClick={() => setPendingStatus("archived")}
+                  >
+                    <Archive className="size-4" />
+                    เก็บถาวร
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => setPublishOpen(true)}
+                >
+                  <Send className="size-4" />
+                  เผยแพร่อีกครั้ง
+                </Button>
+              )}
+            </div>
           </CardContent>
         </Card>
         <Card>
@@ -266,10 +319,11 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
             <CardTitle className="text-sm">การมองเห็น</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
+            {/* Visibility has no effect on a draft (students can't see drafts at all) — disable until published. */}
             <Select
               value={event.visibility}
               onValueChange={(v) => changeVisibility(v as EventVisibility)}
-              disabled={busy}
+              disabled={busy || event.status === "draft"}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -282,8 +336,11 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
                 ))}
               </SelectContent>
             </Select>
-            {/* Visibility only takes effect once the event is published. */}
-            <p className="text-xs text-muted-foreground">มีผลเฉพาะเมื่อเผยแพร่แล้ว</p>
+            <p className="text-xs text-muted-foreground">
+              {event.status === "draft"
+                ? "ตั้งค่าได้หลังเผยแพร่ — ฉบับร่างยังไม่แสดงต่อนักศึกษา"
+                : "มีผลเฉพาะเมื่อเผยแพร่แล้ว"}
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -364,15 +421,50 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
         </Card>
       </div>
 
-      {/* Confirmation + mandatory reason for destructive status changes. */}
+      {/* Publish confirm + readiness gate. Blocks when a self-register event has no form. */}
+      <ConfirmDialog
+        open={publishOpen}
+        onOpenChange={setPublishOpen}
+        title="เผยแพร่กิจกรรม"
+        description={
+          publishBlockReason
+            ? `ยังเผยแพร่ไม่ได้: ${publishBlockReason}`
+            : formWarning
+              ? "หลังเผยแพร่ นักศึกษาจะเห็นกิจกรรมนี้ทันที"
+              : "หลังเผยแพร่ นักศึกษาจะเห็นกิจกรรมนี้ทันทีตามการตั้งค่าการมองเห็น"
+        }
+        confirmLabel={publishBlockReason ? "แก้ไขก่อน" : "เผยแพร่"}
+        onConfirm={async () => {
+          // Readiness gate: if blocked, send the admin to the form builder instead of publishing.
+          if (publishBlockReason) {
+            router.push(`/admin/events/${id}/form`);
+            return;
+          }
+          await applyStatus("published");
+        }}
+      />
+
+      {/* Confirmation + mandatory reason for destructive status changes (cancel/archive/un-publish). */}
       <ReasonDialog
         open={pendingStatus !== null}
         onOpenChange={(next) => {
           if (!next) setPendingStatus(null);
         }}
-        title={pendingStatus ? `ยืนยันเปลี่ยนสถานะเป็น ${STATUS_LABEL[pendingStatus]}` : ""}
-        description="การเปลี่ยนแปลงนี้ส่งผลต่อสิ่งที่นักศึกษาเห็น โปรดระบุเหตุผล"
-        confirmLabel="ยืนยันเปลี่ยนสถานะ"
+        title={
+          pendingStatus === "cancelled"
+            ? "ยกเลิกกิจกรรม"
+            : pendingStatus === "archived"
+              ? "เก็บถาวรกิจกรรม"
+              : pendingStatus === "draft"
+                ? "ยกเลิกการเผยแพร่ (กลับเป็นฉบับร่าง)"
+                : ""
+        }
+        description={
+          pendingStatus === "draft"
+            ? "นักศึกษาจะไม่เห็นกิจกรรมนี้อีกจนกว่าจะเผยแพร่ใหม่ โปรดระบุเหตุผล"
+            : "การเปลี่ยนแปลงนี้ส่งผลต่อสิ่งที่นักศึกษาเห็น โปรดระบุเหตุผล"
+        }
+        confirmLabel="ยืนยัน"
         destructive
         onConfirm={async (reason) => {
           if (pendingStatus) await applyStatus(pendingStatus, reason);
@@ -390,7 +482,14 @@ function Stat({ label, value }: { label: string; value: number | undefined | nul
         <CardTitle className="text-sm font-normal text-muted-foreground">{label}</CardTitle>
       </CardHeader>
       <CardContent>
-        <span className="text-2xl font-semibold">{value ?? "—"}</span>
+        {/* Real 0 renders as "0"; only undefined/null (not loaded / unsupported) shows a muted dash. */}
+        {value == null ? (
+          <span className="text-2xl font-semibold text-muted-foreground" title="ไม่มีข้อมูล">
+            —
+          </span>
+        ) : (
+          <span className="text-2xl font-semibold">{value}</span>
+        )}
       </CardContent>
     </Card>
   );

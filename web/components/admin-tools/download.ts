@@ -15,7 +15,12 @@ function filenameFromDisposition(header: string | null, fallback: string): strin
 }
 
 // GET a file endpoint and trigger a browser download. Throws ApiError on non-OK (so callers can toast).
-export async function downloadFile(path: string, fallbackName: string): Promise<void> {
+// Returns the X-Row-Count header value when present (export endpoints set it) so callers can surface
+// the matched row count / warn on a zero-match export. null when the header is absent.
+export async function downloadFile(
+  path: string,
+  fallbackName: string,
+): Promise<{ rowCount: number | null }> {
   const res = await fetch(`${BASE}${path}`, { method: "GET", credentials: "include" });
   if (!res.ok) {
     // Reuse the JSON error shape when present so messaging stays consistent.
@@ -41,6 +46,9 @@ export async function downloadFile(path: string, fallbackName: string): Promise<
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+
+  const rc = res.headers.get("x-row-count");
+  return { rowCount: rc != null && rc !== "" ? Number(rc) : null };
 }
 
 // Build a query string from filter values, dropping empty/undefined entries.

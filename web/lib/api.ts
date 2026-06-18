@@ -14,8 +14,21 @@ export class ApiError extends Error {
 
 const BASE = "/api";
 
+// Global 401 handler (registered by auth.tsx). Kept as a plain callback so api.ts stays React/router-free.
+type UnauthorizedHandler = () => void;
+let unauthorizedHandler: UnauthorizedHandler | null = null;
+export function setUnauthorizedHandler(fn: UnauthorizedHandler | null): void {
+  unauthorizedHandler = fn;
+}
+
+// Auth bootstrap paths whose 401s are EXPECTED (logged-out probe / bad credentials) — never trigger redirect.
+function isAuthBootstrapPath(path: string): boolean {
+  return path === "/auth/me" || path === "/auth/login";
+}
+
 // Parse a Response into T, or throw ApiError using the { error, message } body when present.
-async function handle<T>(res: Response): Promise<T> {
+// `path` lets us suppress the global session-expiry handler for expected bootstrap 401s.
+async function handle<T>(res: Response, path: string): Promise<T> {
   if (res.ok) {
     if (res.status === 204) return undefined as T;
     const ct = res.headers.get("content-type") ?? "";
@@ -32,12 +45,18 @@ async function handle<T>(res: Response): Promise<T> {
   } catch {
     // non-JSON error body (e.g. backend 404/500 while built in parallel) — keep defaults
   }
+
+  // Session expired on a normal authed call → fire the global handler (redirect to login).
+  // Bootstrap calls (/auth/me, /auth/login) handle their own 401s, so skip them.
+  if (res.status === 401 && !isAuthBootstrapPath(path)) {
+    unauthorizedHandler?.();
+  }
   throw new ApiError(code, message, res.status);
 }
 
 export async function apiGet<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { ...init, method: "GET", credentials: "include" });
-  return handle<T>(res);
+  return handle<T>(res, path);
 }
 
 export async function apiPost<T>(path: string, body?: unknown, init?: RequestInit): Promise<T> {
@@ -48,7 +67,7 @@ export async function apiPost<T>(path: string, body?: unknown, init?: RequestIni
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  return handle<T>(res);
+  return handle<T>(res, path);
 }
 
 export async function apiPatch<T>(path: string, body?: unknown, init?: RequestInit): Promise<T> {
@@ -59,7 +78,7 @@ export async function apiPatch<T>(path: string, body?: unknown, init?: RequestIn
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  return handle<T>(res);
+  return handle<T>(res, path);
 }
 
 // Multipart upload (files). Do NOT set Content-Type — browser sets the boundary.
@@ -70,5 +89,5 @@ export async function apiPostForm<T>(path: string, form: FormData, init?: Reques
     credentials: "include",
     body: form,
   });
-  return handle<T>(res);
+  return handle<T>(res, path);
 }

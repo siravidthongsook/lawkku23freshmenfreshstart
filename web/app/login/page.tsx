@@ -2,22 +2,24 @@
 
 // Login for all roles. GENERIC error only (no user enumeration). On success:
 // password_must_change → /change-password, else route by role (or ?next= if present).
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
+import { Loader2 } from "lucide-react";
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { roleHome } from "@/components/public/role-home";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 
 const GENERIC_ERROR = "อีเมลหรือรหัสผ่านไม่ถูกต้อง";
 
 function LoginForm() {
-  const { login } = useAuth();
+  const { login, user, loading } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next");
@@ -27,6 +29,15 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Refocus password after a failed login so the user can retype without reaching for the field.
+  const passwordRef = useRef<HTMLInputElement>(null);
+
+  // Already-authed visitors shouldn't see the login form; bounce to their role home (or safe ?next).
+  useEffect(() => {
+    if (loading || !user) return;
+    const dest = next && next.startsWith("/") ? next : roleHome(user.role);
+    router.replace(dest);
+  }, [loading, user, next, router]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -49,7 +60,17 @@ function LoginForm() {
         setError(GENERIC_ERROR);
       }
       setSubmitting(false);
+      passwordRef.current?.focus();
     }
+  }
+
+  // While the auth check runs or a redirect is in flight, show a spinner instead of the form flash.
+  if (loading || user) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-muted/30 px-4">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-label="กำลังโหลด" />
+      </div>
+    );
   }
 
   return (
@@ -77,27 +98,40 @@ function LoginForm() {
                 autoComplete="username"
                 autoCapitalize="none"
                 value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
+                onChange={(e) => {
+                  setIdentifier(e.target.value);
+                  if (error) setError(null); // clear stale error while the user fixes input
+                }}
                 required
                 autoFocus
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="password">รหัสผ่าน</Label>
-              <Input
+              <PasswordInput
                 id="password"
-                type="password"
+                ref={passwordRef}
                 autoComplete="current-password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (error) setError(null); // clear stale error while the user fixes input
+                }}
                 required
               />
             </div>
 
             {error ? (
-              <p role="alert" className="text-sm font-medium text-destructive">
-                {error}
-              </p>
+              <div role="alert" className="space-y-1">
+                <p className="text-sm font-medium text-destructive">{error}</p>
+                {/* Recovery hint: temp-password users often mistype the issued password. */}
+                <p className="text-xs text-muted-foreground">
+                  ลืมรหัสผ่าน หรือใช้รหัสผ่านชั่วคราว?{" "}
+                  <Link href="/forgot-password" className="underline underline-offset-4">
+                    ขอความช่วยเหลือ
+                  </Link>
+                </p>
+              </div>
             ) : null}
 
             <Button type="submit" className="w-full" disabled={submitting || !identifier || !password}>
@@ -119,7 +153,13 @@ function LoginForm() {
 export default function LoginPage() {
   // useSearchParams requires a Suspense boundary in the App Router.
   return (
-    <Suspense fallback={null}>
+    <Suspense
+      fallback={
+        <div className="flex min-h-dvh items-center justify-center bg-muted/30 px-4">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-label="กำลังโหลด" />
+        </div>
+      }
+    >
       <LoginForm />
     </Suspense>
   );

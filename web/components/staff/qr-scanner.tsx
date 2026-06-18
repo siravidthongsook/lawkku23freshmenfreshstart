@@ -3,12 +3,13 @@
 // Camera QR scanner (zxing) + manual token-paste fallback. Emits the decoded token string to the parent.
 // This component ONLY decodes tokens; the network scan + success/error handling lives in the parent page
 // so the never-false-success guarantee is enforced in one place.
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BrowserMultiFormatReader, IScannerControls } from "@zxing/browser";
 import { Camera, CameraOff, ClipboardPaste } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
+import { primeAudio } from "./feedback";
 
 export function QrScanner({
   onToken,
@@ -37,9 +38,10 @@ export function QrScanner({
     return () => stop();
   }, []);
 
-  async function start() {
+  const start = useCallback(async () => {
     setCamError(null);
     if (!videoRef.current) return;
+    primeAudio(); // opening the camera is a user gesture — unlock AudioContext for scan-result beeps
     try {
       const reader = new BrowserMultiFormatReader();
       const controls = await reader.decodeFromVideoDevice(
@@ -66,7 +68,27 @@ export function QrScanner({
       setCamError(`${msg} กรุณากรอกโทเค็นด้วยตนเองด้านล่าง`);
       setScanning(false);
     }
-  }
+  }, [onToken]);
+
+  // Auto-start the camera if permission was already granted, so staff don't re-tap "เปิดกล้อง" every visit (:90).
+  // Guard: Permissions API for "camera" isn't universal — if unavailable/denied we silently leave it manual.
+  useEffect(() => {
+    let cancelled = false;
+    const perms = navigator.permissions;
+    if (!perms || typeof perms.query !== "function") return;
+    perms
+      // "camera" isn't in the TS PermissionName union everywhere — cast narrowly.
+      .query({ name: "camera" as PermissionName })
+      .then((status) => {
+        if (!cancelled && status.state === "granted") void start();
+      })
+      .catch(() => {
+        // Permissions API rejected (unsupported name / insecure context) — stay manual.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [start]);
 
   function submitManual(e: React.FormEvent) {
     e.preventDefault();

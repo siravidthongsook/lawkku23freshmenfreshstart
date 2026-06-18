@@ -6,21 +6,33 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
+import { Check, X } from "lucide-react";
 import { apiPost, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { roleHome } from "@/components/public/role-home";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 const MIN = 10;
 const MAX = 128;
 
+// One live checklist row: green check when satisfied, muted cross while pending/empty.
+function Rule({ ok, children }: { ok: boolean; children: React.ReactNode }) {
+  return (
+    <li className={cn("flex items-center gap-1.5 text-xs", ok ? "text-emerald-600" : "text-muted-foreground")}>
+      {ok ? <Check className="h-3.5 w-3.5 shrink-0" /> : <X className="h-3.5 w-3.5 shrink-0" />}
+      <span>{children}</span>
+    </li>
+  );
+}
+
 export default function ChangePasswordPage() {
-  const { user, loading, refetch } = useAuth();
+  const { user, loading, refetch, logout } = useAuth();
   const router = useRouter();
 
   const [current, setCurrent] = useState("");
@@ -36,8 +48,15 @@ export default function ChangePasswordPage() {
 
   const forced = user?.passwordMustChange ?? false;
 
+  // Live rule checks drive both the upfront checklist and the submit-enabled gate.
+  const lengthOk = next.length >= MIN && next.length <= MAX;
+  const differsOk = next.length > 0 && next !== current;
+  const matchOk = confirm.length > 0 && next === confirm;
+  const allFilled = current.length > 0 && next.length > 0 && confirm.length > 0;
+  const canSubmit = !submitting && allFilled && lengthOk && differsOk && matchOk;
+
   function validate(): string | null {
-    if (next.length < MIN || next.length > MAX) return `รหัสผ่านใหม่ต้องมี ${MIN}–${MAX} ตัวอักษร`;
+    if (!lengthOk) return `รหัสผ่านใหม่ต้องมี ${MIN}–${MAX} ตัวอักษร`;
     if (next === current) return "รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสผ่านปัจจุบัน";
     if (next !== confirm) return "รหัสผ่านใหม่ไม่ตรงกัน";
     return null;
@@ -58,11 +77,17 @@ export default function ChangePasswordPage() {
       await refetch(); // clears passwordMustChange in context
       router.replace(user ? roleHome(user.role) : "/events");
     } catch (err) {
+      // Single surface for failures: inline only (success stays toast-only) to avoid redundant noise.
       const msg = err instanceof ApiError ? err.message : "ไม่สามารถเปลี่ยนรหัสผ่านได้ กรุณาลองใหม่อีกครั้ง";
       setError(msg);
-      toast.error(msg);
       setSubmitting(false);
     }
+  }
+
+  // Forced users can't reach normal nav; give them a logout escape so the page isn't a trap.
+  async function onLogout() {
+    await logout();
+    router.replace("/login");
   }
 
   if (loading) {
@@ -95,9 +120,8 @@ export default function ChangePasswordPage() {
           <form onSubmit={onSubmit} className="space-y-4" noValidate>
             <div className="space-y-1.5">
               <Label htmlFor="current">รหัสผ่านปัจจุบัน</Label>
-              <Input
+              <PasswordInput
                 id="current"
-                type="password"
                 autoComplete="current-password"
                 value={current}
                 onChange={(e) => setCurrent(e.target.value)}
@@ -107,27 +131,32 @@ export default function ChangePasswordPage() {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="next">รหัสผ่านใหม่</Label>
-              <Input
+              <PasswordInput
                 id="next"
-                type="password"
                 autoComplete="new-password"
                 value={next}
                 onChange={(e) => setNext(e.target.value)}
                 required
               />
-              <p className="text-xs text-muted-foreground">{MIN}–{MAX} ตัวอักษร</p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="confirm">ยืนยันรหัสผ่านใหม่</Label>
-              <Input
+              <PasswordInput
                 id="confirm"
-                type="password"
-                autoComplete="new-password"
+                // off here so the browser doesn't pop its "generate strong password" UI on the 2nd field.
+                autoComplete="off"
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
                 required
               />
             </div>
+
+            {/* All rules listed upfront and checked live so users aren't surprised post-submit. */}
+            <ul className="space-y-1">
+              <Rule ok={lengthOk}>ความยาว {MIN}–{MAX} ตัวอักษร</Rule>
+              <Rule ok={differsOk}>ต้องไม่ซ้ำกับรหัสผ่านปัจจุบัน</Rule>
+              <Rule ok={matchOk}>ยืนยันรหัสผ่านให้ตรงกัน</Rule>
+            </ul>
 
             {error ? (
               <p role="alert" className="text-sm font-medium text-destructive">
@@ -135,19 +164,23 @@ export default function ChangePasswordPage() {
               </p>
             ) : null}
 
-            <Button type="submit" className="w-full" disabled={submitting}>
+            <Button type="submit" className="w-full" disabled={!canSubmit}>
               {submitting ? "กำลังบันทึก…" : "เปลี่ยนรหัสผ่าน"}
             </Button>
           </form>
 
-          {/* Voluntary visitors can bail out; forced users should complete the change. */}
-          {!forced ? (
-            <div className="mt-4 text-center text-sm text-muted-foreground">
+          {/* Voluntary visitors can cancel; forced users get a logout escape so they aren't trapped. */}
+          <div className="mt-4 text-center text-sm text-muted-foreground">
+            {forced ? (
+              <button type="button" onClick={onLogout} className="underline-offset-4 hover:underline">
+                ออกจากระบบ
+              </button>
+            ) : (
               <Link href={roleHome(user.role)} className="underline-offset-4 hover:underline">
                 ยกเลิก
               </Link>
-            </div>
-          ) : null}
+            )}
+          </div>
         </CardContent>
       </Card>
     </div>

@@ -18,9 +18,14 @@ import {
   getAnswers,
   getEventOrThrow,
   getFileIds,
+  getFiles,
   getFormVersionById,
+  getRegistrationIdentity,
   getRegistrationOrThrow,
+  listEventRegistrationsForAdmin,
   listUserRegistrationsWithEvent,
+  parseFormSchema,
+  searchUsersForRegistration,
   serializeRegistration,
   validateAgainstVersion,
   writeAnswers,
@@ -39,6 +44,20 @@ const adminRegisterBody = z.object({
   reason: z.string().min(1),
 });
 const adminAnswersBody = answersBody.extend({ reason: z.string().min(1) });
+
+// Admin registration-list query: server-side search/filter/pagination.
+const adminRegListQuery = z.object({
+  q: z.string().trim().min(1).optional(), // student_id / email / full_name
+  status: z.enum(["registered", "waitlisted", "checked_in", "cancelled"]).optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+// User typeahead query for the manual-register picker.
+const userSearchQuery = z.object({
+  q: z.string().trim().min(1),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
 
 // QR shown to students only when status is active+eligible and event is published.
 function qrEligible(status: string, eventStatus: string): boolean {
@@ -313,7 +332,22 @@ router.get("/me/registrations/:registrationId", requireAuth, async (c) => {
   if (reg.userId !== user.id) throw forbidden();
   const event = await getEventOrThrow(db, reg.eventId);
 
-  const [answers, fileIds] = await Promise.all([getAnswers(db, reg.id), getFileIds(db, reg.id)]);
+  const [answers, fileIds, files] = await Promise.all([
+    getAnswers(db, reg.id),
+    getFileIds(db, reg.id),
+    getFiles(db, reg.id),
+  ]);
+  // Frozen form schema for THIS reg's version → lets the student page resolve answer keys to labels
+  // and the edit page render real fields. Null when the reg predates forms or schema is corrupt.
+  const version = reg.formVersionId ? await getFormVersionById(db, reg.formVersionId) : null;
+  let form: { schema: unknown } | null = null;
+  if (version) {
+    try {
+      form = { schema: parseFormSchema(version) };
+    } catch {
+      form = null; // corrupt schema → fall back to raw keys, don't break the page
+    }
+  }
   const eligible = qrEligible(reg.status, event.status);
   const qrAvailable = eligible && (await hasActiveQrToken(db, reg.id));
 
@@ -335,6 +369,9 @@ router.get("/me/registrations/:registrationId", requireAuth, async (c) => {
     },
     answers,
     fileIds,
+    // Rich file metadata (filename + mime) so the detail page can label downloads; fileIds kept for back-compat.
+    files,
+    form,
     qr: { eligible, available: qrAvailable, publicEventId: event.publicId },
   });
 });
@@ -343,16 +380,33 @@ router.get("/me/registrations/:registrationId", requireAuth, async (c) => {
 // ADMIN OVERRIDE (canManageEvents — all require reason + audit)
 // =====================================================================
 
-// List registrations for an event.
+// List registrations for an event — enriched with user identity + checked-in-by name + form version.
+// Server-side search/filter/pagination so the page scales (returns total for pagination UI).
 router.get(
   "/admin/events/:eventId/registrations",
   requireAuth,
   requirePermission(canManageEvents),
   async (c) => {
     const { eventId } = eventIdParam.parse(c.req.param());
+    const query = adminRegListQuery.parse(c.req.query());
     await getEventOrThrow(db, eventId);
-    const rows = await db.select().from(registrations).where(eq(registrations.eventId, eventId));
-    return c.json({ registrations: rows.map(serializeRegistration) });
+    const { rows, total } = await listEventRegistrationsForAdmin(eventId, query);
+    return c.json({ registrations: rows, total, limit: query.limit, offset: query.offset });
+  },
+);
+
+// User typeahead for the manual-register picker (by student_id / email / full_name).
+// Excludes users already holding a non-cancelled registration for this event.
+router.get(
+  "/admin/events/:eventId/user-search",
+  requireAuth,
+  requirePermission(canManageEvents),
+  async (c) => {
+    const { eventId } = eventIdParam.parse(c.req.param());
+    const { q, limit } = userSearchQuery.parse(c.req.query());
+    await getEventOrThrow(db, eventId);
+    const users = await searchUsersForRegistration(eventId, q, limit);
+    return c.json({ users });
   },
 );
 
@@ -364,7 +418,14 @@ router.get(
   async (c) => {
     const { registrationId } = regIdParam.parse(c.req.param());
     const reg = await getRegistrationOrThrow(db, registrationId);
-    const [answers, fileIds] = await Promise.all([getAnswers(db, reg.id), getFileIds(db, reg.id)]);
+    const event = await getEventOrThrow(db, reg.eventId);
+    // Identity + file metadata + active-QR state so the per-person page shows WHO it is and current QR status.
+    const [answers, files, user, qrActive] = await Promise.all([
+      getAnswers(db, reg.id),
+      getFiles(db, reg.id),
+      getRegistrationIdentity(db, reg.userId),
+      hasActiveQrToken(db, reg.id),
+    ]);
     const history = await db
       .select()
       .from(auditLogs)
@@ -372,8 +433,11 @@ router.get(
       .orderBy(desc(auditLogs.createdAt));
     return c.json({
       registration: serializeRegistration(reg),
+      user, // { userId, studentId, fullName, email, faculty, department }
       answers,
-      fileIds,
+      files, // [{ id, filename, mimeType }]
+      fileIds: files.map((f) => f.id), // kept for backward compatibility
+      qr: { eligible: qrEligible(reg.status, event.status), active: qrActive },
       auditHistory: history,
     });
   },
@@ -404,7 +468,10 @@ router.post(
 
       const version = await getActiveFormVersion(tx, eventId);
       if (!version) throw badRequest("no_active_form", "Event has no active form version");
-      const values = validateAgainstVersion(version, body.answers);
+      // Manual register: relax required-file fields (no registration yet to attach a file to).
+      const values = validateAgainstVersion(version, body.answers, {
+        allowMissingRequiredFiles: true,
+      });
 
       const count = await countActiveRegistrations(tx, eventId);
       const overCapacity =

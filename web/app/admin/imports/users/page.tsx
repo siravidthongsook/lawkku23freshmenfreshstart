@@ -9,7 +9,9 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { apiPostForm, apiPost, ApiError } from "@/lib/api";
 import { confirmImportSchema } from "@/lib/schemas";
+import { importCountLabel } from "@/lib/labels";
 import { downloadFile } from "@/components/admin-tools/download";
+import { EventPicker } from "@/components/admin-tools/event-picker";
 import { RowStatusBadge } from "@/components/admin-tools/row-status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -38,6 +40,9 @@ import type {
 
 type Scope = "user_pool_only" | "user_pool_and_register_to_event";
 
+// Row statuses that won't be applied on confirm (skipped) — surfaced for triage on large imports.
+const ERROR_STATUSES = new Set(["invalid", "duplicate_email", "duplicate_student_id"]);
+
 export default function ImportUsersPage() {
   const [file, setFile] = useState<File | null>(null);
   const [scope, setScope] = useState<Scope>("user_pool_only");
@@ -47,12 +52,49 @@ export default function ImportUsersPage() {
   const [previewing, setPreviewing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [result, setResult] = useState<ImportConfirmResponse | null>(null);
+  const [errorsOnly, setErrorsOnly] = useState(false); // filter preview rows to problem rows only
 
   // Over-capacity acknowledgement when registering to an event.
   const [overCapAck, setOverCapAck] = useState(false);
   const [reason, setReason] = useState("");
 
   const registerToEvent = scope === "user_pool_and_register_to_event";
+
+  // Any preview is bound to the scope/event used to produce it. If the admin changes either after
+  // previewing, the stored importId no longer matches the new options → drop the stale preview so
+  // confirm can't apply mismatched scope/event. (Forces a fresh preview before confirm.)
+  function invalidatePreview() {
+    setPreview(null);
+    setResult(null);
+    setOverCapAck(false);
+    setReason("");
+    setErrorsOnly(false);
+  }
+  function changeScope(next: Scope) {
+    setScope(next);
+    invalidatePreview();
+  }
+  function changeTargetEvent(id: string) {
+    setTargetEventId(id);
+    invalidatePreview();
+  }
+  function changeFile(next: File | null) {
+    setFile(next);
+    invalidatePreview();
+  }
+
+  // Rows that won't be applied (invalid / duplicates) — surfaced for triage on large imports.
+  const errorCount = useMemo(
+    () => preview?.rows.filter((r) => ERROR_STATUSES.has(r.status)).length ?? 0,
+    [preview],
+  );
+  const visibleRows = useMemo(
+    () =>
+      errorsOnly
+        ? (preview?.rows.filter((r) => ERROR_STATUSES.has(r.status)) ?? [])
+        : (preview?.rows ?? []),
+    [preview, errorsOnly],
+  );
 
   // Count of rows flagged over-capacity in the current preview.
   const overCapCount = useMemo(
@@ -169,12 +211,12 @@ export default function ImportUsersPage() {
                 id="file"
                 type="file"
                 accept=".csv,text/csv"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                onChange={(e) => changeFile(e.target.files?.[0] ?? null)}
               />
             </div>
             <div className="space-y-1.5">
               <Label>ขอบเขต</Label>
-              <Select value={scope} onValueChange={(v) => setScope(v as Scope)}>
+              <Select value={scope} onValueChange={(v) => changeScope(v as Scope)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -188,19 +230,29 @@ export default function ImportUsersPage() {
             </div>
             {registerToEvent ? (
               <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="eventId">รหัสกิจกรรมเป้าหมาย</Label>
-                <Input
-                  id="eventId"
-                  value={targetEventId}
-                  onChange={(e) => setTargetEventId(e.target.value)}
-                  placeholder="UUID ของกิจกรรม"
-                />
+                <Label>กิจกรรมเป้าหมาย</Label>
+                <EventPicker value={targetEventId} onChange={(id) => changeTargetEvent(id)} />
               </div>
             ) : null}
           </div>
-          <Button onClick={runPreview} disabled={previewing}>
-            {previewing ? "กำลังแสดงตัวอย่าง…" : "แสดงตัวอย่าง"}
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={runPreview} disabled={previewing}>
+              {previewing ? "กำลังแสดงตัวอย่าง…" : "แสดงตัวอย่าง"}
+            </Button>
+            {/* Reset everything without a full page reload. */}
+            <Button
+              variant="outline"
+              onClick={() => {
+                changeFile(null);
+                setScope("user_pool_only");
+                setTargetEventId("");
+                invalidatePreview();
+              }}
+              disabled={previewing || confirming}
+            >
+              ล้าง
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -211,17 +263,29 @@ export default function ImportUsersPage() {
             <CardTitle className="text-base">2. ตัวอย่าง</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Summary counts */}
+            {/* Summary counts — Thai-labelled (importCountLabel falls back to the raw key if unmapped). */}
             <div className="flex flex-wrap gap-2">
               {Object.entries(preview.counts).map(([k, v]) => (
                 <span
                   key={k}
                   className="rounded-md border bg-muted px-2 py-1 text-xs text-muted-foreground"
                 >
-                  {k}: <strong className="text-foreground">{v}</strong>
+                  {importCountLabel(k)}: <strong className="text-foreground">{v}</strong>
                 </span>
               ))}
             </div>
+
+            {/* Error-row triage: filter to invalid/duplicate rows so big imports don't need eyeballing every row. */}
+            {errorCount > 0 ? (
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={errorsOnly}
+                  onChange={(e) => setErrorsOnly(e.target.checked)}
+                />
+                แสดงเฉพาะแถวที่มีปัญหา ({errorCount} แถว: ไม่ถูกต้อง / ซ้ำ)
+              </label>
+            ) : null}
 
             <div className="rounded-md border">
               <Table>
@@ -236,7 +300,7 @@ export default function ImportUsersPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {preview.rows.map((r) => (
+                  {visibleRows.map((r) => (
                     <TableRow key={r.rowNumber}>
                       <TableCell className="text-muted-foreground">{r.rowNumber}</TableCell>
                       <TableCell>{r.email}</TableCell>
@@ -279,13 +343,17 @@ export default function ImportUsersPage() {
               </div>
             ) : null}
 
-            <div className="flex gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button onClick={runConfirm} disabled={confirming}>
-                {confirming ? "กำลังยืนยัน…" : "ยืนยันการนำเข้า"}
+                {confirming ? "กำลังยืนยัน…" : "ยืนยันและนำเข้า"}
               </Button>
+              {/* Optional: download the computed preview (statuses only, no temp passwords yet). */}
               <Button variant="outline" onClick={downloadResult}>
-                ดาวน์โหลดผลตัวอย่าง
+                ดาวน์โหลดตัวอย่าง (CSV)
               </Button>
+              <span className="text-xs text-muted-foreground">
+                การยืนยันจะสร้าง/อัปเดตผู้ใช้จริง
+              </span>
             </div>
           </CardContent>
         </Card>
@@ -312,12 +380,15 @@ export default function ImportUsersPage() {
                 เกินจำนวนที่รับ: <strong>{result.over_capacity}</strong>
               </span>
             </div>
-            <p className="text-sm text-muted-foreground">
-              ไฟล์ผลลัพธ์มีรหัสผ่านชั่วคราวที่สร้างขึ้นสำหรับผู้ใช้ที่สร้างใหม่ โปรดถือว่า
-              เป็นข้อมูลละเอียดอ่อน
-            </p>
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              <p className="font-medium">ไฟล์ผลลัพธ์มีรหัสผ่านชั่วคราว (ข้อมูลละเอียดอ่อน)</p>
+              <p className="mt-1">
+                ไฟล์ CSV มีรหัสผ่านชั่วคราวแบบข้อความธรรมดาสำหรับผู้ใช้ที่สร้างใหม่
+                โปรดจัดการอย่างปลอดภัย ส่งให้เฉพาะผู้ที่เกี่ยวข้อง และลบไฟล์เมื่อเสร็จสิ้น
+              </p>
+            </div>
             <Button variant="outline" onClick={downloadResult}>
-              ดาวน์โหลดผลลัพธ์ CSV
+              ดาวน์โหลดผลลัพธ์ CSV (มีรหัสผ่านชั่วคราว)
             </Button>
           </CardContent>
         </Card>

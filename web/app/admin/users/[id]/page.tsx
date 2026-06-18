@@ -6,9 +6,11 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Check, Copy } from "lucide-react";
+import { Copy, Lock } from "lucide-react";
 import { apiGet, apiPatch, apiPost, ApiError } from "@/lib/api";
 import { updateUserSchema, changeRoleSchema } from "@/lib/schemas";
+import { copyText } from "@/lib/clipboard";
+import { roleLabel } from "@/lib/labels";
 import { formatBangkok } from "@/lib/time";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -26,6 +28,7 @@ import {
 } from "@/components/ui/select";
 import { RoleBadge } from "@/components/badges";
 import { ReasonDialog } from "@/components/admin-tools/reason-dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { TempPasswordDialog } from "@/components/admin-tools/temp-password-dialog";
 import type {
   ResetPasswordResponse,
@@ -42,6 +45,7 @@ export default function UserDetailPage() {
 
   const [user, setUser] = useState<UserWire | null>(null);
   const [hasPendingTempPw, setHasPendingTempPw] = useState(false);
+  const [locked, setLocked] = useState(false); // active login lockout (enables Unlock + shows badge)
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,6 +63,8 @@ export default function UserDetailPage() {
   // Mutation dialogs.
   const [resetOpen, setResetOpen] = useState(false);
   const [roleOpen, setRoleOpen] = useState(false);
+  const [disableOpen, setDisableOpen] = useState(false); // reason-gated (logs user out everywhere)
+  const [unlockOpen, setUnlockOpen] = useState(false); // confirm before clearing lockout
   const [pendingAction, setPendingAction] = useState(false);
   const [newRole, setNewRole] = useState<Role>("student");
 
@@ -68,7 +74,6 @@ export default function UserDetailPage() {
   // Inline single-user temp pw reveal (resolve one person without exporting everyone).
   const [revealedPw, setRevealedPw] = useState<string | null>(null);
   const [revealing, setRevealing] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -77,6 +82,7 @@ export default function UserDetailPage() {
       const res = await apiGet<UserDetailResponse>(`/admin/users/${id}`);
       setUser(res.user);
       setHasPendingTempPw(Boolean(res.has_pending_temp_password));
+      setLocked(Boolean(res.locked));
       setNewRole(res.user.role);
       setForm({
         email: res.user.email ?? "",
@@ -164,6 +170,29 @@ export default function UserDetailPage() {
     }
   }
 
+  // Disable is sensitive (logs the user out everywhere) — reason-gated + audited.
+  async function disableUser(reason: string) {
+    setPendingAction(true);
+    try {
+      const res = await apiPost<UserMutationResponse>(`/admin/users/${id}/disable`, { reason });
+      setUser(res.user);
+      setDisableOpen(false);
+      toast.success("ปิดใช้งานผู้ใช้แล้ว");
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "ไม่สามารถปิดใช้งานผู้ใช้ได้");
+    } finally {
+      setPendingAction(false);
+    }
+  }
+
+  // Unlock clears the login lockout; reload after so the lock badge/state refreshes.
+  async function unlockUser() {
+    await apiPost(`/admin/users/${id}/unlock`);
+    toast.success("ปลดล็อกบัญชีแล้ว");
+    setLocked(false);
+    await load();
+  }
+
   async function resetPassword(reason: string) {
     setPendingAction(true);
     try {
@@ -202,11 +231,17 @@ export default function UserDetailPage() {
     }
   }
 
+  // Shoulder-surf guard: auto-hide a revealed temp pw after 30s.
+  useEffect(() => {
+    if (!revealedPw) return;
+    const t = setTimeout(() => setRevealedPw(null), 30_000);
+    return () => clearTimeout(t);
+  }, [revealedPw]);
+
+  // copyText handles insecure (non-HTTPS LAN) contexts + toasts on success/failure.
   async function copyTempPw() {
     if (!revealedPw) return;
-    await navigator.clipboard.writeText(revealedPw);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    await copyText(revealedPw, { successMsg: "คัดลอกรหัสผ่านชั่วคราวแล้ว" });
   }
 
   async function changeRole(reason: string) {
@@ -270,6 +305,12 @@ export default function UserDetailPage() {
           {hasPendingTempPw ? (
             <Badge className="border-transparent bg-amber-100 text-amber-900">
               รอใช้รหัสผ่านชั่วคราว
+            </Badge>
+          ) : null}
+          {locked ? (
+            <Badge className="border-transparent bg-red-100 text-red-800">
+              <Lock className="mr-1 size-3" />
+              ถูกล็อกชั่วคราว
             </Badge>
           ) : null}
         </div>
@@ -354,13 +395,7 @@ export default function UserDetailPage() {
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2">
             {user.status === "active" ? (
-              <Button
-                variant="destructive"
-                disabled={pendingAction}
-                onClick={() =>
-                  runAction(`/admin/users/${id}/disable`, "ปิดใช้งานผู้ใช้แล้ว", { returnsUser: true })
-                }
-              >
+              <Button variant="destructive" disabled={pendingAction} onClick={() => setDisableOpen(true)}>
                 ปิดใช้งาน
               </Button>
             ) : (
@@ -373,10 +408,12 @@ export default function UserDetailPage() {
                 เปิดใช้งาน
               </Button>
             )}
+            {/* Unlock only matters when there's an active lockout; otherwise it's a no-op. */}
             <Button
               variant="outline"
-              disabled={pendingAction}
-              onClick={() => runAction(`/admin/users/${id}/unlock`, "ปลดล็อกบัญชีแล้ว")}
+              disabled={pendingAction || !locked}
+              title={locked ? undefined : "บัญชีนี้ไม่ได้ถูกล็อก"}
+              onClick={() => setUnlockOpen(true)}
             >
               ปลดล็อก
             </Button>
@@ -396,7 +433,7 @@ export default function UserDetailPage() {
                     onClick={copyTempPw}
                     aria-label="คัดลอกรหัสผ่านชั่วคราว"
                   >
-                    {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+                    <Copy className="size-4" />
                   </Button>
                 </div>
               ) : (
@@ -435,6 +472,28 @@ export default function UserDetailPage() {
         </CardContent>
       </Card>
 
+      {/* Reason-gated disable (logs the user out everywhere) */}
+      <ReasonDialog
+        open={disableOpen}
+        onOpenChange={setDisableOpen}
+        title="ปิดใช้งานผู้ใช้"
+        description="ผู้ใช้จะไม่สามารถเข้าสู่ระบบได้ และจะถูกออกจากระบบในทุกอุปกรณ์ทันที"
+        confirmLabel="ปิดใช้งาน"
+        destructive
+        pending={pendingAction}
+        onConfirm={disableUser}
+      />
+
+      {/* Unlock confirm (no reason needed) */}
+      <ConfirmDialog
+        open={unlockOpen}
+        onOpenChange={setUnlockOpen}
+        title="ปลดล็อกบัญชี"
+        description="ล้างการล็อกจากการเข้าสู่ระบบล้มเหลวหลายครั้ง ผู้ใช้จะเข้าสู่ระบบได้อีกครั้ง"
+        confirmLabel="ปลดล็อก"
+        onConfirm={unlockUser}
+      />
+
       {/* Reason-gated reset password */}
       <ReasonDialog
         open={resetOpen}
@@ -451,7 +510,7 @@ export default function UserDetailPage() {
         open={roleOpen}
         onOpenChange={setRoleOpen}
         title="เปลี่ยนบทบาท"
-        description={`เปลี่ยนบทบาทเป็น ${newRole} เซสชันใหม่จะใช้ TTL ของบทบาทใหม่`}
+        description={`เปลี่ยนบทบาทเป็น ${roleLabel(newRole)} เซสชันใหม่จะใช้ TTL ของบทบาทใหม่`}
         confirmLabel="เปลี่ยนบทบาท"
         pending={pendingAction}
         onConfirm={changeRole}
