@@ -67,10 +67,10 @@ export function CreateUserDialog({
     setFieldError(null);
     // Build the payload, dropping empty optionals so zod optional() passes.
     const payload = {
-      email: form.email.trim(),
       role: form.role,
       full_name: form.full_name.trim(),
       provision_mode: form.provision_mode,
+      ...(form.email.trim() ? { email: form.email.trim() } : {}),
       ...(form.student_id.trim() ? { student_id: form.student_id.trim() } : {}),
       ...(form.faculty.trim() ? { faculty: form.faculty.trim() } : {}),
       ...(form.department.trim() ? { department: form.department.trim() } : {}),

@@ -21,7 +21,11 @@ export const provisionModeEnum = z.enum(["temp_password", "claim"]);
 // Students MUST have a student_id (they log in with email OR student_id).
 export const createUserSchema = z
   .object({
-    email: z.string().trim().toLowerCase().email(), // normalize -> case-insensitive login match
+    // Email optional: claim users may have none (login via student_id). Blank string -> undefined.
+    email: z.preprocess(
+      (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+      z.string().trim().toLowerCase().email().optional() // normalize -> case-insensitive login match
+    ),
     student_id: z.string().trim().min(1).optional(),
     role: roleEnum,
     full_name: z.string().trim().min(1),
@@ -38,6 +42,11 @@ export const createUserSchema = z
   .refine((v) => v.provision_mode !== "claim" || !!v.student_id, {
     message: "student_id is required for claim-mode accounts",
     path: ["student_id"],
+  })
+  // Temp-password accounts still need an email to receive/use their issued login.
+  .refine((v) => v.provision_mode === "claim" || !!v.email, {
+    message: "email is required for temp-password accounts",
+    path: ["email"],
   });
 
 // Edit profile — all optional; email/student_id must stay unique.
@@ -49,6 +58,11 @@ export const updateUserSchema = z
     faculty: z.string().trim().nullable().optional(),
     department: z.string().trim().nullable().optional(),
     phone: z.string().trim().nullable().optional(),
+    // บรรพ — int cohort number; blank string -> null (clears). Coerce so "" / numeric strings both work.
+    group_number: z.preprocess(
+      (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+      z.coerce.number().int().nullable().optional(),
+    ),
   })
   .refine((v) => Object.keys(v).length > 0, { message: "No fields to update" });
 

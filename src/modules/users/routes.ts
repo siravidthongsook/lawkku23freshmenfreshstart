@@ -83,7 +83,7 @@ router.post("/admin/users", zValidator("json", createUserSchema), async (c) => {
   const meta = requestMeta(c);
   const body = c.req.valid("json");
 
-  await assertEmailFree(body.email, null);
+  if (body.email) await assertEmailFree(body.email, null);
   if (body.student_id) await assertStudentIdFree(body.student_id, null);
 
   // claim mode -> no password (hash NULL); user self-claims at /claim. temp_password -> admin-issued temp pw.
@@ -96,7 +96,7 @@ router.post("/admin/users", zValidator("json", createUserSchema), async (c) => {
       await tx
         .insert(users)
         .values({
-          email: body.email,
+          email: body.email ?? null,
           studentId: body.student_id ?? null,
           role: body.role,
           fullName: body.full_name,
@@ -228,6 +228,7 @@ router.patch("/admin/users/:userId", zValidator("json", updateUserSchema), async
   if (body.faculty !== undefined) patch.faculty = body.faculty;
   if (body.department !== undefined) patch.department = body.department;
   if (body.phone !== undefined) patch.phone = body.phone;
+  if (body.group_number !== undefined) patch.groupNumber = body.group_number; // บรรพ
 
   const updated = await db.transaction(async (tx) => {
     const row = one(await tx.update(users).set(patch).where(eq(users.id, target.id)).returning());
@@ -524,6 +525,7 @@ function publicUser(u: User) {
     faculty: u.faculty,
     department: u.department,
     phone: u.phone,
+    group_number: u.groupNumber, // บรรพ
     status: u.status,
     password_must_change: u.passwordMustChange,
     created_at: u.createdAt.toISOString(),
