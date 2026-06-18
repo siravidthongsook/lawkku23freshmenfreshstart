@@ -10,6 +10,7 @@ import { canManageEvents } from "../../lib/permissions";
 import { writeAudit } from "../../lib/audit";
 import { storage, buildEventPosterKey } from "../../lib/storage";
 import { computeEventStatus, ensureUniqueSlug, publicEventView } from "./service";
+import { getActiveVersion } from "../forms/service";
 import {
   createEventSchema,
   eventIdParam,
@@ -50,7 +51,11 @@ router.get("/events/:slug", async (c) => {
 
   // cancelled → shown with cancelled flag (no register); archived → read-only; published → normal.
   const computed = await computeEventStatus(event);
-  return c.json({ event: publicEventView(event, computed) });
+  // Include the active form so the public register flow can collect answers (Bug 1: was omitted →
+  // dialog never opened → empty body → backend rejected required fields). Detail page only.
+  const active = await getActiveVersion(event.id);
+  const form = active ? { version: active.versionNumber, schema: active.schemaJson } : null;
+  return c.json({ event: { ...publicEventView(event, computed), form } });
 });
 
 // GET /e/:publicId — permanent QR URL: resolve by public_id → 302 to current /events/:slug.
