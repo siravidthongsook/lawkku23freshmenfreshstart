@@ -6,7 +6,7 @@
 // POST /auth/claim { identifier, group_number, new_password } → { user, password_must_change }.
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
+import { BrandLogo } from "@/components/brand-logo";
 import Link from "next/link";
 import { Check, X, Loader2 } from "lucide-react";
 import { apiPost, ApiError } from "@/lib/api";
@@ -120,7 +120,7 @@ export default function ClaimPage() {
     <div className="flex min-h-dvh flex-col items-center justify-center bg-muted/30 px-4 py-12">
       <div className="mb-6 flex flex-col items-center gap-3">
         <Link href="/events" aria-label="หน้าแรก LawKKUFreshmenFreshStart23">
-          <Image src="/brand/platformlogo.png" alt="LawKKUFreshmenFreshStart23" width={112} height={56} className="h-14 w-auto" priority />
+          <BrandLogo className="h-14" priority />
         </Link>
         {/* Title on two lines: action label above, event name below */}
         <h1 className="text-center text-xl font-bold tracking-tight">

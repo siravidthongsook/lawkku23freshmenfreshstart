@@ -3,7 +3,7 @@
 // The whole top header in one place: brand + global MainNav. Shared by AppShell and
 // PublicHeader so the entire header section is identical across the app.
 import Link from "next/link";
-import Image from "next/image";
+import { BrandLogo } from "@/components/brand-logo";
 import { MainNav } from "@/components/main-nav";
 
 export function SiteHeader() {
@@ -15,15 +15,8 @@ export function SiteHeader() {
           className="flex min-w-0 items-center gap-2.5"
           aria-label="หน้าแรก LawKKUFreshmenFreshStart23"
         >
-          {/* Wide wordmark logo (~2:1) — keep aspect, don't force square. */}
-          <Image
-            src="/brand/platformlogo.png"
-            alt="LawKKUFreshmenFreshStart23"
-            width={64}
-            height={32}
-            className="h-8 w-auto shrink-0"
-            priority
-          />
+          {/* Header is edge-aligned next to the wordmark text → flush (no padding). */}
+          <BrandLogo className="h-8 shrink-0" flush priority />
           <span className="truncate text-base font-semibold tracking-tight">LawKKUFreshmenFreshStart23</span>
         </Link>
         <MainNav />

@@ -1,5 +1,5 @@
 // Static info page: no self-service password reset in V1 — users must contact an admin.
-import Image from "next/image";
+import { BrandLogo } from "@/components/brand-logo";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -13,7 +13,7 @@ export default function ForgotPasswordPage() {
     <div className="flex min-h-dvh flex-col items-center justify-center bg-muted/30 px-4 py-12">
       <div className="mb-6 flex flex-col items-center gap-3">
         <Link href="/events" aria-label="หน้าแรก LawKKUFreshmenFreshStart23">
-          <Image src="/brand/platformlogo.png" alt="LawKKUFreshmenFreshStart23" width={112} height={56} className="h-14 w-auto" priority />
+          <BrandLogo className="h-14" priority />
         </Link>
         <h1 className="text-xl font-bold tracking-tight">ลืมรหัสผ่าน?</h1>
       </div>

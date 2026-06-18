@@ -4,7 +4,7 @@
 // password_must_change → /change-password, else route by role (or ?next= if present).
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Image from "next/image";
+import { BrandLogo } from "@/components/brand-logo";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { ApiError } from "@/lib/api";
@@ -77,13 +77,10 @@ function LoginForm() {
     <div className="flex min-h-dvh flex-col items-center justify-center bg-muted/30 px-4 py-12">
       <div className="mb-6 flex flex-col items-center gap-3">
         <Link href="/events" aria-label="หน้าแรก LawKKUFreshmenFreshStart23">
-          <Image src="/brand/platformlogo.png" alt="LawKKUFreshmenFreshStart23" width={112} height={56} className="h-14 w-auto" priority />
+          <BrandLogo className="h-14" priority />
         </Link>
-        {/* Title on two lines: action label above, event name below */}
-        <h1 className="text-center text-xl font-bold tracking-tight">
-          <span className="block">เข้าสู่ระบบ</span>
-          <span className="block">LawKKUFreshmenFreshStart23</span>
-        </h1>
+        {/* Logo already shows the brand; title is just the action label. */}
+        <h1 className="text-center text-xl font-bold tracking-tight">เข้าสู่ระบบ</h1>
       </div>
 
       <Card className="w-full max-w-sm">
