@@ -3,14 +3,15 @@
 services:
   db:
     image: postgres:16-alpine
+    # Secrets come from a gitignored .env in this dir (see .env.prod.example). Never inline real values.
     environment:
-      POSTGRES_USER: lawkku_freshstart23
-      POSTGRES_PASSWORD: lawkku_freshstart23
-      POSTGRES_DB: lawkku_freshstart23
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U lawkku_freshstart23"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -26,10 +27,11 @@ services:
     environment:
       NODE_ENV: production
       PORT: "3000"
-      DATABASE_URL: postgres://lawkku_freshstart23:lawkku_freshstart23@db:5432/lawkku_freshstart23
+      # Secret: from gitignored .env (see .env.prod.example). Must match the db creds above.
+      DATABASE_URL: ${DATABASE_URL}
       SESSION_COOKIE_NAME: lawkku_freshstart23_session
-      # 32-byte base64 key for temp-password encryption. Override in real deploy.
-      TEMP_PW_ENC_KEY: "0000000000000000000000000000000000000000000=="
+      # Secret: 32-byte base64 AES-256-GCM key for temp-password encryption. From .env, never commit.
+      TEMP_PW_ENC_KEY: ${TEMP_PW_ENC_KEY}
       STORAGE_DIR: /data/storage
       COOKIE_SECURE: "false" # set true behind HTTPS
     ports:
