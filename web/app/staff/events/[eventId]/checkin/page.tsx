@@ -20,24 +20,45 @@ import { Separator } from "@/components/ui/separator";
 import { formatBangkok } from "@/lib/time";
 import { QrScanner } from "@/components/staff/qr-scanner";
 import { ScanResultPanel } from "@/components/staff/scan-result-panel";
+import { RecentScans } from "@/components/staff/recent-scans";
 import { ManualSearch } from "@/components/staff/manual-search";
 import { primeAudio } from "@/components/staff/feedback";
-import type { ScanResponse, StaffCheckinContext } from "@/components/staff/types";
+import type {
+  ScanResponse,
+  DisplayScan,
+  RecentScan,
+  StaffCheckinContext,
+} from "@/components/staff/types";
 
 // How long a scan result stays on screen before auto-clearing back to the idle "ready to scan" panel.
 const RESULT_AUTO_CLEAR_MS = 6000;
 // Periodic ctx refresh so the open/closed badge + counts don't go stale on a phone left open.
 const CTX_REFRESH_MS = 30000;
+// How many recent scans to keep in the strip (in-memory, scanner-minimal).
+const RECENT_LIMIT = 5;
 
 const STAFF_ROLES = ["checkin_staff", "admin"] as const;
+
+// Compact Bangkok time (HH:mm:ss) for the recent-scans strip — client-captured, display-only.
+function bangkokClock(): string {
+  return new Date().toLocaleTimeString("th-TH", {
+    timeZone: "Asia/Bangkok",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
 
 function ScannerContent({ eventId }: { eventId: string }) {
   const [ctx, setCtx] = useState<StaffCheckinContext | null>(null);
   const [ctxError, setCtxError] = useState<string | null>(null);
-  const [result, setResult] = useState<ScanResponse | null>(null);
+  const [result, setResult] = useState<DisplayScan | null>(null);
+  const [recent, setRecent] = useState<RecentScan[]>([]);
   // Guard against overlapping scans (camera can fire repeatedly). Token of the last in-flight scan.
   const inFlightRef = useRef(false);
   const lastTokenRef = useRef<string | null>(null);
+  // Monotonic per-scan id so each outcome remounts the card (re-fires animation) even if identical.
+  const seqRef = useRef(0);
 
   // Auto-clear timer for the last scan result (reset panel to "พร้อมสแกน" idle).
   const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -62,13 +83,37 @@ function ScannerContent({ eventId }: { eventId: string }) {
     return () => clearInterval(id);
   }, [loadCtx]);
 
-  // Show a result and (re)arm the auto-clear so a stale success card can't be mistaken for a fresh scan (:58).
-  const showResult = useCallback((res: ScanResponse) => {
-    setResult(res);
+  // Transient "checking…" the instant a scan starts: blanks the previous outcome so a stale green can
+  // never be misread as the current person at a fast gate. Not added to the recent strip.
+  const showProcessing = useCallback(() => {
     if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
+    setResult({ result: "processing", seq: ++seqRef.current });
+  }, []);
+
+  // Show a resolved result (re)arm the auto-clear, and record it in the recent strip so staff can
+  // confirm THIS person registered even after the card advances to the next scan.
+  const showResult = useCallback((res: ScanResponse) => {
+    const seq = ++seqRef.current;
+    setResult({ ...res, seq });
     // network_error keeps its retry button on screen — don't auto-dismiss it.
+    if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
     if (res.result !== "network_error") {
       clearTimerRef.current = setTimeout(() => setResult(null), RESULT_AUTO_CLEAR_MS);
+    }
+    // Strip excludes network_error (no person involved); everything else lands so staff have an audit trail.
+    if (res.result !== "network_error") {
+      setRecent((prev) =>
+        [
+          {
+            seq,
+            code: res.result,
+            fullName: res.fullName ?? null,
+            studentId: res.studentId ?? null,
+            at: bangkokClock(),
+          },
+          ...prev,
+        ].slice(0, RECENT_LIMIT),
+      );
     }
   }, []);
 
@@ -85,6 +130,7 @@ function ScannerContent({ eventId }: { eventId: string }) {
       inFlightRef.current = true;
       lastTokenRef.current = token;
       primeAudio(); // a scan is a user gesture — unlock the AudioContext for the result beep
+      showProcessing(); // immediately clear the previous person's card while we wait for the server
       try {
         const res = await apiPost<ScanResponse>(`/events/${eventId}/checkins/scan`, {
           qr_token: token,
@@ -103,7 +149,7 @@ function ScannerContent({ eventId }: { eventId: string }) {
         inFlightRef.current = false;
       }
     },
-    [eventId, loadCtx, showResult],
+    [eventId, loadCtx, showResult, showProcessing],
   );
 
   const retry = useCallback(() => {
@@ -165,6 +211,9 @@ function ScannerContent({ eventId }: { eventId: string }) {
 
       {/* Recent scan result — always visible above the fold so staff see the latest outcome. */}
       <ScanResultPanel result={result} onRetry={retry} />
+
+      {/* Recent-scans strip: confirm THIS person registered even after the card advances at a fast gate. */}
+      <RecentScans items={recent} />
 
       <Tabs defaultValue="scan">
         {/* h-auto so list grows to fit the taller h-11 triggers (else active box overflows) */}

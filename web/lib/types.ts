@@ -117,7 +117,8 @@ export type ScanResultCode =
   | "event_cancelled"
   | "qr_revoked"
   | "qr_invalid"
-  | "network_error";
+  | "network_error" // UI-only: thrown ApiError / non-2xx / offline. Never a success.
+  | "processing"; // UI-only: scan sent, awaiting server. Blanks the previous result so it can't be mistaken.
 
 // Import row status — mirrors backend ROW_STATUSES (kept here for UI without importing server-only code).
 export type ImportRowStatus =

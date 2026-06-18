@@ -1,7 +1,9 @@
 "use client";
 
-// Renders the most recent scan outcome. Every ScanResultCode (+ network_error) has an explicit treatment.
-// SAFETY: only `checked_in_success` is a success (green). Everything else is a denial/error — never green.
+// Renders the most recent scan outcome. Every ScanResultCode (+ network_error/processing) has an explicit
+// treatment. SAFETY: only `checked_in_success` is a success (green). Everything else is a denial/error/
+// pending — never green. The card remounts per scan (key={result.seq}) so back-to-back outcomes visibly
+// re-fire instead of looking like a stale previous result.
 import { useEffect } from "react";
 import {
   CheckCircle2,
@@ -11,6 +13,7 @@ import {
   Clock,
   CalendarClock,
   RotateCcw,
+  Loader2,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,27 +21,22 @@ import { cn } from "@/lib/utils";
 import { formatBangkok } from "@/lib/time";
 import { feedbackSuccess, feedbackWarn, feedbackDeny } from "./feedback";
 import type { ScanResultCode } from "@/lib/types";
-import type { ScanResponse } from "./types";
+import type { DisplayScan } from "./types";
 
-// `info` is a distinct tone for "window not open / closed" so it doesn't look like already-checked-in (warn).
-type Tone = "success" | "warn" | "info" | "deny" | "error";
+// `info` = window timing (not-open/closed). `pending` = awaiting server (no sound).
+type Tone = "success" | "warn" | "info" | "deny" | "error" | "pending";
 
-// Per-code presentation. `manualHint` shows the "try manual search" nudge for invalid/revoked tokens.
 const PRESENTATION: Record<
   ScanResultCode,
   { tone: Tone; title: string; hint: string; manualHint?: boolean }
 > = {
-  checked_in_success: { tone: "success", title: "เช็คอินแล้ว", hint: "ผู้เข้าร่วมได้เช็คอินเรียบร้อยแล้ว" },
+  checked_in_success: { tone: "success", title: "เช็คอินสำเร็จ", hint: "ผู้เข้าร่วมเช็คอินเรียบร้อยแล้ว" },
   already_checked_in: {
     tone: "warn",
     title: "เช็คอินไปแล้ว",
     hint: "ผู้เข้าร่วมรายนี้เช็คอินไปแล้ว",
   },
-  wrong_event: {
-    tone: "deny",
-    title: "ผิดกิจกรรม",
-    hint: "บัตรนี้เป็นของกิจกรรมอื่น",
-  },
+  wrong_event: { tone: "deny", title: "ผิดกิจกรรม", hint: "บัตรนี้เป็นของกิจกรรมอื่น" },
   registration_cancelled: {
     tone: "deny",
     title: "ยกเลิกการลงทะเบียนแล้ว",
@@ -49,16 +47,8 @@ const PRESENTATION: Record<
     title: "รายชื่อสำรอง",
     hint: "ผู้ที่อยู่ในรายชื่อสำรองไม่สามารถเช็คอินได้",
   },
-  checkin_not_open: {
-    tone: "info",
-    title: "ยังไม่เปิดเช็คอิน",
-    hint: "ยังไม่ถึงช่วงเวลาเช็คอิน",
-  },
-  checkin_closed: {
-    tone: "info",
-    title: "ปิดเช็คอินแล้ว",
-    hint: "ช่วงเวลาเช็คอินสิ้นสุดแล้ว",
-  },
+  checkin_not_open: { tone: "info", title: "ยังไม่เปิดเช็คอิน", hint: "ยังไม่ถึงช่วงเวลาเช็คอิน" },
+  checkin_closed: { tone: "info", title: "ปิดเช็คอินแล้ว", hint: "ช่วงเวลาเช็คอินสิ้นสุดแล้ว" },
   event_not_published: {
     tone: "deny",
     title: "กิจกรรมยังไม่เผยแพร่",
@@ -77,50 +67,55 @@ const PRESENTATION: Record<
     hint: "ไม่รู้จักโค้ดนี้ ลองค้นหาด้วยตนเอง",
     manualHint: true,
   },
-  // network_error is UI-only: thrown ApiError / non-2xx / offline. NEVER a success.
+  // UI-only: thrown ApiError / non-2xx / offline. NEVER a success.
   network_error: {
     tone: "error",
     title: "เครือข่ายผิดพลาด",
     hint: "ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้ ผู้เข้าร่วมยังไม่ถูกเช็คอิน กรุณาลองใหม่",
   },
+  // UI-only: scan sent, awaiting server. Blanks the previous result so a stale green can't be misread.
+  processing: { tone: "pending", title: "กำลังตรวจสอบ…", hint: "กำลังยืนยันกับเซิร์ฟเวอร์" },
 };
 
 const TONE_STYLE: Record<Tone, string> = {
-  success: "border-green-300 bg-green-50 text-green-900",
+  success: "border-green-400 bg-green-50 text-green-900",
   warn: "border-amber-300 bg-amber-50 text-amber-900",
   info: "border-blue-300 bg-blue-50 text-blue-900",
   deny: "border-red-300 bg-red-50 text-red-900",
   error: "border-orange-400 bg-orange-50 text-orange-900",
+  pending: "border-slate-300 bg-slate-50 text-slate-700",
 };
 
 function ToneIcon({ tone }: { tone: Tone }) {
-  const cls = "size-7 shrink-0";
+  const cls = "size-8 shrink-0";
   if (tone === "success") return <CheckCircle2 className={cls} />;
   if (tone === "warn") return <Clock className={cls} />;
-  if (tone === "info") return <CalendarClock className={cls} />; // window timing — distinct from already-checked-in
+  if (tone === "info") return <CalendarClock className={cls} />;
   if (tone === "error") return <WifiOff className={cls} />;
+  if (tone === "pending") return <Loader2 className={cn(cls, "animate-spin")} />;
   return <XCircle className={cls} />;
 }
 
-// Map a tone to its audio+haptic feedback. success=chirp, warn/info=soft double-beep, deny/error=buzzer.
+// Map a tone to audio+haptic. success=chirp, warn/info=soft double-beep, deny/error=buzzer, pending=silent.
 function playFeedback(tone: Tone): void {
+  if (tone === "pending") return; // no sound while waiting
   if (tone === "success") return feedbackSuccess();
   if (tone === "warn" || tone === "info") return feedbackWarn();
-  return feedbackDeny(); // deny + error → clearly-bad buzzer
+  return feedbackDeny();
 }
 
 export function ScanResultPanel({
   result,
   onRetry,
 }: {
-  result: ScanResponse | null;
+  result: DisplayScan | null;
   onRetry?: () => void;
 }) {
-  // Fire audio+haptic feedback on every new result (parent passes a fresh object per scan, so each scan plays).
+  // Fire audio+haptic on every new scan. Keyed on seq so identical back-to-back outcomes still re-fire.
   useEffect(() => {
     if (!result) return;
     playFeedback(PRESENTATION[result.result].tone);
-  }, [result]);
+  }, [result?.seq]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!result) {
     return (
@@ -131,37 +126,58 @@ export function ScanResultPanel({
   }
 
   const p = PRESENTATION[result.result];
-  const showSuccessDetails = result.result === "checked_in_success";
-  const showAlreadyDetails = result.result === "already_checked_in";
+  const isSuccess = result.result === "checked_in_success";
+  const isAlready = result.result === "already_checked_in";
+  // Any reg-bearing outcome carries identity; show it so staff confirm WHO this scan was for.
+  const hasIdentity = !!(result.fullName || result.studentId);
 
   return (
-    <Card className={cn("border-2 p-5", TONE_STYLE[p.tone])} aria-live="assertive">
+    // key={seq} remounts the card each scan → CSS pop animation replays → clearly a fresh hit.
+    <Card
+      key={result.seq}
+      className={cn("animate-scan-pop border-2 p-5", TONE_STYLE[p.tone])}
+      aria-live="assertive"
+    >
       <div className="flex items-start gap-3">
         <ToneIcon tone={p.tone} />
         <div className="min-w-0 flex-1">
           <p className="text-lg font-semibold leading-tight">{p.title}</p>
-          <p className="mt-0.5 text-sm opacity-90">{p.hint}</p>
 
-          {/* Success detail (best-effort: backend may omit name/student_id/time). */}
-          {showSuccessDetails && (result.fullName || result.studentId || result.checkedInAt) && (
-            <dl className="mt-3 space-y-0.5 text-sm">
-              {result.fullName && <DetailRow label="ชื่อ" value={result.fullName} />}
-              {result.studentId && <DetailRow label="รหัสนักศึกษา" value={result.studentId} />}
-              {result.checkedInAt && (
-                <DetailRow label="เวลา" value={formatBangkok(result.checkedInAt)} />
+          {/* Identity hero: on success the name/ID is the headline so staff glance-confirm the person. */}
+          {hasIdentity ? (
+            <div className={cn("mt-2", isSuccess && "rounded-md bg-white/60 px-3 py-2")}>
+              {result.fullName && (
+                <p className={cn("font-bold leading-tight", isSuccess ? "text-2xl" : "text-base")}>
+                  {result.fullName}
+                </p>
               )}
-            </dl>
+              {result.studentId && (
+                <p className={cn("font-mono", isSuccess ? "text-base" : "text-sm opacity-80")}>
+                  {result.studentId}
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="mt-0.5 text-sm opacity-90">{p.hint}</p>
           )}
 
-          {/* Already-checked-in: show original time + who, if provided. */}
-          {showAlreadyDetails && (result.originalCheckedInAt || result.checkedInBy) && (
-            <dl className="mt-3 space-y-0.5 text-sm">
+          {/* Success: confirmation time. */}
+          {isSuccess && result.checkedInAt && (
+            <p className="mt-2 text-sm opacity-90">เวลา {formatBangkok(result.checkedInAt)}</p>
+          )}
+
+          {/* Already-checked-in: original time + who, so staff can tell a duplicate from a fresh check-in. */}
+          {isAlready && (result.originalCheckedInAt || result.checkedInBy) && (
+            <dl className="mt-2 space-y-0.5 text-sm">
               {result.originalCheckedInAt && (
                 <DetailRow label="เช็คอินเมื่อ" value={formatBangkok(result.originalCheckedInAt)} />
               )}
               {result.checkedInBy && <DetailRow label="โดย" value={result.checkedInBy} />}
             </dl>
           )}
+
+          {/* When identity is the hero, surface the hint as a thin secondary line for non-success outcomes. */}
+          {hasIdentity && !isSuccess && <p className="mt-2 text-sm opacity-90">{p.hint}</p>}
 
           {p.manualHint && (
             <p className="mt-2 flex items-center gap-1 text-sm font-medium">
@@ -170,12 +186,7 @@ export function ScanResultPanel({
           )}
 
           {result.result === "network_error" && onRetry && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="mt-3 bg-white"
-              onClick={onRetry}
-            >
+            <Button variant="outline" size="sm" className="mt-3 bg-white" onClick={onRetry}>
               <RotateCcw className="size-4" /> ลองใหม่
             </Button>
           )}

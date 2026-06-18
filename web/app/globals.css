@@ -86,3 +86,22 @@
     color: var(--foreground);
   }
 }
+
+/* Scanner result card: re-fired on every scan (parent remounts via key={seq}) so back-to-back
+   outcomes read as a distinct fresh hit, not a lingering previous one. */
+@keyframes scan-pop {
+  0% {
+    transform: scale(0.96);
+    opacity: 0.35;
+  }
+  45% {
+    transform: scale(1.025);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.animate-scan-pop {
+  animation: scan-pop 340ms cubic-bezier(0.22, 1, 0.36, 1);
+}

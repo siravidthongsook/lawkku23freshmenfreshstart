@@ -35,18 +35,29 @@ export type StaffCheckinContext = {
   counts: { registered: number; checkedIn: number };
 };
 
-// POST /api/events/:eventId/checkins/scan — server returns the outcome code (+ optional registrationId).
-// NOTE: backend currently returns only { result, registrationId } — name/student_id/time are NOT in the
-// scan payload. We render whatever the server includes; success detail fields are optional/best-effort.
+// POST /api/events/:eventId/checkins/scan — server returns the outcome code + identity for every
+// reg-bearing outcome (so staff confirm WHO at a fast gate). Scanner-minimal: name + student_id only.
 export type ScanResponse = {
   result: ScanResultCode;
   registrationId?: string;
-  // Optional enrichment if the backend later adds it to the success payload — render when present.
   fullName?: string | null;
   studentId?: string | null;
   checkedInAt?: string | null;
   checkedInBy?: string | null;
   originalCheckedInAt?: string | null;
+};
+
+// Display wrapper: `seq` is a per-scan counter so the result card remounts (re-fires the pop animation)
+// even on identical back-to-back outcomes, and the recent strip can key items stably.
+export type DisplayScan = ScanResponse & { seq: number };
+
+// One row in the recent-scans strip. `at` = client-captured Bangkok time string for the strip only.
+export type RecentScan = {
+  seq: number;
+  code: ScanResultCode;
+  fullName: string | null;
+  studentId: string | null;
+  at: string;
 };
 
 // GET /api/events/:eventId/checkins/search — minimal, scanner-safe projection (no email/phone/answers/files).

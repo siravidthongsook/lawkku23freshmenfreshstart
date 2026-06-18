@@ -141,7 +141,19 @@ router.post(
     log.set("eventId", eventId);
     const tokenHash = hashToken(body.qr_token);
 
-    const result = await db.transaction(async (tx): Promise<{ result: ScanResult; registrationId?: string }> => {
+    // Identity travels with every reg-bearing outcome so staff can confirm WHO the scan was for
+    // (fast one-by-one gate). Scanner-minimal: name + student_id only — no email/phone/answers.
+    type ScanOut = {
+      result: ScanResult;
+      registrationId?: string;
+      fullName?: string | null;
+      studentId?: string | null;
+      checkedInAt?: string | null;
+      originalCheckedInAt?: string | null;
+      checkedInBy?: string | null;
+    };
+
+    const result = await db.transaction(async (tx): Promise<ScanOut> => {
       // Look up token by hash.
       const [token] = await tx
         .select()
@@ -160,26 +172,50 @@ router.post(
         .limit(1);
       if (!reg) return { result: "qr_invalid" };
 
+      // Resolve identity once; attach to every outcome below via spread.
+      const [u] = await tx
+        .select({ fullName: users.fullName, studentId: users.studentId })
+        .from(users)
+        .where(eq(users.id, reg.userId))
+        .limit(1);
+      const who = { registrationId: reg.id, fullName: u?.fullName ?? null, studentId: u?.studentId ?? null };
+
       // Token must belong to a registration of THIS event.
-      if (reg.eventId !== eventId) return { result: "wrong_event", registrationId: reg.id };
+      if (reg.eventId !== eventId) return { result: "wrong_event", ...who };
 
       const [event] = await tx.select().from(events).where(eq(events.id, reg.eventId)).limit(1);
-      if (!event) return { result: "event_not_published", registrationId: reg.id };
-      if (event.status === "cancelled") return { result: "event_cancelled", registrationId: reg.id };
-      if (event.status !== "published")
-        return { result: "event_not_published", registrationId: reg.id };
+      if (!event) return { result: "event_not_published", ...who };
+      if (event.status === "cancelled") return { result: "event_cancelled", ...who };
+      if (event.status !== "published") return { result: "event_not_published", ...who };
 
       // Window: distinguish not-yet-open vs closed.
       const now = new Date();
       if (event.checkinOpenAt && now < event.checkinOpenAt)
-        return { result: "checkin_not_open", registrationId: reg.id };
+        return { result: "checkin_not_open", ...who };
       if (event.checkinCloseAt && now > event.checkinCloseAt)
-        return { result: "checkin_closed", registrationId: reg.id };
+        return { result: "checkin_closed", ...who };
 
       // Registration status checks.
-      if (reg.status === "cancelled") return { result: "registration_cancelled", registrationId: reg.id };
-      if (reg.status === "waitlisted") return { result: "waitlisted_not_allowed", registrationId: reg.id };
-      if (reg.status === "checked_in") return { result: "already_checked_in", registrationId: reg.id };
+      if (reg.status === "cancelled") return { result: "registration_cancelled", ...who };
+      if (reg.status === "waitlisted") return { result: "waitlisted_not_allowed", ...who };
+      if (reg.status === "checked_in") {
+        // Surface original time + who did it, so staff can tell a duplicate from a fresh check-in.
+        let checkedInBy: string | null = null;
+        if (reg.checkedInByUserId) {
+          const [s] = await tx
+            .select({ fullName: users.fullName })
+            .from(users)
+            .where(eq(users.id, reg.checkedInByUserId))
+            .limit(1);
+          checkedInBy = s?.fullName ?? null;
+        }
+        return {
+          result: "already_checked_in",
+          ...who,
+          originalCheckedInAt: reg.checkedInAt?.toISOString() ?? null,
+          checkedInBy,
+        };
+      }
 
       // Success: registered → checked_in via QR scan.
       await tx
@@ -209,7 +245,7 @@ router.post(
         },
         tx,
       );
-      return { result: "checked_in_success", registrationId: reg.id };
+      return { result: "checked_in_success", ...who, checkedInAt: now.toISOString() };
     });
 
     // Every scan outcome lands in the log (success + all reject codes) — 200 either way.
