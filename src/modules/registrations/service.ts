@@ -1,4 +1,5 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import type { Tx } from "../../db/client";
 import { db } from "../../db/client";
 import { events, type Event } from "../../db/schema/events";
@@ -9,6 +10,7 @@ import {
   registrations,
   type Registration,
 } from "../../db/schema/registrations";
+import { users } from "../../db/schema/users";
 import { formSchema, type FormSchema, validateAnswers, type AnswerMap } from "../../lib/form-schema";
 import { badRequest, notFound } from "../../lib/errors";
 
@@ -83,9 +85,15 @@ export function parseFormSchema(version: EventFormVersion): FormSchema {
 }
 
 // Validate submitted answers against a version's schema → normalized values or 400 with field errors.
-export function validateAgainstVersion(version: EventFormVersion, answers: AnswerMap): AnswerMap {
+// `allowMissingRequiredFiles` relaxes the required check for FILE fields only (admin manual register,
+// where the registration — and thus file attach — doesn't exist yet).
+export function validateAgainstVersion(
+  version: EventFormVersion,
+  answers: AnswerMap,
+  opts?: { allowMissingRequiredFiles?: boolean },
+): AnswerMap {
   const schema = parseFormSchema(version);
-  const result = validateAnswers(schema, answers);
+  const result = validateAnswers(schema, answers, opts);
   if (!result.ok) {
     const err = badRequest("invalid_form_answers", "Form answers failed validation");
     (err as unknown as { details: unknown }).details = result.errors;
@@ -192,4 +200,181 @@ export function serializeRegistration(reg: Registration) {
     createdAt: reg.createdAt.toISOString(),
     updatedAt: reg.updatedAt.toISOString(),
   };
+}
+
+// Identity fields joined onto a registration so admin UIs show WHO a registration belongs to
+// (rather than a raw user_id UUID). Referenced by user_id only — never email/student_id (invariant).
+type RegistrationIdentity = {
+  studentId: string | null;
+  fullName: string | null;
+  email: string | null;
+  faculty: string | null;
+  department: string | null;
+};
+
+// Admin registration-list filters (server-side search/filter/pagination). Mirrors registration_status enum.
+export type AdminRegistrationListParams = {
+  q?: string; // matches student_id / email / full_name (ilike)
+  status?: "registered" | "waitlisted" | "checked_in" | "cancelled";
+  limit: number;
+  offset: number;
+};
+
+// Serialized admin registration row = reg fields + user identity + checked-in-by name + form version number.
+export type AdminRegistrationRow = ReturnType<typeof serializeRegistration> &
+  RegistrationIdentity & {
+    eventId: string;
+    checkedInBy: string | null; // full name of the staff/admin who checked them in
+    formVersion: number | null; // human-friendly version number, not the version UUID
+  };
+
+// List registrations for an event with user identity + check-in actor name + form version number.
+// Server-side search/filter/pagination so the page scales past hundreds of rows. Returns { rows, total }.
+export async function listEventRegistrationsForAdmin(
+  eventId: string,
+  params: AdminRegistrationListParams,
+): Promise<{ rows: AdminRegistrationRow[]; total: number }> {
+  const checkedInByUser = alias(users, "checked_in_by_user");
+
+  const conds: SQL[] = [eq(registrations.eventId, eventId)];
+  if (params.status) conds.push(eq(registrations.status, params.status));
+  if (params.q) {
+    const pat = `%${params.q}%`;
+    const search = or(
+      ilike(users.studentId, pat),
+      ilike(users.email, pat),
+      ilike(users.fullName, pat),
+    );
+    if (search) conds.push(search);
+  }
+  const where = and(...conds);
+
+  const [countRow] = await db
+    .select({ c: sql<number>`count(*)::int` })
+    .from(registrations)
+    .innerJoin(users, eq(users.id, registrations.userId))
+    .where(where);
+  const total = countRow?.c ?? 0;
+
+  const rows = await db
+    .select({
+      reg: registrations,
+      studentId: users.studentId,
+      fullName: users.fullName,
+      email: users.email,
+      faculty: users.faculty,
+      department: users.department,
+      checkedInByName: checkedInByUser.fullName,
+      formVersion: eventFormVersions.versionNumber,
+    })
+    .from(registrations)
+    .innerJoin(users, eq(users.id, registrations.userId))
+    .leftJoin(checkedInByUser, eq(checkedInByUser.id, registrations.checkedInByUserId))
+    .leftJoin(eventFormVersions, eq(eventFormVersions.id, registrations.formVersionId))
+    .where(where)
+    .orderBy(desc(registrations.createdAt))
+    .limit(params.limit)
+    .offset(params.offset);
+
+  return {
+    rows: rows.map((r) => ({
+      ...serializeRegistration(r.reg),
+      studentId: r.studentId,
+      fullName: r.fullName,
+      email: r.email,
+      faculty: r.faculty,
+      department: r.department,
+      checkedInBy: r.checkedInByName ?? null,
+      formVersion: r.formVersion ?? null,
+    })),
+    total,
+  };
+}
+
+// Load a registration's user identity (for the single-registration admin detail view).
+export async function getRegistrationIdentity(
+  exec: Exec,
+  userId: string,
+): Promise<RegistrationIdentity & { userId: string }> {
+  const [u] = await exec
+    .select({
+      studentId: users.studentId,
+      fullName: users.fullName,
+      email: users.email,
+      faculty: users.faculty,
+      department: users.department,
+    })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  return {
+    userId,
+    studentId: u?.studentId ?? null,
+    fullName: u?.fullName ?? null,
+    email: u?.email ?? null,
+    faculty: u?.faculty ?? null,
+    department: u?.department ?? null,
+  };
+}
+
+// User typeahead for the manual-register picker: match active students by student_id / email / full_name.
+// Returns id + identity only (no auth state). Excludes already-registered (non-cancelled) users for this event.
+export async function searchUsersForRegistration(
+  eventId: string,
+  q: string,
+  limit: number,
+): Promise<(RegistrationIdentity & { id: string })[]> {
+  const pat = `%${q}%`;
+  // Users who already hold a non-cancelled registration for this event — exclude from the picker.
+  const taken = db
+    .select({ userId: registrations.userId })
+    .from(registrations)
+    .where(
+      and(
+        eq(registrations.eventId, eventId),
+        inArray(registrations.status, ["registered", "waitlisted", "checked_in"]),
+      ),
+    );
+
+  const rows = await db
+    .select({
+      id: users.id,
+      studentId: users.studentId,
+      fullName: users.fullName,
+      email: users.email,
+      faculty: users.faculty,
+      department: users.department,
+    })
+    .from(users)
+    .where(
+      and(
+        eq(users.status, "active"),
+        or(ilike(users.studentId, pat), ilike(users.email, pat), ilike(users.fullName, pat)),
+        sql`${users.id} not in ${taken}`,
+      ),
+    )
+    .orderBy(users.fullName)
+    .limit(limit);
+  return rows;
+}
+
+// File metadata for the admin registration detail (filename + mime type, not just opaque id).
+export async function getFiles(
+  exec: Exec,
+  registrationId: string,
+): Promise<{ id: string; filename: string; mimeType: string }[]> {
+  const rows = await exec
+    .select({
+      id: uploadedFiles.id,
+      filename: uploadedFiles.originalFilename,
+      mimeType: uploadedFiles.mimeType,
+    })
+    .from(uploadedFiles)
+    .where(
+      and(
+        eq(uploadedFiles.registrationId, registrationId),
+        sql`${uploadedFiles.deletedAt} is null`,
+      ),
+    );
+  return rows;
 }

@@ -40,9 +40,13 @@ export type AnswerMap = Record<string, unknown>;
 
 // Validate submitted answers against a form schema. Returns normalized values or field errors.
 // File fields are NOT value-checked here (handled by upload endpoint) — only presence if required.
+// `allowMissingRequiredFiles`: admin manual-register sends answers BEFORE a registration exists, so a
+// required file can't be attached yet — relax the required check for file fields only (the user
+// attaches the file afterward). Non-file required fields are still enforced.
 export function validateAnswers(
   schema: FormSchema,
   answers: AnswerMap,
+  opts?: { allowMissingRequiredFiles?: boolean },
 ): { ok: true; values: AnswerMap } | { ok: false; errors: Record<string, string> } {
   const errors: Record<string, string> = {};
   const values: AnswerMap = {};
@@ -58,7 +62,9 @@ export function validateAnswers(
     const missing = raw === undefined || raw === null || raw === "";
 
     if (missing) {
-      if (f.required) errors[f.key] = "Required";
+      // Allow a missing required FILE field when the caller opts in (admin manual register).
+      const fileExempt = opts?.allowMissingRequiredFiles && isFileField(f);
+      if (f.required && !fileExempt) errors[f.key] = "Required";
       continue;
     }
 
