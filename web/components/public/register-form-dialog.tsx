@@ -43,6 +43,8 @@ export function RegisterFormDialog({
 }: Props) {
   const [values, setValues] = useState<AnswerMap>(initialValues ?? {});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  // PDPA consent — required gate; collects per-event personal data so consent must precede submit.
+  const [pdpaAgreed, setPdpaAgreed] = useState(false);
 
   // Sorted fields; file fields can't be uploaded pre-registration (no registrationId yet).
   const fields = useMemo(() => [...schema.fields].sort((a, b) => a.sort - b.sort), [schema]);
@@ -59,6 +61,7 @@ export function RegisterFormDialog({
 
   function handleSubmit() {
     if (blockedByFile) return; // guard: required file field can't be satisfied pre-registration
+    if (!pdpaAgreed) return; // guard: PDPA consent required before collecting personal data
     setFieldErrors({});
     const result = validateAnswers(schema, values);
     if (!result.ok) {
@@ -116,11 +119,36 @@ export function RegisterFormDialog({
           ) : null}
         </div>
 
+        {/* PDPA consent — required gate. Links to KKU privacy policy; submit stays disabled until checked. */}
+        {!blockedByFile ? (
+          <label htmlFor="register-pdpa" className="flex cursor-pointer items-start gap-2 text-xs text-muted-foreground">
+            <input
+              id="register-pdpa"
+              type="checkbox"
+              checked={pdpaAgreed}
+              onChange={(e) => setPdpaAgreed(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-primary"
+            />
+            <span>
+              ข้าพเจ้ายินยอมให้เก็บรวบรวมและใช้ข้อมูลส่วนบุคคลตาม{" "}
+              <a
+                href="https://iad.kku.ac.th/page.php?id=94"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-primary underline underline-offset-4"
+              >
+                นโยบายความเป็นส่วนตัว (PDPA)
+              </a>{" "}
+              ของกิจกรรม
+            </span>
+          </label>
+        ) : null}
+
         <DialogFooter>
           <Button variant="outline" disabled={submitting} onClick={() => onOpenChange(false)}>
             ยกเลิก
           </Button>
-          <Button disabled={submitting || blockedByFile} onClick={handleSubmit}>
+          <Button disabled={submitting || blockedByFile || !pdpaAgreed} onClick={handleSubmit}>
             {submitting ? "กำลังลงทะเบียน…" : "ส่งและลงทะเบียน"}
           </Button>
         </DialogFooter>

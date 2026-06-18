@@ -201,7 +201,7 @@ export default function ClaimPage() {
               <Rule ok={matchOk}>ยืนยันรหัสผ่านให้ตรงกัน</Rule>
             </ul>
 
-            {/* PDPA consent — required gate. Mock copy for now; submit stays disabled until checked. */}
+            {/* PDPA consent — required gate. Links to KKU privacy policy; submit stays disabled until checked. */}
             <label htmlFor="pdpa" className="flex cursor-pointer items-start gap-2 text-xs text-muted-foreground">
               <input
                 id="pdpa"
@@ -211,9 +211,16 @@ export default function ClaimPage() {
                 className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-primary"
               />
               <span>
-                ข้าพเจ้ายินยอมให้เก็บรวบรวมและใช้ข้อมูลส่วนบุคคลตาม
-                นโยบายความเป็นส่วนตัว (PDPA) ของกิจกรรม{" "}
-                <span className="text-muted-foreground/70">[ข้อความตัวอย่าง รอเนื้อหาจริง]</span>
+                ข้าพเจ้ายินยอมให้เก็บรวบรวมและใช้ข้อมูลส่วนบุคคลตาม{" "}
+                <a
+                  href="https://iad.kku.ac.th/page.php?id=94"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-primary underline underline-offset-4"
+                >
+                  นโยบายความเป็นส่วนตัว (PDPA)
+                </a>{" "}
+                ของกิจกรรม
               </span>
             </label>
 
