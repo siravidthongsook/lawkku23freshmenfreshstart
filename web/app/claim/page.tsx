@@ -146,7 +146,11 @@ export default function ClaimPage() {
                 placeholder="693270XXX-X"
                 value={identifier}
                 onChange={(e) => {
-                  setIdentifier(e.target.value);
+                  let v = e.target.value;
+                  // Students forget the dash: exactly 10 straight digits → auto-insert it at the
+                  // canonical spot (693270001-0). Any other format passes through untouched.
+                  if (/^\d{10}$/.test(v)) v = v.slice(0, 9) + "-" + v.slice(9);
+                  setIdentifier(v);
                   if (error) setError(null); // clear stale error while the user fixes input
                 }}
                 required
