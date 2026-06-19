@@ -295,12 +295,27 @@ Rules:
 
 ต้องมีตั้งแต่ V1
 
-Recommended defaults:
+ป้องกัน 3 มิติ (layered) — กันให้แม่นขึ้นโดยไม่ block นักศึกษาบริสุทธิ์ที่อยู่หลัง campus NAT IP เดียวกัน:
 
 ```txt
-IP limit: 20 login attempts / 10 minutes / IP
-Account/email failed limit: 5 failed attempts / 10 minutes / email
-Temporary lockout: 15 minutes
+1. account (email/identifier) — HARD lock
+   5 failed attempts / 10 minutes / account → lockout 15 นาที
+   แม่นที่สุด, ลบ/เปลี่ยน device ก็หนีไม่พ้น, admin unlock ได้
+
+2. device — SOFT block
+   FE สร้าง random deviceId (localStorage) ส่งมาเป็น header X-Device-Id
+   10 failed attempts / 10 minutes / device → block (ไม่มี lockout row, หายเองเมื่อ fail พ้น window)
+   เป็นสัญญาณ precision เท่านั้น (ลบ/ปลอมได้) — ไม่ใช่ security boundary
+   ถ้า client ไม่ส่ง header → ข้ามมิตินี้ (account + IP ยังคุ้ม)
+
+3. IP — SMART backstop (credential-stuffing signature)
+   block IP เฉพาะเมื่อเข้าครบทั้ง 3 เงื่อนไขใน window:
+     fails >= 30  AND  distinct accounts >= 8  AND  successes == 0
+   มี success แม้ครั้งเดียวใน window = ไม่ block (campus wifi มี success ปนเสมอ จึงไม่โดนลูกหลง)
+   ยิงเดี่ยวจาก attack box (ไม่เคย login ถูก) ถึงจะติด
+
+WINDOW = 10 นาที, Temporary lockout (account) = 15 นาที
+เลข threshold ทั้งหมดเป็น tunable constant บนหัวไฟล์ src/modules/auth/service.ts
 ```
 
 Error message:

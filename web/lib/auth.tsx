@@ -5,6 +5,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { apiGet, apiPost, ApiError, setUnauthorizedHandler } from "@/lib/api";
+import { getDeviceId } from "@/lib/device-id";
 import type { Me } from "@/lib/types";
 
 type AuthState = {
@@ -96,7 +97,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (identifier: string, password: string) => {
     // Returns the user; caller decides where to redirect (e.g. /change-password if must-change).
     // identifier = email OR student_id; backend looks up by either.
-    await apiPost("/auth/login", { identifier, password });
+    // X-Device-Id feeds the backend per-device rate-limit dimension (precision, not security).
+    await apiPost("/auth/login", { identifier, password }, { headers: { "X-Device-Id": getDeviceId() } });
     const me = await fetchMe();
     setUser(me);
     return me;

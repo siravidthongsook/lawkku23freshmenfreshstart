@@ -57,5 +57,6 @@ export function requestMeta(c: { req: { header: (k: string) => string | undefine
     ipAddress:
       c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? c.req.header("x-real-ip") ?? null,
     userAgent: c.req.header("user-agent") ?? null,
+    deviceId: c.req.header("x-device-id") ?? null, // FE-generated device token (rate-limit precision dim)
   };
 }

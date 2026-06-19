@@ -19,13 +19,14 @@ export const sessions = pgTable(
   (t) => [index("sessions_user_id_idx").on(t.userId)],
 );
 
-// Failed-login tracking for rate-limit/lockout (per email + per ip).
+// Failed-login tracking for rate-limit/lockout (per email + per ip + per device).
 export const loginAttempts = pgTable(
   "login_attempts",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     email: text("email"),
     ipAddress: text("ip_address"),
+    deviceId: text("device_id"), // FE-generated random token (X-Device-Id); null = client didn't send it
     success: timestamp("success", { withTimezone: true }), // null = failed attempt
     lockedUntil: timestamp("locked_until", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -33,6 +34,7 @@ export const loginAttempts = pgTable(
   (t) => [
     index("login_attempts_email_idx").on(t.email, t.createdAt),
     index("login_attempts_ip_idx").on(t.ipAddress, t.createdAt),
+    index("login_attempts_device_idx").on(t.deviceId, t.createdAt),
   ],
 );
 

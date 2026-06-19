@@ -10,6 +10,7 @@ import { BrandLogo } from "@/components/brand-logo";
 import Link from "next/link";
 import { Check, X, Loader2 } from "lucide-react";
 import { apiPost, ApiError } from "@/lib/api";
+import { getDeviceId } from "@/lib/device-id";
 import { useAuth } from "@/lib/auth";
 import { roleHome } from "@/components/public/role-home";
 import type { Role } from "@/lib/types";
@@ -82,11 +83,15 @@ export default function ClaimPage() {
     setSubmitting(true);
     try {
       // Claim sets the session cookie like login; read role from the response for redirect.
-      const res = await apiPost<ClaimResponse>("/auth/claim", {
-        identifier: identifier.trim(),
-        new_password: newPassword,
-        instagram: instagram.trim(),
-      });
+      const res = await apiPost<ClaimResponse>(
+        "/auth/claim",
+        {
+          identifier: identifier.trim(),
+          new_password: newPassword,
+          instagram: instagram.trim(),
+        },
+        { headers: { "X-Device-Id": getDeviceId() } }, // per-device rate-limit dim (precision, not security)
+      );
       await refetch(); // populate auth context from the new session
       // Claim sets the password here, so must-change shouldn't happen — keep the guard as a safety net.
       if (res.password_must_change) {

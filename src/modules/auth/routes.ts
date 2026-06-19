@@ -56,23 +56,24 @@ router.post("/auth/login", zValidator("json", loginSchema), async (c) => {
   const rl = await log.call(
     "checkRateLimit",
     { rlKey },
-    () => checkRateLimit(rlKey, meta.ipAddress),
-    (r) => ({ blocked: r.blocked, lockedUntil: r.lockedUntil }),
+    () => checkRateLimit(rlKey, meta.ipAddress, meta.deviceId),
+    (r) => ({ blocked: r.blocked, lockedUntil: r.lockedUntil, reason: r.reason }),
   );
   if (rl.blocked) {
     loginFailuresTotal.inc();
+    log.set("rateLimitReason", rl.reason); // which dimension tripped: account | device | ip
     // Don't re-audit an already-active lockout on every blocked request (that was the audit-spam
     // source) — it's logged once at the transition below. Only audit the non-lockout rate-limit case.
     if (!rl.lockedUntil) {
       await writeAudit({
         action: "login_failed_rate_limited",
         entityType: "auth",
-        metadata: { identifier },
+        metadata: { identifier, reason: rl.reason }, // reason not a secret; deviceId-derived dim is loggable
         ...meta,
       });
     } else {
       // WHERE — branch marker on the active-lockout sub-path only (the non-lockout RL branch audits above).
-      log.event("rate_limited", { lockedUntil: rl.lockedUntil });
+      log.event("rate_limited", { lockedUntil: rl.lockedUntil, reason: rl.reason });
     }
     log.set("outcome", rl.lockedUntil ? "locked_out" : "rate_limited");
     throw new AppError(429, "rate_limited", "Too many attempts. Try again later.");
@@ -94,7 +95,7 @@ router.post("/auth/login", zValidator("json", loginSchema), async (c) => {
   log.event("credential_check", { ok: !!ok });
   if (!ok) {
     loginFailuresTotal.inc();
-    const { justLocked } = await recordAttempt(rlKey, meta.ipAddress, false);
+    const { justLocked } = await recordAttempt(rlKey, meta.ipAddress, meta.deviceId, false);
     if (justLocked) {
       await writeAudit({
         action: "account_temporarily_locked",
@@ -108,7 +109,7 @@ router.post("/auth/login", zValidator("json", loginSchema), async (c) => {
     throw invalidCredentials();
   }
 
-  await recordAttempt(rlKey, meta.ipAddress, true);
+  await recordAttempt(rlKey, meta.ipAddress, meta.deviceId, true);
   // createSession returns { token, id }; capture id for the log (never the token).
   const session = await log.call(
     "createSession",
@@ -149,14 +150,14 @@ router.post("/auth/claim", zValidator("json", claimSchema), async (c) => {
   const rlKey = identifier.toLowerCase();
 
   // Rate-limit / lockout gate runs before any DB work or hashing.
-  const rl = await checkRateLimit(rlKey, meta.ipAddress);
+  const rl = await checkRateLimit(rlKey, meta.ipAddress, meta.deviceId);
   if (rl.blocked) {
     // Mirror login: lockout already audited at its transition edge; only log the non-lockout case.
     if (!rl.lockedUntil) {
       await writeAudit({
         action: "login_failed_rate_limited",
         entityType: "auth",
-        metadata: { identifier },
+        metadata: { identifier, reason: rl.reason },
         ...meta,
       });
     }
@@ -185,7 +186,7 @@ router.post("/auth/claim", zValidator("json", claimSchema), async (c) => {
 
   // Any mismatch → same generic invalid-credentials path as login (counts toward lockout). No enumeration.
   if (!user) {
-    const { justLocked } = await recordAttempt(rlKey, meta.ipAddress, false);
+    const { justLocked } = await recordAttempt(rlKey, meta.ipAddress, meta.deviceId, false);
     if (justLocked) {
       await writeAudit({
         action: "account_temporarily_locked",
@@ -224,7 +225,7 @@ router.post("/auth/claim", zValidator("json", claimSchema), async (c) => {
     );
   });
 
-  await recordAttempt(rlKey, meta.ipAddress, true);
+  await recordAttempt(rlKey, meta.ipAddress, meta.deviceId, true);
   // New shape { token, id }; capture id so the claim-path session is logged too (token never logged).
   const { id: claimSessionId } = await createSession(c, user);
   log.set("userId", user.id).set("role", user.role).set("sessionId", claimSessionId);
