@@ -19,9 +19,11 @@ export type UserWire = {
   instagram: string | null; // IG handle (collected at claim)
   group_number: number | null; // บรรพ
   status: "active" | "disabled";
+  claimed: boolean; // false = claim account not yet self-claimed (no password set)
   password_must_change: boolean;
   created_at: string;
   updated_at: string;
+  last_active_at: string | null; // last authed request seen; null = never active since launch
 };
 
 // List rows carry the pending temp-pw flag so the table can badge users awaiting first login.

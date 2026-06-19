@@ -3,11 +3,18 @@ import { z } from "zod";
 const roleEnum = z.enum(["student", "checkin_staff", "admin"]);
 const statusEnum = z.enum(["active", "disabled"]);
 
+// Sortable columns for the user list. Maps 1:1 to a users column in routes.ts.
+const userSortEnum = z.enum(["created_at", "last_active_at", "full_name", "student_id"]);
+
 // List/search filter for GET /admin/users. limit/offset paginate like audit-logs.
 export const listUsersQuery = z.object({
   q: z.string().trim().min(1).optional(), // matches email / student_id / full_name
   role: roleEnum.optional(),
   status: statusEnum.optional(),
+  // Claim filter: "yes" = password set, "no" = not yet claimed (passwordHash NULL). Omit = all.
+  claimed: z.enum(["yes", "no"]).optional(),
+  sort: userSortEnum.default("created_at"),
+  order: z.enum(["asc", "desc"]).default("desc"),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });

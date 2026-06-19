@@ -26,6 +26,8 @@ export const users = pgTable("users", {
   createdByAdminId: uuid("created_by_admin_id"), // self-ref → users.id (nullable for seed admin)
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  // Last authenticated request seen for this user; null until first activity. Throttled write in requireAuth.
+  lastActiveAt: timestamp("last_active_at", { withTimezone: true }),
 });
 
 // Encrypted temp password kept ONLY until user changes password (enables re-export).

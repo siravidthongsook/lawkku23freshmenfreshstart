@@ -29,13 +29,24 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Loader2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronsUpDown, Loader2 } from "lucide-react";
 import { RoleBadge } from "@/components/badges";
 import { CreateUserDialog } from "@/components/admin-tools/create-user-dialog";
 import type { UserListResponse, UserListRow } from "@/components/admin-tools/wire";
 import type { Role } from "@/lib/types";
 
 const PAGE_SIZE = 50;
+
+// Sortable columns — must match userSortEnum in src/modules/users/schema.ts.
+type SortKey = "student_id" | "full_name" | "created_at" | "last_active_at";
+type SortOrder = "asc" | "desc";
+// Date columns default to newest-first; text columns to A→Z on first click.
+const DEFAULT_ORDER: Record<SortKey, SortOrder> = {
+  student_id: "asc",
+  full_name: "asc",
+  created_at: "desc",
+  last_active_at: "desc",
+};
 
 // "all" is a UI-only sentinel; we omit the param from the query when selected.
 const ROLE_OPTIONS: { value: Role | "all"; label: string }[] = [
@@ -49,11 +60,56 @@ const STATUS_OPTIONS: { value: "all" | "active" | "disabled"; label: string }[] 
   { value: "active", label: "ใช้งานอยู่" },
   { value: "disabled", label: "ปิดใช้งาน" },
 ];
+// Claim filter — "no" surfaces accounts that never set a password (not yet self-claimed).
+const CLAIM_OPTIONS: { value: "all" | "yes" | "no"; label: string }[] = [
+  { value: "all", label: "ทุกการยืนยัน" },
+  { value: "yes", label: "ยืนยันบัญชีแล้ว" },
+  { value: "no", label: "ยังไม่ยืนยันบัญชี" },
+];
+
+// Clickable sort header: shows direction arrow when active, a neutral up/down hint otherwise.
+function SortHeader({
+  label,
+  active,
+  order,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  order: SortOrder;
+  onClick: () => void;
+}) {
+  return (
+    <TableHead>
+      <button
+        type="button"
+        onClick={onClick}
+        className="-ml-1 inline-flex items-center gap-1 rounded px-1 py-0.5 hover:text-foreground"
+        aria-label={`เรียงตาม${label}`}
+      >
+        {label}
+        {active ? (
+          order === "asc" ? (
+            <ArrowUp className="size-3.5" />
+          ) : (
+            <ArrowDown className="size-3.5" />
+          )
+        ) : (
+          <ChevronsUpDown className="size-3.5 text-muted-foreground/50" />
+        )}
+      </button>
+    </TableHead>
+  );
+}
 
 export default function UsersPage() {
   const [q, setQ] = useState("");
   const [role, setRole] = useState<Role | "all">("all");
   const [status, setStatus] = useState<"all" | "active" | "disabled">("all");
+  const [claimed, setClaimed] = useState<"all" | "yes" | "no">("all");
+
+  const [sort, setSort] = useState<SortKey>("created_at");
+  const [order, setOrder] = useState<SortOrder>("desc");
 
   const [users, setUsers] = useState<UserListRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -74,6 +130,9 @@ export default function UsersPage() {
       if (q.trim()) sp.set("q", q.trim());
       if (role !== "all") sp.set("role", role);
       if (status !== "all") sp.set("status", status);
+      if (claimed !== "all") sp.set("claimed", claimed);
+      sp.set("sort", sort);
+      sp.set("order", order);
       sp.set("limit", String(PAGE_SIZE));
       sp.set("offset", String(offset));
       try {
@@ -90,13 +149,25 @@ export default function UsersPage() {
         setRefetching(false);
       }
     },
-    [q, role, status, offset],
+    [q, role, status, claimed, sort, order, offset],
   );
 
-  // Reset to first page whenever the filters change (so we never page past a narrowed result set).
+  // Reset to first page whenever filters or sort change (so we never page past a narrowed result set).
   useEffect(() => {
     setOffset(0);
-  }, [q, role, status]);
+  }, [q, role, status, claimed, sort, order]);
+
+  // Click a column header: toggle direction if already sorting by it, else switch with that column's default.
+  const toggleSort = useCallback(
+    (key: SortKey) => {
+      if (sort === key) setOrder((o) => (o === "asc" ? "desc" : "asc"));
+      else {
+        setSort(key);
+        setOrder(DEFAULT_ORDER[key]);
+      }
+    },
+    [sort],
+  );
 
   // Debounce search/filter so we don't fire a request per keystroke. First mount → skeletons; later → spinner.
   const initialLoad = useRef(true);
@@ -129,7 +200,7 @@ export default function UsersPage() {
           <CardTitle className="text-base">ตัวกรอง</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="space-y-1.5">
               <Label htmlFor="q" className="flex items-center gap-2">
                 ค้นหา
@@ -175,6 +246,21 @@ export default function UsersPage() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-1.5">
+              <Label>การยืนยันบัญชี</Label>
+              <Select value={claimed} onValueChange={(v) => setClaimed(v as "all" | "yes" | "no")}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CLAIM_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -203,12 +289,33 @@ export default function UsersPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>รหัสนักศึกษา</TableHead>
-                      <TableHead>ชื่อ</TableHead>
+                      <SortHeader
+                        label="รหัสนักศึกษา"
+                        active={sort === "student_id"}
+                        order={order}
+                        onClick={() => toggleSort("student_id")}
+                      />
+                      <SortHeader
+                        label="ชื่อ"
+                        active={sort === "full_name"}
+                        order={order}
+                        onClick={() => toggleSort("full_name")}
+                      />
                       <TableHead>อีเมล</TableHead>
                       <TableHead>บทบาท</TableHead>
                       <TableHead>สถานะ</TableHead>
-                      <TableHead>สร้างเมื่อ</TableHead>
+                      <SortHeader
+                        label="สร้างเมื่อ"
+                        active={sort === "created_at"}
+                        order={order}
+                        onClick={() => toggleSort("created_at")}
+                      />
+                      <SortHeader
+                        label="ใช้งานล่าสุด"
+                        active={sort === "last_active_at"}
+                        order={order}
+                        onClick={() => toggleSort("last_active_at")}
+                      />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -223,6 +330,12 @@ export default function UsersPage() {
                           <Link href={`/admin/users/${u.id}`} className="hover:underline">
                             {u.full_name}
                           </Link>
+                          {/* Not-claimed badge: claim account with no password set yet. */}
+                          {!u.claimed ? (
+                            <Badge className="ml-2 border-transparent bg-rose-100 text-rose-900">
+                              ยังไม่ยืนยันบัญชี
+                            </Badge>
+                          ) : null}
                           {/* Pending temp-pw badge: user hasn't changed their first password yet. */}
                           {u.has_pending_temp_password ? (
                             <Badge className="ml-2 border-transparent bg-amber-100 text-amber-900">
@@ -247,6 +360,9 @@ export default function UsersPage() {
                         </TableCell>
                         <TableCell className="text-muted-foreground">
                           {formatBangkok(u.created_at)}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {u.last_active_at ? formatBangkok(u.last_active_at) : "—"}
                         </TableCell>
                       </TableRow>
                     ))}

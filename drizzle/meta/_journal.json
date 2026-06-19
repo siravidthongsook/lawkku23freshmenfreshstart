@@ -50,6 +50,13 @@
       "when": 1781797739534,
       "tag": "0006_organic_luminals",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1781801678706,
+      "tag": "0007_spicy_centennial",
+      "breakpoints": true
     }
   ]
 }

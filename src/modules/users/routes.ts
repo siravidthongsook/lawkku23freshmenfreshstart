@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, ilike, inArray, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import type { AppVariables } from "../../lib/context";
 import { db } from "../../db/client";
 import { temporaryPasswords, users, type User } from "../../db/schema/users";
@@ -37,10 +37,13 @@ router.use("/admin/users", requireAuth, requirePermission(canManageUsers));
 // GET /admin/users — list/search/filter + limit/offset pagination (returns total for the pager).
 // Each row carries has_pending_temp_password so the list can badge users awaiting first login.
 router.get("/admin/users", zValidator("query", listUsersQuery), async (c) => {
-  const { q, role, status, limit, offset } = c.req.valid("query");
+  const { q, role, status, claimed, sort, order, limit, offset } = c.req.valid("query");
   const conds = [];
   if (role) conds.push(eq(users.role, role));
   if (status) conds.push(eq(users.status, status));
+  // claimed=no -> never-claimed accounts (no password); claimed=yes -> password set.
+  if (claimed === "no") conds.push(isNull(users.passwordHash));
+  if (claimed === "yes") conds.push(isNotNull(users.passwordHash));
   if (q) {
     const pat = `%${q}%`;
     conds.push(or(ilike(users.email, pat), ilike(users.studentId, pat), ilike(users.fullName, pat)));
@@ -50,11 +53,20 @@ router.get("/admin/users", zValidator("query", listUsersQuery), async (c) => {
   const [countRow] = await db.select({ c: sql<number>`count(*)::int` }).from(users).where(where);
   const total = countRow?.c ?? 0;
 
+  // Sort column whitelisted by Zod; keep NULLs last in both directions (never-active users at the end).
+  const sortCol = {
+    created_at: users.createdAt,
+    last_active_at: users.lastActiveAt,
+    full_name: users.fullName,
+    student_id: users.studentId,
+  }[sort];
+  const orderBy = sql`${sortCol} ${sql.raw(order === "asc" ? "asc" : "desc")} nulls last`;
+
   const rows = await db
     .select()
     .from(users)
     .where(where)
-    .orderBy(desc(users.createdAt))
+    .orderBy(orderBy)
     .limit(limit)
     .offset(offset);
 
@@ -529,9 +541,11 @@ function publicUser(u: User) {
     instagram: u.instagram, // IG handle (collected at claim)
     group_number: u.groupNumber, // บรรพ
     status: u.status,
+    claimed: u.passwordHash !== null, // false = claim account not yet self-claimed (no password set)
     password_must_change: u.passwordMustChange,
     created_at: u.createdAt.toISOString(),
     updated_at: u.updatedAt.toISOString(),
+    last_active_at: u.lastActiveAt ? u.lastActiveAt.toISOString() : null, // null = never seen since launch
   };
 }
 
