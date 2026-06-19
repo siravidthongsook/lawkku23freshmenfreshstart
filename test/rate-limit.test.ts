@@ -41,7 +41,8 @@ describe("rate-limit: account dimension (regression — 5 fails hard-lock)", () 
     // Even the CORRECT password is now rejected (account is locked, not just bad-cred).
     const correct = await goodLogin(admin.email!, admin.password);
     expect(correct.status).toBe(429);
-  });
+    // argon2 hashing makes these route-driven loops slow on CI's throwaway PG — raise vitest timeout.
+  }, 30_000);
 });
 
 describe("rate-limit: device dimension (soft block, 10 fails)", () => {
@@ -66,7 +67,7 @@ describe("rate-limit: device dimension (soft block, 10 fails)", () => {
     // Same fresh account, but from device B → NOT device-blocked (different device counter).
     const okB = await badLogin(fresh.email!, { deviceId: deviceB });
     expect(okB.status).toBe(401); // bad credentials, but NOT rate-limited
-  });
+  }, 30_000);
 });
 
 describe("rate-limit: IP smart gate — CAMPUS-SIM must NOT block", () => {
@@ -86,7 +87,7 @@ describe("rate-limit: IP smart gate — CAMPUS-SIM must NOT block", () => {
     const fresh = await seedUser({ role: "student" });
     const res = await badLogin(fresh.studentId!, { ip });
     expect(res.status).toBe(401); // bad creds, NOT 429 — the IP gate stayed open
-  });
+  }, 30_000);
 });
 
 describe("rate-limit: IP smart gate — STUFFING-SIM must block", () => {
@@ -113,7 +114,7 @@ describe("rate-limit: IP smart gate — STUFFING-SIM must block", () => {
     const blocked = await badLogin(fresh.studentId!, { ip, deviceId: "evil-final" });
     expect(blocked.status).toBe(429);
     expect((await blocked.json()).error).toBe("rate_limited");
-  });
+  }, 30_000);
 });
 
 describe("rate-limit: deviceId null (old client) still works", () => {
@@ -125,5 +126,5 @@ describe("rate-limit: deviceId null (old client) still works", () => {
     }
     const blocked = await badLogin(admin.email!);
     expect(blocked.status).toBe(429); // account lock still engages without a device id
-  });
+  }, 30_000);
 });
