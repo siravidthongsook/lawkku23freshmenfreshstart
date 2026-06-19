@@ -17,7 +17,8 @@ export const requireAuth: MiddlewareHandler<{ Variables: AppVariables }> = async
   if (!user || user.status === "disabled") throw unauthorized();
   c.set("session", session);
   c.set("user", user);
-  c.get("log")?.set("userId", user.id).set("role", user.role); // every authed request carries who
+  // every authed request carries who (userId/role) + which session (sessionId) for correlation
+  c.get("log")?.set("userId", user.id).set("role", user.role).set("sessionId", session.id);
   bumpLastActive(user.id); // fire-and-forget; throttled in SQL so it's a no-op when fresh
   await next();
 };

@@ -11,6 +11,7 @@ import { requireAuth, requirePermission, requestMeta } from "../../lib/auth-midd
 import { canManualCheckin, canScanCheckin } from "../../lib/permissions";
 import { badRequest, notFound } from "../../lib/errors";
 import { writeAudit } from "../../lib/audit";
+import { checkinsTotal } from "../../lib/metrics";
 import { hashToken } from "../../lib/crypto";
 import { isWithinWindow } from "../../lib/time";
 
@@ -138,7 +139,7 @@ router.post(
     const staff = c.get("user");
     const meta = requestMeta(c);
     const log = c.get("log");
-    log.set("eventId", eventId);
+    log.set("action", "checkin.scan").set("eventId", eventId); // WHAT — 5WH action marker
     const tokenHash = hashToken(body.qr_token);
 
     // Identity travels with every reg-bearing outcome so staff can confirm WHO the scan was for
@@ -248,7 +249,10 @@ router.post(
       return { result: "checked_in_success", ...who, checkedInAt: now.toISOString() };
     });
 
+    // Count only a real check-in; all other result codes are rejects (no counter).
+    if (result.result === "checked_in_success") checkinsTotal.inc({ event: eventId });
     // Every scan outcome lands in the log (success + all reject codes) — 200 either way.
+    log.set("outcome", result.result);
     log.event("scan_result", { result: result.result, registrationId: result.registrationId ?? null });
     return c.json(result);
   },
@@ -318,9 +322,13 @@ router.post(
     const { registrationId } = regIdParam.parse(c.req.param());
     const staff = c.get("user");
     const meta = requestMeta(c);
+    const log = c.get("log");
+    log.set("action", "checkin.manual"); // WHAT — 5WH action marker
     // Authoritative server time — returned so the client renders this instead of its own clock.
     const now = new Date();
 
+    // Capture the event id out of the tx so we can label the metric after commit.
+    let checkedInEventId: string | null = null;
     await db.transaction(async (tx) => {
       const [reg] = await tx
         .select()
@@ -329,6 +337,7 @@ router.post(
         .for("update")
         .limit(1);
       if (!reg) throw notFound("Registration not found");
+      checkedInEventId = reg.eventId;
 
       const [event] = await tx.select().from(events).where(eq(events.id, reg.eventId)).limit(1);
       if (!event) throw notFound("Event not found");
@@ -373,6 +382,9 @@ router.post(
       );
     });
 
+    // Tx committed → this is a real manual check-in; count it by event.
+    if (checkedInEventId) checkinsTotal.inc({ event: checkedInEventId });
+    log.set("outcome", "checked_in_success");
     return c.json({ result: "checked_in_success", checkedInAt: now.toISOString() });
   },
 );

@@ -10,6 +10,7 @@ import { requireAuth, requirePermission, requestMeta } from "../../lib/auth-midd
 import { canManageEvents } from "../../lib/permissions";
 import { badRequest, conflict, forbidden, notFound } from "../../lib/errors";
 import { writeAudit } from "../../lib/audit";
+import { capacityRejectionsTotal, registrationsTotal } from "../../lib/metrics";
 import { isWithinWindow } from "../../lib/time";
 import {
   issueQrToken,
@@ -80,7 +81,7 @@ router.post("/events/:eventId/register", requireAuth, async (c) => {
   const user = c.get("user");
   const meta = requestMeta(c);
   const log = c.get("log");
-  log.set("eventId", eventId);
+  log.set("action", "registration.submit").set("eventId", eventId); // WHAT — 5WH action marker
 
   const result = await db.transaction(async (tx) => {
     // Row-lock the event so concurrent submits serialize on capacity. Span the lock wait.
@@ -118,7 +119,12 @@ router.post("/events/:eventId/register", requireAuth, async (c) => {
     let status: "registered" | "waitlisted";
     if (!capFull) status = "registered";
     else if (event.waitlistEnabled) status = "waitlisted";
-    else throw conflict("registration_full", "Event is full");
+    else {
+      // Capacity-full reject path (no waitlist): count the rejection before bailing.
+      capacityRejectionsTotal.inc();
+      log.set("outcome", "capacity_full");
+      throw conflict("registration_full", "Event is full");
+    }
 
     const now = new Date();
     const reg = existing
@@ -148,6 +154,11 @@ router.post("/events/:eventId/register", requireAuth, async (c) => {
     return { reg, qrToken, alreadyExisted: false };
   });
 
+  // Count a confirmed registration (registered status) by event; waitlisted/dup don't consume a slot.
+  if (result.reg.status === "registered" && !result.alreadyExisted) {
+    registrationsTotal.inc({ event: eventId });
+  }
+  log.set("outcome", result.alreadyExisted ? "already_registered" : result.reg.status);
   log.event("register_result", {
     status: result.reg.status,
     alreadyExisted: result.alreadyExisted,

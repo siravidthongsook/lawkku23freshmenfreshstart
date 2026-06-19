@@ -11,6 +11,7 @@ import { generateTempPassword, hashPassword } from "../../lib/password";
 import { decryptSecret, encryptSecret } from "../../lib/crypto";
 import { revokeAllSessions } from "../../lib/session";
 import { writeAudit } from "../../lib/audit";
+import { tempPwIssuedTotal } from "../../lib/metrics";
 import { clearLockout, getLockoutState } from "../auth/service";
 import {
   changeRoleSchema,
@@ -93,6 +94,8 @@ router.get("/admin/users", zValidator("query", listUsersQuery), async (c) => {
 router.post("/admin/users", zValidator("json", createUserSchema), async (c) => {
   const admin = c.get("user");
   const meta = requestMeta(c);
+  const log = c.get("log");
+  log.set("action", "user.create"); // WHAT — 5WH action marker
   const body = c.req.valid("json");
 
   if (body.email) await assertEmailFree(body.email, null);
@@ -149,6 +152,9 @@ router.post("/admin/users", zValidator("json", createUserSchema), async (c) => {
     );
     return row;
   });
+  // Count an admin-issued temp password (claim mode issues none).
+  if (tempPw) tempPwIssuedTotal.inc();
+  log.set("outcome", tempPw ? "created_temp_pw" : "created_claim");
   return c.json({ user: publicUser(created) }, 201);
 });
 
@@ -341,6 +347,8 @@ router.post(
   async (c) => {
     const admin = c.get("user");
     const meta = requestMeta(c);
+    const log = c.get("log");
+    log.set("action", "user.reset_password"); // WHAT — 5WH action marker
     const { reason, mode } = c.req.valid("json");
     const target = await getUserOr404(c.req.param("userId"));
 
@@ -391,6 +399,9 @@ router.post(
         tx,
       );
     });
+    // Count an admin-issued temp password (claim-mode reset issues none).
+    if (tempPw) tempPwIssuedTotal.inc();
+    log.set("outcome", claimMode ? "reset_to_claim" : "reset_temp_pw");
     return c.json({ ok: true });
   },
 );

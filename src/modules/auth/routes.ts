@@ -14,6 +14,7 @@ import {
   revokeSession,
 } from "../../lib/session";
 import { writeAudit } from "../../lib/audit";
+import { loginFailuresTotal, loginSuccessTotal } from "../../lib/metrics";
 import { changePasswordSchema, claimSchema, loginSchema, updateOwnProfileSchema } from "./schema";
 import { checkRateLimit, recordAttempt } from "./service";
 
@@ -28,6 +29,7 @@ router.post("/auth/login", zValidator("json", loginSchema), async (c) => {
   const { identifier, password } = c.req.valid("json");
   const meta = requestMeta(c);
   const log = c.get("log");
+  log.set("action", "auth.signin"); // WHAT — 5WH action marker for this handler
   log.set("identifier", identifier); // who is trying (not a secret); password never logged
 
   // Resolve by email OR student_id OR username. Lookup is cheap; password work still gated behind rate-limit below.
@@ -50,9 +52,15 @@ router.post("/auth/login", zValidator("json", loginSchema), async (c) => {
   const rlKey = user?.email ?? identifier.toLowerCase();
   log.event("user_lookup", { found: !!user, status: user?.status ?? null });
 
-  // Rate-limit / lockout gate runs before any password work.
-  const rl = await checkRateLimit(rlKey, meta.ipAddress);
+  // Rate-limit / lockout gate runs before any password work. Pick only safe fields (no raw row).
+  const rl = await log.call(
+    "checkRateLimit",
+    { rlKey },
+    () => checkRateLimit(rlKey, meta.ipAddress),
+    (r) => ({ blocked: r.blocked, lockedUntil: r.lockedUntil }),
+  );
   if (rl.blocked) {
+    loginFailuresTotal.inc();
     // Don't re-audit an already-active lockout on every blocked request (that was the audit-spam
     // source) — it's logged once at the transition below. Only audit the non-lockout rate-limit case.
     if (!rl.lockedUntil) {
@@ -62,19 +70,30 @@ router.post("/auth/login", zValidator("json", loginSchema), async (c) => {
         metadata: { identifier },
         ...meta,
       });
+    } else {
+      // WHERE — branch marker on the active-lockout sub-path only (the non-lockout RL branch audits above).
+      log.event("rate_limited", { lockedUntil: rl.lockedUntil });
     }
+    log.set("outcome", rl.lockedUntil ? "locked_out" : "rate_limited");
     throw new AppError(429, "rate_limited", "Too many attempts. Try again later.");
   }
 
   // Same generic path whether user is missing, disabled, unclaimed (null hash), or password wrong.
   // Null passwordHash = account not yet claimed — never reveal that, falls through to generic error.
+  // verifyPassword wrapped with a SAFE pick — never log the plaintext password arg (pass userId only).
   const ok =
     user &&
     user.status === "active" &&
     user.passwordHash !== null &&
-    (await verifyPassword(user.passwordHash, password));
+    (await log.call(
+      "verifyPassword",
+      { userId: user.id },
+      () => verifyPassword(user.passwordHash as string, password),
+      (r) => ({ ok: r }),
+    ));
   log.event("credential_check", { ok: !!ok });
   if (!ok) {
+    loginFailuresTotal.inc();
     const { justLocked } = await recordAttempt(rlKey, meta.ipAddress, false);
     if (justLocked) {
       await writeAudit({
@@ -85,12 +104,21 @@ router.post("/auth/login", zValidator("json", loginSchema), async (c) => {
         ...meta,
       });
     }
+    log.set("outcome", "bad_credentials");
     throw invalidCredentials();
   }
 
   await recordAttempt(rlKey, meta.ipAddress, true);
-  await createSession(c, user);
-  log.set("userId", user.id).set("role", user.role);
+  // createSession returns { token, id }; capture id for the log (never the token).
+  const session = await log.call(
+    "createSession",
+    { userId: user.id },
+    () => createSession(c, user),
+    (s) => ({ sessionId: s.id }),
+  );
+  loginSuccessTotal.inc();
+  // 5WH terminal: WHO=userId, sessionId; WHAT outcome=success (action set at top).
+  log.set("userId", user.id).set("role", user.role).set("sessionId", session.id).set("outcome", "success");
   // Sign-in success audit — single source of truth for "who actually got in". login_attempts only
   // records login-path success (claim writes none), so this uniform event covers both paths.
   await writeAudit({
@@ -197,8 +225,9 @@ router.post("/auth/claim", zValidator("json", claimSchema), async (c) => {
   });
 
   await recordAttempt(rlKey, meta.ipAddress, true);
-  await createSession(c, user);
-  log.set("userId", user.id).set("role", user.role);
+  // New shape { token, id }; capture id so the claim-path session is logged too (token never logged).
+  const { id: claimSessionId } = await createSession(c, user);
+  log.set("userId", user.id).set("role", user.role).set("sessionId", claimSessionId);
   // Sign-in success audit (claim path) — same login_succeeded action so the audit log shows every
   // successful sign-in uniformly. account_claimed above is the one-time identity proof; this marks
   // the resulting session (method=claim distinguishes it).

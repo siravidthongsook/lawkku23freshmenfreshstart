@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { ZodError } from "zod";
+import { scrubText } from "./request-log";
 
 // Standard error shape across the API: { error: code, message }.
 export class AppError extends Error {
@@ -34,7 +35,12 @@ export function errorHandler(err: Error, c: Context) {
       400,
     );
   }
-  log?.setError("internal_error", err.message);
-  console.error("unhandled error", err);
+  // 5xx free-text leak vectors: err.message + stack can carry DSNs/tokens (Alloy tails stdout).
+  // Scrub both before they reach the log line; only attach a stack on 5xx, and scrub it too.
+  const safeMessage = scrubText(err.message);
+  const safeStack = err.stack ? scrubText(err.stack) : undefined;
+  log?.setError("internal_error", safeMessage, safeStack ? { stack: safeStack } : undefined);
+  // Never dump the raw error object — log a scrubbed message only.
+  console.error("unhandled error:", safeMessage);
   return c.json({ error: "internal_error", message: "Something went wrong" }, 500);
 }

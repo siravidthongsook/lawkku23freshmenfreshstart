@@ -17,5 +17,6 @@ COPY . .
 # private file storage volume mount point
 RUN mkdir -p /data/storage
 EXPOSE 3000
-# start only; migrations run as an explicit deploy step (see deploy.yml)
+# start only; migrations run as an explicit deploy step (see deploy.yml).
+# `pnpm start` preloads ./src/lib/otel.ts via tsx --import (see package.json).
 CMD ["pnpm", "start"]

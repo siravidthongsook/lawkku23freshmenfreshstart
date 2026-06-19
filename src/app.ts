@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { db } from "./db/client";
 import type { AppVariables } from "./lib/context";
 import { errorHandler } from "./lib/errors";
+import { metricsHandler, metricsMiddleware } from "./lib/metrics";
 import { requestLogger } from "./lib/request-log";
 
 // Module routers. Each declares ABSOLUTE paths and is mounted at "/" — no prefix collisions.
@@ -20,9 +21,14 @@ import auditRoutes from "./modules/audit-logs/routes";
 export function createApp() {
   const app = new Hono<{ Variables: AppVariables }>();
 
-  // Structured per-request logger first — sets c.get("log"), emits one JSON line at request end.
+  // Metrics first so it times/observes EVERY route incl probes/scrape (logger excludes those, metrics don't).
+  app.use("*", metricsMiddleware());
+  // Structured per-request logger next — sets c.get("log"), emits one JSON line at request end.
   app.use("*", requestLogger());
   app.onError(errorHandler);
+
+  // Prometheus scrape endpoint — plain route; logger already skips it. Network isolation is infra's job.
+  app.get("/metrics", metricsHandler);
 
   app.get("/health", (c) => c.json({ ok: true }));
 
@@ -33,7 +39,8 @@ export function createApp() {
       return c.json({ ready: true });
     } catch (err) {
       // Log the real cause server-side (request log line) but keep the client response generic — no detail leak.
-      c.get("log").event("ready_db_check_failed", { error: err instanceof Error ? err.message : String(err) });
+      // /ready is excluded from the request logger (anti-spam), so no log object exists here — guard it.
+      c.get("log")?.event("ready_db_check_failed", { error: err instanceof Error ? err.message : String(err) });
       return c.json({ ready: false, error: "db" }, 503);
     }
   });

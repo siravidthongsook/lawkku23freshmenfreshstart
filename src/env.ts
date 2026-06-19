@@ -13,6 +13,17 @@ const schema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
+  // Observability kill-switches: default ON, set "false" to disable (§14).
+  OTEL_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+  METRICS_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+  // OTLP HTTP collector (Tempo). App must boot even if unreachable.
+  OTEL_EXPORTER_OTLP_ENDPOINT: z.string().default("http://tempo:4318"),
 });
 
 export const env = schema.parse(process.env);

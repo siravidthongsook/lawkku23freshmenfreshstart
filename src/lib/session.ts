@@ -18,19 +18,30 @@ function expiryFor(role: User["role"], now: number): Date {
   return new Date(now + TTL_MS[role]);
 }
 
-// Create a session row + set the cookie. Returns plaintext token (also in cookie).
-export async function createSession(c: Context, user: User, exec: Tx | typeof db = db): Promise<string> {
+// Create a session row + set the cookie.
+// Returns the inserted session id AND the plaintext token (token also goes in the cookie).
+// NOTE: return shape changed from `string` -> `{ token, id }` so callers can log sessionId
+// without a second query. Call sites must destructure (e.g. `const { token } = await createSession(...)`).
+export async function createSession(
+  c: Context,
+  user: User,
+  exec: Tx | typeof db = db,
+): Promise<{ token: string; id: string }> {
   const token = generateToken();
   const tokenHash = hashToken(token);
   const expiresAt = expiryFor(user.role, Date.now());
-  await exec.insert(sessions).values({
-    userId: user.id,
-    tokenHash,
-    roleSnapshot: user.role,
-    expiresAt,
-  });
+  const [row] = await exec
+    .insert(sessions)
+    .values({
+      userId: user.id,
+      tokenHash,
+      roleSnapshot: user.role,
+      expiresAt,
+    })
+    .returning({ id: sessions.id });
+  if (!row) throw new Error("failed to create session"); // insert .returning() must yield the new row
   setSessionCookie(c, token, expiresAt);
-  return token;
+  return { token, id: row.id };
 }
 
 export function setSessionCookie(c: Context, token: string, expiresAt: Date): void {
