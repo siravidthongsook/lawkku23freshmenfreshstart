@@ -20,8 +20,11 @@ export const registrations = pgTable(
     registeredAt: timestamp("registered_at", { withTimezone: true }),
     waitlistedAt: timestamp("waitlisted_at", { withTimezone: true }),
     checkedInAt: timestamp("checked_in_at", { withTimezone: true }),
+    // Scan-out (points §4.2): set when student is scanned OUT; independent of check-in status field.
+    checkedOutAt: timestamp("checked_out_at", { withTimezone: true }),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
     checkedInByUserId: uuid("checked_in_by_user_id").references(() => users.id),
+    checkedOutByUserId: uuid("checked_out_by_user_id").references(() => users.id),
     checkinMethod: checkinMethod("checkin_method"),
     manualCheckinReason: text("manual_checkin_reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

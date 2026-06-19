@@ -14,13 +14,19 @@ import { writeAudit } from "../../lib/audit";
 import { checkinsTotal } from "../../lib/metrics";
 import { hashToken } from "../../lib/crypto";
 import { isWithinWindow } from "../../lib/time";
+import { awardCheckinIn, awardCheckinOut, reverseCheckinOnUndo } from "../points/checkin-award";
+import { getEventPointConfig, getPointSettings, isCheckinOutEnabled, isPastCutoff, scanOutWindow } from "../points/config-service";
 
 const router = new Hono<{ Variables: AppVariables }>();
 
 // ---- Zod boundary schemas ----
 const eventIdParam = z.object({ eventId: z.string().uuid() });
 const regIdParam = z.object({ registrationId: z.string().uuid() });
-const scanBody = z.object({ qr_token: z.string().min(1) });
+// scan_type defaults to "in" so existing IN callers are unaffected; "out" runs the scan-out flow (§4.2).
+const scanBody = z.object({
+  qr_token: z.string().min(1),
+  scan_type: z.enum(["in", "out"]).default("in"),
+});
 const searchQuery = z.object({ q: z.string().min(1) });
 const reasonBody = z.object({ reason: z.string().min(1) });
 
@@ -28,6 +34,12 @@ const reasonBody = z.object({ reason: z.string().min(1) });
 type ScanResult =
   | "checked_in_success"
   | "already_checked_in"
+  | "checked_out_success"
+  | "already_checked_out"
+  | "not_checked_in" // scan-out attempted before a check-in exists
+  | "scan_window_closed" // points §4.1 — outside the scan-in/out window
+  | "points_closed" // points §5/§10 — past the leaderboard cutoff
+  | "checkout_disabled" // event's checkinOutEnabled toggle is off
   | "wrong_event"
   | "registration_cancelled"
   | "waitlisted_not_allowed"
@@ -136,10 +148,11 @@ router.post(
   async (c) => {
     const { eventId } = eventIdParam.parse(c.req.param());
     const body = scanBody.parse(await c.req.json());
+    const scanType = body.scan_type;
     const staff = c.get("user");
     const meta = requestMeta(c);
     const log = c.get("log");
-    log.set("action", "checkin.scan").set("eventId", eventId); // WHAT — 5WH action marker
+    log.set("action", "checkin.scan").set("eventId", eventId).set("scanType", scanType); // WHAT — 5WH action marker
     const tokenHash = hashToken(body.qr_token);
 
     // Identity travels with every reg-bearing outcome so staff can confirm WHO the scan was for
@@ -150,8 +163,10 @@ router.post(
       fullName?: string | null;
       studentId?: string | null;
       checkedInAt?: string | null;
+      checkedOutAt?: string | null;
       originalCheckedInAt?: string | null;
       checkedInBy?: string | null;
+      pointsAwarded?: number; // §4.2 — surfaces "+N" to the UI (0 when no/duplicate award)
     };
 
     const result = await db.transaction(async (tx): Promise<ScanOut> => {
@@ -173,13 +188,14 @@ router.post(
         .limit(1);
       if (!reg) return { result: "qr_invalid" };
 
-      // Resolve identity once; attach to every outcome below via spread.
+      // Resolve identity once; attach to every outcome below via spread. role drives the points guard.
       const [u] = await tx
-        .select({ fullName: users.fullName, studentId: users.studentId })
+        .select({ fullName: users.fullName, studentId: users.studentId, role: users.role })
         .from(users)
         .where(eq(users.id, reg.userId))
         .limit(1);
       const who = { registrationId: reg.id, fullName: u?.fullName ?? null, studentId: u?.studentId ?? null };
+      const studentRole = u?.role ?? "student";
 
       // Token must belong to a registration of THIS event.
       if (reg.eventId !== eventId) return { result: "wrong_event", ...who };
@@ -189,16 +205,64 @@ router.post(
       if (event.status === "cancelled") return { result: "event_cancelled", ...who };
       if (event.status !== "published") return { result: "event_not_published", ...who };
 
-      // Window: distinguish not-yet-open vs closed.
       const now = new Date();
+
+      // Common rejects for both directions.
+      if (reg.status === "cancelled") return { result: "registration_cancelled", ...who };
+      if (reg.status === "waitlisted") return { result: "waitlisted_not_allowed", ...who };
+
+      // ----- SCAN OUT (§4.2): requires an existing check-in, scan-out window, and the toggle. -----
+      if (scanType === "out") {
+        if (reg.status !== "checked_in") return { result: "not_checked_in", ...who };
+        if (reg.checkedOutAt)
+          return { result: "already_checked_out", ...who, checkedOutAt: reg.checkedOutAt.toISOString() };
+
+        const settings = await getPointSettings(tx);
+        const config = await getEventPointConfig(reg.eventId, tx);
+        if (!isCheckinOutEnabled(config)) return { result: "checkout_disabled", ...who };
+        // Cutoff freeze blocks the OUT scan entirely (it only exists to award points).
+        if (isPastCutoff(settings, now)) return { result: "points_closed", ...who };
+        const win = scanOutWindow(config, event, settings);
+        if (!isWithinWindow(now, win.open, win.close)) return { result: "scan_window_closed", ...who };
+
+        await tx
+          .update(registrations)
+          .set({ checkedOutAt: now, checkedOutByUserId: staff.id, updatedAt: now })
+          .where(eq(registrations.id, reg.id));
+
+        const award = await awardCheckinOut(tx, {
+          eventId: reg.eventId,
+          registrationId: reg.id,
+          studentUserId: reg.userId,
+          studentRole,
+          scannedByUserId: staff.id,
+          eventTitle: event.title,
+        });
+
+        await writeAudit(
+          {
+            actorUserId: staff.id,
+            actorRole: staff.role,
+            action: "qr_scan_checkout",
+            entityType: "registration",
+            entityId: reg.id,
+            eventId: reg.eventId,
+            registrationId: reg.id,
+            targetUserId: reg.userId,
+            newValue: { checkedOut: true, pointsAwarded: award.pointsAwarded },
+            ...meta,
+          },
+          tx,
+        );
+        return { result: "checked_out_success", ...who, checkedOutAt: now.toISOString(), pointsAwarded: award.pointsAwarded };
+      }
+
+      // ----- SCAN IN (default): check-in window, then check-in + points award. -----
       if (event.checkinOpenAt && now < event.checkinOpenAt)
         return { result: "checkin_not_open", ...who };
       if (event.checkinCloseAt && now > event.checkinCloseAt)
         return { result: "checkin_closed", ...who };
 
-      // Registration status checks.
-      if (reg.status === "cancelled") return { result: "registration_cancelled", ...who };
-      if (reg.status === "waitlisted") return { result: "waitlisted_not_allowed", ...who };
       if (reg.status === "checked_in") {
         // Surface original time + who did it, so staff can tell a duplicate from a fresh check-in.
         let checkedInBy: string | null = null;
@@ -230,6 +294,16 @@ router.post(
         })
         .where(eq(registrations.id, reg.id));
 
+      // Award checkin_in points in the SAME tx (student + toggle + cutoff guarded inside; idempotent).
+      const award = await awardCheckinIn(tx, {
+        eventId: reg.eventId,
+        registrationId: reg.id,
+        studentUserId: reg.userId,
+        studentRole,
+        scannedByUserId: staff.id,
+        eventTitle: event.title,
+      });
+
       await writeAudit(
         {
           actorUserId: staff.id,
@@ -241,12 +315,12 @@ router.post(
           registrationId: reg.id,
           targetUserId: reg.userId,
           oldValue: { status: "registered" },
-          newValue: { status: "checked_in", method: "qr_scan" },
+          newValue: { status: "checked_in", method: "qr_scan", pointsAwarded: award.pointsAwarded },
           ...meta,
         },
         tx,
       );
-      return { result: "checked_in_success", ...who, checkedInAt: now.toISOString() };
+      return { result: "checked_in_success", ...who, checkedInAt: now.toISOString(), pointsAwarded: award.pointsAwarded };
     });
 
     // Count only a real check-in; all other result codes are rejects (no counter).
@@ -418,10 +492,22 @@ router.post(
           checkedInAt: null,
           checkedInByUserId: null,
           checkinMethod: null,
+          // Undo also clears any scan-out stamp (the check-in it depended on is gone).
+          checkedOutAt: null,
+          checkedOutByUserId: null,
           manualCheckinReason: reason,
           updatedAt: new Date(),
         })
         .where(eq(registrations.id, reg.id));
+
+      // U6: undo must reverse BOTH awarded checkin_in and checkin_out points (negative correction_reverse,
+      // idempotent, does not move lastPositiveAt). No-op per leg when that leg was never awarded.
+      const rev = await reverseCheckinOnUndo(tx, {
+        registrationId: reg.id,
+        studentUserId: reg.userId,
+        undoneByUserId: staff.id,
+        reason,
+      });
 
       await writeAudit(
         {
@@ -434,7 +520,7 @@ router.post(
           registrationId: reg.id,
           targetUserId: reg.userId,
           oldValue: { status: "checked_in" },
-          newValue: { status: "registered" },
+          newValue: { status: "registered", pointsReversed: rev.reversed },
           reason,
           ...meta,
         },

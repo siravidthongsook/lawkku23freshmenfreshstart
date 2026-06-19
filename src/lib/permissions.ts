@@ -19,6 +19,9 @@ export const canManualCheckin = (u: AuthUser) => isStaff(u) || isAdmin(u);
 
 // Points/rewards — students only earn points & appear on the leaderboard (plan §6). Staff/admin have no balance.
 export const canEarnPoints = (u: AuthUser) => isStudent(u);
+// Per-event point config + global point-settings/cutoff = admin only (plan §6). Config-editing endpoints land later;
+// defined now so the award path can reference the same rule.
+export const canManagePointConfig = (u: AuthUser) => isAdmin(u);
 
 // File download: student = own only, admin = all, staff = none.
 export function canViewUploadedFile(u: AuthUser, file: Pick<UploadedFile, "ownerUserId">): boolean {

@@ -10,3 +10,4 @@ export * from "./qr";
 export * from "./audit";
 export * from "./imports";
 export * from "./points";
+export * from "./point-config";
