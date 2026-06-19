@@ -53,12 +53,16 @@ router.post("/auth/login", zValidator("json", loginSchema), async (c) => {
   // Rate-limit / lockout gate runs before any password work.
   const rl = await checkRateLimit(rlKey, meta.ipAddress);
   if (rl.blocked) {
-    await writeAudit({
-      action: rl.lockedUntil ? "account_temporarily_locked" : "login_failed_rate_limited",
-      entityType: "auth",
-      metadata: { identifier, locked_until: rl.lockedUntil?.toISOString() ?? null },
-      ...meta,
-    });
+    // Don't re-audit an already-active lockout on every blocked request (that was the audit-spam
+    // source) — it's logged once at the transition below. Only audit the non-lockout rate-limit case.
+    if (!rl.lockedUntil) {
+      await writeAudit({
+        action: "login_failed_rate_limited",
+        entityType: "auth",
+        metadata: { identifier },
+        ...meta,
+      });
+    }
     throw new AppError(429, "rate_limited", "Too many attempts. Try again later.");
   }
 
@@ -87,6 +91,17 @@ router.post("/auth/login", zValidator("json", loginSchema), async (c) => {
   await recordAttempt(rlKey, meta.ipAddress, true);
   await createSession(c, user);
   log.set("userId", user.id).set("role", user.role);
+  // Sign-in success audit — single source of truth for "who actually got in". login_attempts only
+  // records login-path success (claim writes none), so this uniform event covers both paths.
+  await writeAudit({
+    actorUserId: user.id,
+    actorRole: user.role,
+    action: "login_succeeded",
+    entityType: "auth",
+    targetUserId: user.id,
+    metadata: { identifier, method: "login" },
+    ...meta,
+  });
   return c.json({
     user: publicUser(user),
     password_must_change: user.passwordMustChange,
@@ -108,12 +123,15 @@ router.post("/auth/claim", zValidator("json", claimSchema), async (c) => {
   // Rate-limit / lockout gate runs before any DB work or hashing.
   const rl = await checkRateLimit(rlKey, meta.ipAddress);
   if (rl.blocked) {
-    await writeAudit({
-      action: rl.lockedUntil ? "account_temporarily_locked" : "login_failed_rate_limited",
-      entityType: "auth",
-      metadata: { identifier, locked_until: rl.lockedUntil?.toISOString() ?? null },
-      ...meta,
-    });
+    // Mirror login: lockout already audited at its transition edge; only log the non-lockout case.
+    if (!rl.lockedUntil) {
+      await writeAudit({
+        action: "login_failed_rate_limited",
+        entityType: "auth",
+        metadata: { identifier },
+        ...meta,
+      });
+    }
     throw new AppError(429, "rate_limited", "Too many attempts. Try again later.");
   }
 
@@ -181,6 +199,18 @@ router.post("/auth/claim", zValidator("json", claimSchema), async (c) => {
   await recordAttempt(rlKey, meta.ipAddress, true);
   await createSession(c, user);
   log.set("userId", user.id).set("role", user.role);
+  // Sign-in success audit (claim path) — same login_succeeded action so the audit log shows every
+  // successful sign-in uniformly. account_claimed above is the one-time identity proof; this marks
+  // the resulting session (method=claim distinguishes it).
+  await writeAudit({
+    actorUserId: user.id,
+    actorRole: user.role,
+    action: "login_succeeded",
+    entityType: "auth",
+    targetUserId: user.id,
+    metadata: { identifier, method: "claim" },
+    ...meta,
+  });
   // Same shape as login. Claimed users set their own password → no forced change.
   return c.json({
     user: publicUser(user),

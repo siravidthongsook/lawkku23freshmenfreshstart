@@ -84,11 +84,16 @@ export async function recordAttempt(
         gt(loginAttempts.createdAt, since),
       ),
     );
-  const willCross = (emailFails?.n ?? 0) + 1 >= EMAIL_MAX_FAILS;
-  const lockedUntil = willCross ? new Date(Date.now() + LOCKOUT_MS) : null;
+  // Exact equality (not >=): justLocked marks ONLY the attempt that crosses the threshold, so the
+  // lockout is audited once at the transition edge — not on the 6th, 7th… failure too (audit-spam fix).
+  // Subsequent attempts are short-circuited by checkRateLimit's active-lockout gate anyway.
+  const priorFails = emailFails?.n ?? 0;
+  const justLocked = priorFails + 1 === EMAIL_MAX_FAILS;
+  // Keep stamping lockedUntil for any failure at/over threshold so the lock window stays fresh.
+  const lockedUntil = priorFails + 1 >= EMAIL_MAX_FAILS ? new Date(Date.now() + LOCKOUT_MS) : null;
 
   await db.insert(loginAttempts).values({ email, ipAddress: ip, success: null, lockedUntil });
-  return { justLocked: willCross };
+  return { justLocked };
 }
 
 // Active-lockout state for an email (used by user detail to show a lock badge + gate unlock).

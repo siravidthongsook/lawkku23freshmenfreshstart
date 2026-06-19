@@ -154,6 +154,8 @@ export function importStatusLabel(s: string | null | undefined): string {
 // ---- audit action names (action literals across src/modules + src/lib/audit) ----
 const AUDIT_ACTION: Record<string, string> = {
   // auth / account
+  login_succeeded: "เข้าสู่ระบบสำเร็จ",
+  login_failed_rate_limited: "ถูกจำกัดอัตราการเข้าสู่ระบบ",
   account_temporarily_locked: "บัญชีถูกล็อกชั่วคราว",
   admin_unlocked_account: "ผู้ดูแลปลดล็อกบัญชี",
   admin_password_reset: "ผู้ดูแลรีเซ็ตรหัสผ่าน",
