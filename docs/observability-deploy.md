@@ -80,15 +80,38 @@ docker compose -p eticket_obs -f docker-compose.observability.yml down
 
 ---
 
-## 4. Access Grafana via SSH tunnel (audit fix N9)
+## 4. Expose Grafana via Cloudflare Tunnel
 
-Until a reverse-proxy + TLS story exists, Grafana is bound to `127.0.0.1:33492` on the box (NOT
-`0.0.0.0`). Reach it from your laptop through an SSH tunnel:
+Grafana is public at **https://observe.lawkku23freshmenfreshstart.space** through Cloudflare Tunnel
+(`cloudflared`). TLS terminates at Cloudflare's edge; the tunnel connects out from the box to the
+local Grafana port. Grafana stays bound to `127.0.0.1:33492` (NOT `0.0.0.0`) — only `cloudflared`
+on the host reaches it, nothing else is host-exposed.
+
+Add this ingress rule to the existing `cloudflared` config (`~/.cloudflared/config.yml` or the
+Cloudflare Zero Trust dashboard), alongside the rule that already serves the main site:
+
+```yaml
+ingress:
+  - hostname: observe.lawkku23freshmenfreshstart.space
+    service: http://localhost:33492
+  # ... existing main-site rule(s) ...
+  - service: http_status:404
+```
+
+> ⚠️ This `http://localhost:33492` target assumes `cloudflared` runs on the **host** (same network
+> namespace as the `127.0.0.1` bind). If `cloudflared` runs as a **container**, `localhost` won't
+> reach the host loopback — either give it host networking, or join it to `eticket_default` and
+> target `http://grafana:3000` directly (then the host port publish isn't even needed).
+
+The Grafana service already sets `GF_SERVER_ROOT_URL` to the public URL plus public-face hardening
+(secure cookies, anonymous + self-signup disabled). Set a strong `GF_SECURITY_ADMIN_PASSWORD` in
+`.env.observability`. Strongly recommended: put **Cloudflare Access** in front of the hostname so
+the login page itself isn't internet-facing (defense in depth on top of Grafana's own auth).
+
+For maintenance without the tunnel, an SSH forward still works:
 
 ```bash
-# laptop → forward local 33492 to the box's loopback 33492
-ssh -L 33492:127.0.0.1:33492 <user>@<prod-box>
-# then open http://127.0.0.1:33492 in your browser
+ssh -L 33492:127.0.0.1:33492 <user>@<prod-box>   # then open http://127.0.0.1:33492
 ```
 
 Everything else (Prometheus, Loki, Tempo, exporters) has **zero published ports** and is reachable

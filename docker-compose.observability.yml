@@ -16,13 +16,22 @@ services:
   grafana:
     image: grafana/grafana:11.4.0
     restart: unless-stopped
-    # N9: NO reverse-proxy/TLS decided yet → bind to localhost only, reach via SSH tunnel.
-    # Do NOT change to 0.0.0.0 until a proxy + TLS story exists. This is the only published port.
+    # Exposed publicly via Cloudflare Tunnel (cloudflared on host) → observe.lawkku23freshmenfreshstart.space.
+    # TLS terminates at Cloudflare's edge; the tunnel connects to this localhost port. Keep bound to
+    # 127.0.0.1 (NOT 0.0.0.0) — only cloudflared on the host should reach it. This is the only published port.
     ports:
       - "127.0.0.1:33492:3000"
     environment:
       # Secret from gitignored .env.observability — never inline.
       GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD}
+      # Public URL behind the tunnel — Grafana needs this or login redirects/assets/share-links break.
+      GF_SERVER_ROOT_URL: "https://observe.lawkku23freshmenfreshstart.space"
+      GF_SERVER_DOMAIN: "observe.lawkku23freshmenfreshstart.space"
+      # Hardening for a public face: secure cookies (browser↔Cloudflare is HTTPS), no anon, no self-signup.
+      GF_SECURITY_COOKIE_SECURE: "true"
+      GF_SECURITY_COOKIE_SAMESITE: "lax"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
       # Exemplar (metric->trace) + trace->log correlation needs these datasource features on.
       GF_FEATURE_TOGGLES_ENABLE: "traceToMetrics traceToLogs"
     volumes:
