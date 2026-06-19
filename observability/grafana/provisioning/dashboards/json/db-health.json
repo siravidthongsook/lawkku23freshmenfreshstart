@@ -1,0 +1,103 @@
+{
+  "uid": "db-health",
+  "title": "DB Health (postgres_exporter)",
+  "tags": ["eticket", "db"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "pg_up",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "description": "0 = postgres_exporter cannot reach the DB. Drives the postgres-down alert.",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] }
+        },
+        "overrides": []
+      },
+      "targets": [ { "refId": "A", "expr": "pg_up" } ]
+    },
+    {
+      "id": 2,
+      "title": "Connections vs max",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 18, "x": 6, "y": 0 },
+      "description": "Drives the >80% connections alert.",
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(pg_stat_activity_count)", "legendFormat": "active connections" },
+        { "refId": "B", "expr": "pg_settings_max_connections", "legendFormat": "max_connections" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Cache hit ratio %",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(pg_stat_database_blks_hit[5m])) / (sum(rate(pg_stat_database_blks_hit[5m])) + sum(rate(pg_stat_database_blks_read[5m]))) * 100",
+          "legendFormat": "cache hit %"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Deadlocks (rate)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "rate(pg_stat_database_deadlocks[5m])", "legendFormat": "{{datname}}" }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Locks held",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum by (mode) (pg_locks_count)", "legendFormat": "{{mode}}" }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Slow queries (longest running txn age, s)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "description": "Proxy for slow queries / long transactions. Tune to the exporter's available metric.",
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "max(pg_stat_activity_max_tx_duration)", "legendFormat": "max tx duration" }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "DB size",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "pg_database_size_bytes", "legendFormat": "{{datname}}" }
+      ]
+    }
+  ]
+}

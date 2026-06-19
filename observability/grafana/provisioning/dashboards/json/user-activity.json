@@ -1,0 +1,120 @@
+{
+  "uid": "user-activity",
+  "title": "User Activity (business + audit)",
+  "tags": ["eticket", "business"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Registrations / min",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 0 },
+      "description": "No-PII business counter (design §4 prefers this for shared dashboards).",
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(registrations_total[5m])) * 60", "legendFormat": "registrations/min" }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Check-ins / min",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(checkins_total[5m])) * 60", "legendFormat": "checkins/min" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Login success vs failures / min",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 0 },
+      "description": "Failure spikes drive the brute-force alert.",
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(login_success_total[5m])) * 60", "legendFormat": "success/min" },
+        { "refId": "B", "expr": "sum(rate(login_failures_total[5m])) * 60", "legendFormat": "failures/min" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Capacity rejections / min",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 7 },
+      "description": "From the capacity-race path; spikes during registration windows.",
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(capacity_rejections_total[5m])) * 60", "legendFormat": "rejections/min" }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Temp passwords issued / hr",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 7 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(temp_pw_issued_total[1h])) * 3600", "legendFormat": "temp pw/hr" }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Audit: actions by type (last range)",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "audit_pg" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "description": "From audit_logs_safe (PII-stripped, read-only role).",
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT date_trunc('hour', created_at) AS time, action AS metric, count(*) AS value FROM audit_logs_safe WHERE $__timeFilter(created_at) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Audit: top actors (by user_id)",
+      "type": "table",
+      "datasource": { "type": "postgres", "uid": "audit_pg" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "description": "user_id only — never email/student_id (no-PII invariant).",
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT actor_user_id, count(*) AS actions FROM audit_logs_safe WHERE $__timeFilter(created_at) AND actor_user_id IS NOT NULL GROUP BY actor_user_id ORDER BY actions DESC LIMIT 20"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Audit: sensitive actions with reason",
+      "type": "table",
+      "datasource": { "type": "postgres", "uid": "audit_pg" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 22 },
+      "description": "Reason is required on sensitive actions; surfaced here for forensics. Still no PII columns.",
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT created_at, action, actor_user_id, actor_role, target_user_id, reason FROM audit_logs_safe WHERE $__timeFilter(created_at) AND reason IS NOT NULL ORDER BY created_at DESC LIMIT 100"
+        }
+      ]
+    }
+  ]
+}

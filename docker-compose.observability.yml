@@ -1,0 +1,160 @@
+# Observability stack (Grafana LGTM + traces). SEPARATE compose project from the app.
+# Bring up:  docker compose -p eticket_obs -f docker-compose.observability.yml --env-file .env.observability up -d
+#
+# WHY a separate project (design I5): the app's deploy.yml verify step is PROJECT-WIDE
+# (no service allow-list) and auto-rolls-back if any service in the app project isn't "running".
+# Folding an exporter into the app's docker-compose.yml would let an unhealthy exporter
+# roll back a HEALTHY app deploy. So: never add these services to the app compose.
+#
+# Host port map (grouped after app: web 33490, api 33491):
+#   grafana 33492 (ONLY published, bound to 127.0.0.1), prometheus 33493, loki 33494,
+#   tempo 33495, alloy 33496, node-exporter 33497, cadvisor 33498, postgres-exporter 33499.
+# Inter-container traffic uses service-name + CONTAINER port over the shared network
+# (prometheus:9090, tempo:4318, api:3000, db:5432) — host ports are only for debugging.
+
+services:
+  grafana:
+    image: grafana/grafana:11.4.0
+    restart: unless-stopped
+    # N9: NO reverse-proxy/TLS decided yet → bind to localhost only, reach via SSH tunnel.
+    # Do NOT change to 0.0.0.0 until a proxy + TLS story exists. This is the only published port.
+    ports:
+      - "127.0.0.1:33492:3000"
+    environment:
+      # Secret from gitignored .env.observability — never inline.
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD}
+      # Exemplar (metric->trace) + trace->log correlation needs these datasource features on.
+      GF_FEATURE_TOGGLES_ENABLE: "traceToMetrics traceToLogs"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      # grafana/ provisioning (datasources/dashboards/alerts) is owned by another worker — mounted here.
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    restart: unless-stopped
+    # Internal-only by default (route shapes / target list shouldn't be host-exposed).
+    # Uncomment to debug from the box; prefer SSH tunnel.
+    # ports:
+    #   - "127.0.0.1:33493:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      # §12 retention: 30d time cap AND a hard size cap so a runaway scrape can't fill disk.
+      - "--storage.tsdb.retention.time=30d"
+      - "--storage.tsdb.retention.size=2GB"
+      # Exemplar storage: required for histogram->Tempo trace links (app emits OpenMetrics exemplars).
+      - "--enable-feature=exemplar-storage"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    # Lets the host.docker.internal:9100 node-exporter target resolve on a Linux box
+    # (auto on Docker Desktop, NOT on Linux without this). Without it server-health is blank.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  loki:
+    image: grafana/loki:3.3.2
+    restart: unless-stopped
+    # Optional host publish (internal-only default).
+    # ports:
+    #   - "127.0.0.1:33494:3100"
+    command: ["-config.file=/etc/loki/loki-config.yml"]
+    volumes:
+      - ./observability/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki-data:/loki
+
+  tempo:
+    image: grafana/tempo:2.7.0
+    restart: unless-stopped
+    # Optional host publish for the Tempo UI/HTTP (3200). OTLP ingest 4318 stays INTERNAL —
+    # the app exports to tempo:4318 over the shared network, never from the host.
+    # ports:
+    #   - "127.0.0.1:33495:3200"
+    command: ["-config.file=/etc/tempo/tempo-config.yml"]
+    volumes:
+      - ./observability/tempo-config.yml:/etc/tempo/tempo-config.yml:ro
+      - tempo-data:/var/tempo
+
+  alloy:
+    image: grafana/alloy:v1.5.1
+    restart: unless-stopped
+    # Optional host publish for the Alloy debug UI (12345).
+    # ports:
+    #   - "127.0.0.1:33496:12345"
+    command:
+      - "run"
+      - "--server.http.listen-addr=0.0.0.0:12345"
+      - "--storage.path=/var/lib/alloy/data"
+      - "/etc/alloy/config.alloy"
+    volumes:
+      - ./observability/alloy.config:/etc/alloy/config.alloy:ro
+      # docker.sock ro: Alloy discovers containers + tails their stdout. RO = it can read but not control Docker.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    restart: unless-stopped
+    # N1: host network mode → exporter sees the real host NICs/PIDs. In host mode a `ports:`
+    # mapping is IGNORED by Docker, so it is intentionally dropped (it would be a silent no-op).
+    network_mode: host
+    pid: host
+    command:
+      - "--path.rootfs=/host"
+    volumes:
+      # Read-only host root mount so node-exporter reads real CPU/mem/disk/fs metrics.
+      - /:/host:ro,rslave
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    restart: unless-stopped
+    # Optional host publish (8080).
+    # ports:
+    #   - "127.0.0.1:33498:8080"
+    # N2 (cgroup v2): cAdvisor needs these RO mounts to read per-container CPU/mem,
+    # restart counts and OOM kills on a cgroup-v2 host.
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    devices:
+      - /dev/kmsg
+    privileged: true # cAdvisor needs this on most hosts to read cgroup-v2 + device stats.
+
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.16.0
+    restart: unless-stopped
+    # I1/C4: UNPUBLISHED — exporter debug endpoints can leak the DSN. Reaches the app DB as
+    # db:5432 over the shared eticket_default network (prod db has no host port).
+    environment:
+      # Secret DSN from gitignored .env.observability. MUST be a least-privilege monitoring
+      # role (pg_monitor / SELECT only), NOT the app owner. Never inline.
+      DATA_SOURCE_NAME: ${DATA_SOURCE_NAME}
+
+# §12 disk-full protection: keep these volumes on a partition SEPARATE from the Postgres data
+# volume if possible, so a log/metric flood can't take the app DB down. The retention + size
+# caps above (Prometheus size cap, Loki/Tempo retention) protect a single shared partition.
+volumes:
+  prometheus-data:
+  loki-data:
+  tempo-data:
+  grafana-data:
+
+# C4: app docker-compose.yml declares NO explicit network → its implicit network is
+# <project>_default = eticket_default. We JOIN it as external so obs containers can reach
+# api:3000 / db:5432 by service name.
+# VERIFY ON THE BOX with `docker network ls` BEFORE bringing this up — a `docker compose -p <name>`
+# override on the app stack changes this name, and a wrong name = every scrape target silently fails.
+networks:
+  default:
+    external: true
+    name: eticket_default

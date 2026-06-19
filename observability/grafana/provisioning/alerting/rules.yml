@@ -1,0 +1,335 @@
+# Alert rules as code (design §5 + §13 runbooks).
+# EVERY rule carries a runbook_url annotation pointing at the §13 first-move —
+# an alert without a next-action is noise. Thresholds match the design
+# (disk 70% per §12, error-rate 2%, p99 1s, DB conns 80%).
+#
+# All Prometheus rules use datasourceUid: prometheus + the expression model that
+# Grafana provisioning expects (query A -> reduce B -> threshold C).
+# RUNBOOK is the committed doc; adjust the path if the runbook lives elsewhere.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: eticket-core
+    folder: eTicket
+    interval: 1m
+    rules:
+      # --- API down: /metrics scrape fails (no api target up) -----------------
+      - uid: api-down
+        title: API down
+        condition: C
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "API /metrics scrape is failing (api target down)."
+          runbook_url: "§13 API down: docker compose -p eticket ps + last api trace in Loki."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: 'up{job="eticket-api"}'
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: last, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              refId: C
+              # fire when up < 1 (down or absent)
+              conditions:
+                - evaluator: { type: lt, params: [1] }
+
+      # --- Error rate > 2% over 5m -------------------------------------------
+      - uid: error-rate-high
+        title: Error rate >2%
+        condition: C
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "5xx ratio above 2% for 5m."
+          runbook_url: "§13 Error-rate spike: exemplar -> Tempo failing span -> Loki outcome/error.code."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: 'sum(rate(http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(http_requests_total[5m])), 1) * 100'
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: last, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              refId: C
+              conditions:
+                - evaluator: { type: gt, params: [2] }
+
+      # --- p99 latency > 1s over 5m ------------------------------------------
+      - uid: latency-p99-high
+        title: p99 latency >1s
+        condition: C
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "p99 request latency above 1s for 5m."
+          runbook_url: "§13 p99 latency: Tempo slowest traces -> which span (pg? storage?) dominates."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: 'histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))'
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: last, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              refId: C
+              conditions:
+                - evaluator: { type: gt, params: [1] }
+
+      # --- Container restart / crash loop ------------------------------------
+      - uid: container-restart
+        title: Container restarting
+        condition: C
+        for: 5m
+        # cAdvisor event series are absent until the first restart ever happens — NoData here is
+        # the healthy idle state, not an incident. OK avoids false pages (§5 24h-idle AC).
+        noDataState: OK
+        execErrState: OK
+        labels: { severity: critical }
+        annotations:
+          summary: "A container restarted in the last 10m (possible crash loop)."
+          runbook_url: "§13 Container restart/OOM: cAdvisor mem trend + which container; raise limit or fix leak."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: 'sum by (name) (increase(container_restart_count[10m]))'
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: max, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              refId: C
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+
+      # --- OOM kills ----------------------------------------------------------
+      - uid: container-oom
+        title: Container OOM killed
+        condition: C
+        for: 0m
+        # OOM event series absent until the first kill — NoData = healthy idle, not an incident.
+        noDataState: OK
+        execErrState: OK
+        labels: { severity: critical }
+        annotations:
+          summary: "A container was OOM-killed."
+          runbook_url: "§13 Container restart/OOM: cAdvisor mem trend + which container; raise mem limit or fix leak."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: 'sum by (name) (increase(container_oom_events_total[10m]))'
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: max, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              refId: C
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+
+      # --- DB connections > 80% of max ---------------------------------------
+      - uid: db-conns-high
+        title: DB connections >80% max
+        condition: C
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Active connections above 80% of max_connections."
+          runbook_url: "§13 DB conns near max: postgres_exporter active vs idle; find leaking pool / long tx."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: 'sum(pg_stat_activity_count) / clamp_min(max(pg_settings_max_connections), 1) * 100'
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: last, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              refId: C
+              conditions:
+                - evaluator: { type: gt, params: [80] }
+
+      # --- Host disk > 70% (design §12 wants 70, not 85) ---------------------
+      - uid: host-disk-high
+        title: Host disk >70%
+        condition: C
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Host disk usage above 70% — monitoring disk creep is the likely cause."
+          runbook_url: "§13 Disk >70%: docker system df + which volume grew; check Loki ingestion rate (§12)."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: 'max((1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"})) * 100)'
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: last, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              refId: C
+              conditions:
+                - evaluator: { type: gt, params: [70] }
+
+      # --- Login-failure spike (brute force) ---------------------------------
+      - uid: login-failure-spike
+        title: Login failure spike
+        condition: C
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Login failures elevated (>0.5/s over 5m) — possible brute force / credential stuffing."
+          runbook_url: "§13 Login-failure spike: Loki filter action=auth.signin outcome=bad_credentials group by ip."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: 'sum(rate(login_failures_total[5m]))'
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: last, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              refId: C
+              # 0.5/s ~= 30 failures/min sustained for 5m. Tune to real baseline.
+              conditions:
+                - evaluator: { type: gt, params: [0.5] }
+
+      # --- Postgres down: pg_up == 0 -----------------------------------------
+      - uid: postgres-down
+        title: Postgres down
+        condition: C
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "postgres_exporter reports pg_up == 0 — DB unreachable."
+          runbook_url: "§13 Postgres down: check db container + disk + pg_isready (api will be down too)."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: 'min(pg_up)'
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: last, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              refId: C
+              conditions:
+                - evaluator: { type: lt, params: [1] }
+
+      # --- Deploy / rollback fired (I6) --------------------------------------
+      # deploy.yml's rollback path emits a metric another worker wires in. This
+      # rule just defines the receiver: fire when that signal is present.
+      # If the emit is a Discord webhook directly from CI instead of a metric,
+      # this rule is a no-op safety net and can be dropped — left here so the
+      # §13 deploy/rollback runbook has a Grafana-side home if wired via metric.
+      - uid: deploy-rollback
+        title: Deploy rollback fired
+        # Paused: rollback alerting is wired directly deploy.yml → Discord (I6); no one emits
+        # eticket_deploy_rollback_total, so leaving this active would fire NoData noise. Unpause
+        # only if you switch to a pushgateway metric path.
+        isPaused: true
+        condition: C
+        for: 0m
+        labels: { severity: critical }
+        annotations:
+          summary: "A deploy auto-rollback was triggered (from deploy.yml)."
+          runbook_url: "§13 Deploy/rollback fired: read the GitHub Actions run; confirm app on previous good image; check migration step (expand-only violation?)."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              # Placeholder metric the CI emit would push (e.g. via pushgateway).
+              # Worker that wires deploy.yml owns producing eticket_deploy_rollback_total.
+              expr: 'sum(increase(eticket_deploy_rollback_total[10m]))'
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: max, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              refId: C
+              conditions:
+                - evaluator: { type: gt, params: [0] }

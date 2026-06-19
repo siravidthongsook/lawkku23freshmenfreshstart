@@ -1,0 +1,102 @@
+# Grafana datasources as code (design §4/§6).
+# All targets are reached by SERVICE NAME over the shared docker network
+# (eticket_default) — NOT host ports. Secrets come from env (${...}), never inline.
+apiVersion: 1
+
+# Allow re-provisioning to overwrite stale datasources on container recreate.
+deleteDatasources:
+  - { name: Prometheus, orgId: 1 }
+  - { name: Loki, orgId: 1 }
+  - { name: Tempo, orgId: 1 }
+  - { name: "Audit (Postgres RO)", orgId: 1 }
+
+datasources:
+  # --- Metrics ---------------------------------------------------------------
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      httpMethod: POST
+      # OpenMetrics exemplars carry trace_id -> click an exemplar to jump to the
+      # exact Tempo trace (the §1 trace-back chain: metric -> trace).
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+          # internalLink keeps the jump inside Grafana (Explore -> Tempo trace view).
+          urlDisplayLabel: "View trace in Tempo"
+
+  # --- Logs ------------------------------------------------------------------
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      # Derived field: pull trace_id out of the structured log line (request-log
+      # emits trace_id) and link it to Tempo (log -> trace correlation, §1).
+      derivedFields:
+        - name: trace_id
+          # Matches "trace_id":"<hex>" or trace_id=<hex> in the log body.
+          matcherRegex: '"?trace_id"?[=:]\s*"?([a-f0-9]+)"?'
+          url: "$${__value.raw}"
+          datasourceUid: tempo
+          urlDisplayLabel: "View trace in Tempo"
+
+  # --- Traces ----------------------------------------------------------------
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    # Tempo query/UI port. OTLP ingest (4318) is used by the app, not Grafana.
+    url: http://tempo:3200
+    jsonData:
+      # trace -> logs: from a span, jump to Loki filtered by the same trace_id.
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: "-1h"
+        spanEndTimeShift: "1h"
+        filterByTraceID: true
+        filterBySpanID: false
+        # No span-tag→label map: trace_id (filterByTraceID) is the correlation key. The app's Loki
+        # labels don't include service.name, so a tag filter here would over-match to zero logs.
+      # trace -> metrics: back-link a span to the RED metrics for its route,
+      # completing the trace-back chain both directions (§1).
+      tracesToMetrics:
+        datasourceUid: prometheus
+        spanStartTimeShift: "-1h"
+        spanEndTimeShift: "1h"
+        # No tags map: app metrics carry no `service` label, so $$__tags must stay empty —
+        # the queries then back-link to the whole-api RED metrics (still useful from any span).
+        queries:
+          - name: "Request rate"
+            query: 'sum(rate(http_requests_total[5m]))'
+          - name: "Request duration p99"
+            query: 'histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))'
+      # Show the service graph node from a trace if service-graph metrics exist.
+      serviceMap:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true
+
+  # --- Audit forensics (Postgres, READ-ONLY, PII-stripped VIEW) -------------
+  # CRITICAL (C2/C3): points at the READ-ONLY role + the PII-stripped VIEW, NOT
+  # the app's DATABASE_URL owner role and NOT the raw audit_logs table.
+  # Creds come from env so no secret is committed.
+  - name: "Audit (Postgres RO)"
+    uid: audit_pg
+    type: postgres
+    access: proxy
+    # Reach the prod db over the shared network (it has no host port).
+    url: db:5432
+    user: ${GRAFANA_PG_USER}
+    # Read-only role/view only; never the migration/owner role.
+    jsonData:
+      database: ${GRAFANA_PG_DATABASE}
+      sslmode: disable          # internal docker network; enable if DB enforces TLS
+      postgresVersion: 1600     # pg16
+      timescaledb: false
+    secureJsonData:
+      password: ${GRAFANA_PG_PASSWORD}

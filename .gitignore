@@ -1,6 +1,8 @@
 node_modules
 dist
 .env
+# observability secrets (DSN with monitoring creds, grafana admin pw) — keep the .example only
+.env.observability
 .storage
 .storage-test
 *.log

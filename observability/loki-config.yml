@@ -1,0 +1,54 @@
+# Loki single-binary / filesystem config for the eticket box.
+# Goal (§12): cheap log store with HARD ingestion rate limits + 14d retention so a log-spam
+# loop (e.g. a crash loop emitting stack traces) can't run away and fill the disk.
+
+auth_enabled: false # single-tenant internal box; no multi-tenant auth header needed.
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+# Ingestion rate limits — the disk-full guardrail. A runaway logger gets throttled/dropped
+# (Loki logs the drop) instead of filling the volume.
+limits_config:
+  ingestion_rate_mb: 8 # global per-tenant rate ceiling (MB/s)
+  ingestion_burst_size_mb: 16 # short burst headroom
+  per_stream_rate_limit: 3MB # per-stream cap so one noisy container can't dominate
+  per_stream_rate_limit_burst: 6MB
+  max_streams_per_user: 5000 # bound label cardinality (paired with templated route labels)
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+  # 14d retention (§12). Enforced by the compactor below.
+  retention_period: 336h
+
+# Compactor enforces retention by deleting expired chunks.
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem
+
+# Disable usage reporting / phone-home on an internal box.
+analytics:
+  reporting_enabled: false

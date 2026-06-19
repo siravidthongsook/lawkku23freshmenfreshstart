@@ -204,11 +204,45 @@ jobs:
           echo "Deploy verified: containers running + api/web serving HTTP."
           echo "Deployed ${{ steps.pull.outputs.to_sha }} | db backup: ${{ steps.backup.outputs.db_backup }} | storage backup: ${{ steps.backup.outputs.storage_backup }}"
 
+      # NOTE (I5): observability is a SEPARATE compose project (`-p eticket_obs`) with its own lifecycle.
+      # The verify step above runs `docker compose ps` in this job's working-directory (the app deploy
+      # clone), so it stays scoped to the app project ONLY — a down exporter never rolls back an app
+      # deploy. Do NOT add any observability compose bring-up to this workflow.
+
+      # Discord alert — deploy SUCCESS (green). Fires only when the verify step passed.
+      # Webhook URL comes from a secret; never inline it.
+      - name: Notify Discord — deploy success
+        if: success() && steps.verify.outcome == 'success'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          # Skip silently if the webhook isn't configured (keeps deploy from failing on a missing secret).
+          if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then echo "no DISCORD_WEBHOOK_URL set — skipping notify"; exit 0; fi
+          NOW="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          # Embed color 3066993 = green.
+          curl -fsS -X POST "$DISCORD_WEBHOOK_URL" \
+            -H 'Content-Type: application/json' \
+            -d @- <<JSON
+          {
+            "embeds": [{
+              "title": "✅ eTicket prod deploy succeeded",
+              "color": 3066993,
+              "fields": [
+                { "name": "commit", "value": "${{ steps.pull.outputs.to_sha }}", "inline": true },
+                { "name": "time",   "value": "$NOW", "inline": true },
+                { "name": "run",    "value": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" }
+              ]
+            }]
+          }
+          JSON
+
       # 10. AUTO-ROLLBACK (code-only) — scoped to post-recreate failures (step 8 or 9). Migrate-fail
       # (step 7) aborts before this point and needs no rollback. Auto-rollback is code-only: we
       # re-checkout FROM_SHA and reuse the :prev images (instant, no rebuild). DB is NOT auto-restored
       # because that is destructive (overwrites rows) — restore is a deliberate manual rollback.yml run.
       - name: Auto-rollback (code-only) on recreate/verify failure
+        id: rollback
         if: failure() && (steps.recreate.outcome == 'failure' || steps.verify.outcome == 'failure')
         env:
           SERVICES: ${{ github.event.inputs.services }}
@@ -263,3 +297,34 @@ jobs:
 
           echo "::error::Rolled back code to ${{ steps.from.outputs.from_sha }}. DB was NOT restored (db backup: ${{ steps.backup.outputs.db_backup }}). The bad commit is STILL on origin/main — git revert it before the next deploy or it will re-ship. If the schema is incompatible, manually run rollback.yml with restore_db=true."
           exit 1
+
+      # Discord alert — ROLLBACK fired (red). `always()` so it sends even though the rollback step
+      # above exits 1 and the job is failing. Conditioned on the rollback step having actually run
+      # (its `if:` gates it to recreate/verify failures), so it never fires on a clean deploy.
+      # Mirrors the ::error:: text at the end of the rollback step.
+      - name: Notify Discord — rollback fired
+        if: always() && steps.rollback.outcome != 'skipped' && steps.rollback.outcome != ''
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then echo "no DISCORD_WEBHOOK_URL set — skipping notify"; exit 0; fi
+          NOW="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          # Embed color 15158332 = red.
+          curl -fsS -X POST "$DISCORD_WEBHOOK_URL" \
+            -H 'Content-Type: application/json' \
+            -d @- <<JSON
+          {
+            "embeds": [{
+              "title": "🚨 eTicket prod deploy ROLLED BACK",
+              "color": 15158332,
+              "description": "Code rolled back to **${{ steps.from.outputs.from_sha }}** using :prev images. **DB was NOT restored** (a DB restore is a deliberate manual rollback.yml run with restore_db=true). The bad commit is **STILL on origin/main** — git revert it before the next deploy or it will re-ship.",
+              "fields": [
+                { "name": "rolled back to", "value": "${{ steps.from.outputs.from_sha }}", "inline": true },
+                { "name": "time",           "value": "$NOW", "inline": true },
+                { "name": "db backup",      "value": "${{ steps.backup.outputs.db_backup }}" },
+                { "name": "run",            "value": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" }
+              ]
+            }]
+          }
+          JSON

@@ -1,0 +1,40 @@
+# Prometheus scrape config for the eticket observability stack.
+# Retention/size caps live on the CLI flags in docker-compose.observability.yml
+# (--storage.tsdb.retention.time=30d, --storage.tsdb.retention.size=2GB per design §12).
+# Exemplar storage is enabled there too (--enable-feature=exemplar-storage) so histogram
+# samples carry trace_id exemplars → Grafana metric->Tempo trace links. The app emits
+# OpenMetrics exemplars on http_request_duration_seconds.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # App metrics. NOTE: api container listens on port 3000 INTERNALLY (host maps 33491:3000),
+  # so over the shared network the target is api:3000, not 33491.
+  - job_name: "eticket-api"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:3000"]
+
+  # Host metrics. node-exporter runs in host network mode (N1) → reach it on the host's
+  # docker-gateway. host.docker.internal works on Docker Desktop; on a Linux prod box it
+  # resolves via extra_hosts (host-gateway) or use the box's docker0 IP / 172.17.0.1.
+  - job_name: "node-exporter"
+    static_configs:
+      - targets: ["host.docker.internal:9100"]
+
+  # Per-container CPU/mem, restart counts, OOM kills.
+  - job_name: "cadvisor"
+    static_configs:
+      - targets: ["cadvisor:8080"]
+
+  # Postgres health (connections, locks, deadlocks, cache hit ratio). Exporter reaches db:5432.
+  - job_name: "postgres-exporter"
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+
+  # Prometheus self-scrape.
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]

@@ -1,0 +1,44 @@
+# Tempo config for the eticket box. Local filesystem storage, OTLP HTTP ingest.
+# The app exports traces to tempo:4318 over the shared network (OTEL_EXPORTER_OTLP_ENDPOINT).
+# Size-based block retention ~7d (§12) so traces can't fill the disk at 100% sampling.
+
+stream_over_http_enabled: true
+
+server:
+  http_listen_port: 3200 # Tempo HTTP/UI (queries from Grafana). OTLP ingest is separate (below).
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        # OTLP HTTP on 4318 — what the app sends to (tempo:4318). Stays INTERNAL, never host-published.
+        http:
+          endpoint: 0.0.0.0:4318
+        # gRPC receiver kept available on 4317 for any future exporter; internal-only too.
+        grpc:
+          endpoint: 0.0.0.0:4317
+
+ingester:
+  max_block_duration: 5m # flush blocks promptly so retention can act on a small box.
+
+compactor:
+  compaction:
+    block_retention: 168h # 7d trace retention (§12).
+
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks
+
+# Generate service-graph + span metrics for Grafana, and let Prometheus exemplars link in.
+metrics_generator:
+  storage:
+    path: /var/tempo/generator/wal
+  traces_storage:
+    path: /var/tempo/generator/traces
+
+usage_report:
+  reporting_enabled: false

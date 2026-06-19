@@ -1,0 +1,23 @@
+# Alert contact points (design §5 — Discord).
+# The webhook URL is NEVER inlined: it comes from env via Grafana's secure-field
+# expansion. Set DISCORD_WEBHOOK_URL in .env.observability (gitignored).
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: discord
+    receivers:
+      - uid: discord-eticket
+        type: discord
+        settings:
+          # ${DISCORD_WEBHOOK_URL} is expanded by Grafana at load. Placeholder only.
+          url: ${DISCORD_WEBHOOK_URL}
+          use_discord_username: true
+          # Title + message include the runbook link so the on-call has a next move.
+          title: "[eTicket] {{ .CommonLabels.alertname }} — {{ .Status }}"
+          message: |
+            {{ range .Alerts }}
+            **{{ .Labels.alertname }}** ({{ .Labels.severity }})
+            {{ .Annotations.summary }}
+            First move: {{ .Annotations.runbook_url }}
+            {{ end }}

@@ -1,0 +1,16 @@
+# Dashboard provider (design §6 — dashboards as code).
+# Loads every JSON under json/ so a container recreate restores all dashboards.
+apiVersion: 1
+
+providers:
+  - name: "eticket-observability"
+    orgId: 1
+    folder: "eTicket"
+    type: file
+    disableDeletion: false
+    # Allow editing in the UI, but file is source of truth (reloaded periodically).
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards/json
+      foldersFromFilesStructure: false
