@@ -1,0 +1,53 @@
+# Manual-only prod deploy. Runs on the self-hosted runner on the prod box.
+# Never triggers on push/PR — Boss dispatches it by hand (prod is live with real users).
+name: Deploy prod (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type DEPLOY to confirm (prod is live)'
+        required: true
+        default: ''
+      services:
+        description: 'Services to rebuild (blank = all). e.g. "api" or "web api"'
+        required: false
+        default: ''
+
+# Block overlapping deploys; let an in-flight one finish (do not cancel a live deploy).
+concurrency:
+  group: prod-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Custom label so this hits ONLY the eticket runner, not the shared ITL runner.
+    runs-on: [self-hosted, eticket]
+    steps:
+      - name: Guard — require explicit DEPLOY confirm
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "DEPLOY" ]; then
+            echo "::error::confirm input must be 'DEPLOY' (got '${{ github.event.inputs.confirm }}'). Aborting."
+            exit 1
+          fi
+
+      # Operate on the real deploy clone, NOT the runner's _work checkout.
+      - name: Pull latest main
+        working-directory: /home/siravid/projects/eticket
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+          echo "Now at: $(git rev-parse --short HEAD) — $(git log -1 --pretty=%s)"
+
+      - name: Build & recreate containers
+        working-directory: /home/siravid/projects/eticket
+        run: |
+          set -euo pipefail
+          # api auto-runs `pnpm db:migrate` on boot (see Dockerfile CMD).
+          docker compose up -d --build ${{ github.event.inputs.services }}
+
+      - name: Verify
+        working-directory: /home/siravid/projects/eticket
+        run: docker compose ps
