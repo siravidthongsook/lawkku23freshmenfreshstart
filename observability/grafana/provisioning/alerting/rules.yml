@@ -50,6 +50,10 @@ groups:
         title: Error rate >2%
         condition: C
         for: 5m
+        # No requests / no 5xx at idle -> the ratio query is EMPTY, not zero -> NoData.
+        # Zero errors is healthy, so NoData must be OK, not a critical page. (api-down covers a dead api.)
+        noDataState: OK
+        execErrState: OK
         labels: { severity: critical }
         annotations:
           summary: "5xx ratio above 2% for 5m."
@@ -80,6 +84,10 @@ groups:
         title: p99 latency >1s
         condition: C
         for: 5m
+        # No requests in window -> histogram_quantile has no data -> NoData. No traffic is not a
+        # latency regression, so OK rather than alert.
+        noDataState: OK
+        execErrState: OK
         labels: { severity: warning }
         annotations:
           summary: "p99 request latency above 1s for 5m."
