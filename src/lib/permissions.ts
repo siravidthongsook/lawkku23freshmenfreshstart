@@ -23,6 +23,17 @@ export const canEarnPoints = (u: AuthUser) => isStudent(u);
 // defined now so the award path can reference the same rule.
 export const canManagePointConfig = (u: AuthUser) => isAdmin(u);
 
+// Points adjust/grant (plan §6). Staff + admin can grant (give to students); staff draws from budget,
+// admin is unlimited. Used by: grant-token issue, manual adjust (+), staff self-reverse window.
+export const canAdjustPoints = (u: AuthUser) => isStaff(u) || isAdmin(u);
+// Topping up / adjusting staff budget = admin only (admin is the budget source).
+export const canTopupStaffBudget = (u: AuthUser) => isAdmin(u);
+// Deducting points / reversing any ledger entry / freeform correction = admin only (plan §4.8).
+export const canDeductPoints = (u: AuthUser) => isAdmin(u);
+// Staff may reverse THEIR OWN recent manual-grant within the window; admin always can. The
+// own-entry + reason-type + time-window checks are enforced in the handler (this only gates the route).
+export const canReverseOwnRecentGrant = (u: AuthUser) => isStaff(u) || isAdmin(u);
+
 // File download: student = own only, admin = all, staff = none.
 export function canViewUploadedFile(u: AuthUser, file: Pick<UploadedFile, "ownerUserId">): boolean {
   if (isAdmin(u)) return true;

@@ -44,6 +44,14 @@ export const pointReason = pgEnum("point_reason", [
   "correction_reverse", // admin reverses a wrong entry (negative delta)
 ]);
 
+// Point-grant QR token lifecycle (plan §3.1). active → exhausted (all claims used) | revoked | expired.
+export const grantTokenStatus = pgEnum("grant_token_status", [
+  "active",
+  "revoked",
+  "exhausted",
+  "expired",
+]);
+
 // Staff budget ledger reasons (budget tables land in a later phase; enum defined here per plan §3.1).
 export const staffBudgetReason = pgEnum("staff_budget_reason", [
   "topup", // admin tops up budget (+)
