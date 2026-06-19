@@ -6,7 +6,9 @@ import type { AppVariables } from "../../lib/context";
 import { db } from "../../db/client";
 import { pointGrantTokens, staffBudgetLedger } from "../../db/schema/points";
 import { users } from "../../db/schema/users";
-import { requireAuth, requirePermission } from "../../lib/auth-middleware";
+import { requireAuth, requirePermission, requestMeta } from "../../lib/auth-middleware";
+import { writeAudit } from "../../lib/audit";
+import { toBangkokString } from "../../lib/time";
 import {
   canAdjustPoints,
   canDeductPoints,
@@ -15,6 +17,7 @@ import {
   canTopupStaffBudget,
 } from "../../lib/permissions";
 import { AppError } from "../../lib/errors";
+import { pointRateLimit } from "../../lib/point-rate-limit";
 import { getBalance, getLedgerEntryDetail, listUserLedger, serializeLedgerEntry } from "./service";
 import { adjustBudget, getStaffBudget } from "./budget-service";
 import {
@@ -123,6 +126,7 @@ router.post(
   "/points/grant-tokens",
   requireAuth,
   requirePermission(canAdjustPoints),
+  pointRateLimit("grant_issue"), // lenient burst-log only (§15.7, no hard cap)
   zValidator("json", issueBody),
   async (c) => {
     const user = c.get("user");
@@ -255,6 +259,7 @@ router.post(
   "/points/adjust",
   requireAuth,
   requirePermission(canAdjustPoints),
+  pointRateLimit("adjust"), // lenient burst-log only (§15.7, no hard cap)
   zValidator("json", adjustBody),
   async (c) => {
     const user = c.get("user");
@@ -300,7 +305,7 @@ router.post(
 const claimBody = z.object({ token: z.string().min(1) });
 
 // POST /points/claim — student claims a staff grant QR (awards once; idempotent re-claim).
-router.post("/points/claim", requireAuth, zValidator("json", claimBody), async (c) => {
+router.post("/points/claim", requireAuth, pointRateLimit("claim"), zValidator("json", claimBody), async (c) => {
   const user = c.get("user");
   const { token } = c.req.valid("json");
   const res = await claimGrantToken({
@@ -506,6 +511,54 @@ router.get(
   },
 );
 
+// GET /admin/users/:userId/points/export — full point-ledger CSV for one student (audit / dispute
+// trail before results announcement, plan §7). Admin only (canDeductPoints — the correction audience).
+// Reuses the formula-injection-safe csv-out; timestamp column is Bangkok-labeled per CLAUDE.md.
+router.get(
+  "/admin/users/:userId/points/export",
+  requireAuth,
+  requirePermission(canDeductPoints),
+  async (c) => {
+    const { userId } = userIdParam.parse(c.req.param());
+    // No pagination — admin pulls the whole ledger once for the audit file (mirrors leaderboard export).
+    const { rows } = await listUserLedger(userId, 1_000_000, 0);
+    const records = rows.map((r) => ({
+      ledger_id: r.id,
+      delta: r.delta,
+      reason_code: r.reasonCode,
+      reversal_of_ledger_id: r.reversalOfLedgerId ?? "",
+      created_by_user_id: r.createdByUserId ?? "",
+      reason: ((r.metadata as Record<string, unknown> | null)?.reason as string | undefined) ?? "",
+      created_at_bangkok: toBangkokString(r.createdAt),
+    }));
+    const csv = toCsv(records, [
+      "ledger_id",
+      "delta",
+      "reason_code",
+      "reversal_of_ledger_id",
+      "created_by_user_id",
+      "reason",
+      "created_at_bangkok",
+    ]);
+    // Audit the export itself (append-only) — who pulled a student's full point history, and how many rows.
+    await writeAudit({
+      actorUserId: c.get("user").id,
+      actorRole: c.get("user").role,
+      action: "point_ledger_exported",
+      entityType: "user",
+      entityId: userId,
+      targetUserId: userId,
+      metadata: { row_count: records.length },
+      ...requestMeta(c),
+    });
+    c.header("Content-Type", "text/csv; charset=utf-8");
+    c.header("Content-Disposition", `attachment; filename="user-${userId}-points.csv"`);
+    c.header("X-Row-Count", String(records.length));
+    c.header("Access-Control-Expose-Headers", "X-Row-Count, Content-Disposition");
+    return c.body(csv);
+  },
+);
+
 const reverseBody = z.object({ ledger_id: z.string().uuid(), reason: z.string().min(1) });
 
 // POST /admin/users/:userId/points/reverse — admin reverses ANY ledger entry (bypasses cutoff).
@@ -569,7 +622,7 @@ const connectBody = z.object({ token: z.string().min(1) });
 
 // POST /points/connect — scanner connects a peer; scanner earns +peerPoints once per ordered pair.
 // Always HTTP 200 with a result code (mirror scan/claim — UI branches on result).
-router.post("/points/connect", requireAuth, zValidator("json", connectBody), async (c) => {
+router.post("/points/connect", requireAuth, pointRateLimit("connect"), zValidator("json", connectBody), async (c) => {
   const user = c.get("user");
   const { token } = c.req.valid("json");
   const res = await connectPeer({

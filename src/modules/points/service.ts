@@ -20,6 +20,9 @@ export type AddPointsArgs = {
   metadata?: Record<string, unknown> | null;
   createdByUserId?: string | null; // null = system
   reason?: string | null; // audit reason; required by callers for manual/correction paths
+  // Audit action code (plan §15.5): default "point_award"; reverse/correct paths pass
+  // "point_reverse"/"point_correct" so the audit log is filterable by intent, not just by reasonCode.
+  auditAction?: string;
 };
 
 export type AddPointsResult = {
@@ -84,7 +87,7 @@ export async function addPoints(args: AddPointsArgs, outerTx?: Tx): Promise<AddP
     await writeAudit(
       {
         actorUserId: args.createdByUserId ?? null,
-        action: "point_award",
+        action: args.auditAction ?? "point_award",
         entityType: "point_ledger",
         entityId: entry.id,
         targetUserId: args.userId,

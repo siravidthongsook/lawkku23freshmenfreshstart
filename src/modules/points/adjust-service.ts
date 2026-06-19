@@ -136,6 +136,7 @@ export async function adminReverseLedgerEntry(args: {
         reversalOfLedgerId: orig.id,
         createdByUserId: args.actorUserId,
         reason: args.reason,
+        auditAction: "point_reverse", // §15.5 — distinct from point_award for audit filtering
         metadata: { originalReasonCode: orig.reasonCode, originalDelta: orig.delta },
       },
       tx,
@@ -200,6 +201,7 @@ export async function adminCorrect(args: {
         reasonCode: "correction_add",
         createdByUserId: args.actorUserId,
         reason: args.reason,
+        auditAction: "point_correct", // §15.5 — distinct from point_award for audit filtering
         metadata: { correction: true },
       },
       tx,
@@ -270,6 +272,7 @@ export async function staffSelfReverse(args: {
         reversalOfLedgerId: orig.id,
         createdByUserId: args.actorUserId,
         reason: args.reason,
+        auditAction: "point_reverse", // §15.5 — staff self-reverse is still a reverse for audit filtering
         metadata: { originalReasonCode: orig.reasonCode, originalDelta: orig.delta, selfReverse: true },
       },
       tx,

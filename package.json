@@ -22,6 +22,7 @@
     "db:seed": "tsx --env-file-if-exists=.env src/db/seed.ts",
     "load:users": "tsx --env-file-if-exists=.env src/db/load-users.ts",
     "db:backfill-qr": "tsx --env-file-if-exists=.env src/db/backfill-qr-token-enc.ts",
+    "reconcile:points": "tsx --env-file-if-exists=.env src/db/reconcile-points.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
