@@ -21,7 +21,9 @@
     "db:push": "drizzle-kit push",
     "db:seed": "tsx --env-file-if-exists=.env src/db/seed.ts",
     "load:users": "tsx --env-file-if-exists=.env src/db/load-users.ts",
-    "db:backfill-qr": "tsx --env-file-if-exists=.env src/db/backfill-qr-token-enc.ts"
+    "db:backfill-qr": "tsx --env-file-if-exists=.env src/db/backfill-qr-token-enc.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
@@ -39,7 +41,9 @@
     "@types/papaparse": "^5.3.15",
     "@types/pg": "^8.11.10",
     "concurrently": "^10.0.3",
+    "dotenv": "^17.4.2",
     "drizzle-kit": "^0.28.1",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.9"
   }
 }

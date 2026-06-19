@@ -6,3 +6,8 @@ dist
 .env
 .storage
 *.log
+# test harness — never needed in the prod image (NODE_ENV=production never runs vitest)
+test
+vitest.config.ts
+.env.test
+.storage-test

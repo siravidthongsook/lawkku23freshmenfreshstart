@@ -2,6 +2,7 @@ node_modules
 dist
 .env
 .storage
+.storage-test
 *.log
 
 # local + prod DB backups (contain hashes/PII)
