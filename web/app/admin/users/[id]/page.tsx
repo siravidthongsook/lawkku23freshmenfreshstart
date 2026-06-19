@@ -336,9 +336,17 @@ export default function UserDetailPage() {
             </Badge>
           ) : null}
         </div>
-        <Button variant="outline" size="sm" asChild>
-          <Link href="/admin/users">ย้อนกลับ</Link>
-        </Button>
+        <div className="flex gap-2">
+          {/* Points ledger + corrections (students earn points; harmless link for other roles). */}
+          {user.role === "student" ? (
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/admin/users/${id}/points`}>แต้ม</Link>
+            </Button>
+          ) : null}
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/admin/users">ย้อนกลับ</Link>
+          </Button>
+        </div>
       </div>
 
       {/* Profile edit */}

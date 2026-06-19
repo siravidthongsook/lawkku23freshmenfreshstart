@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { AppVariables } from "../../lib/context";
 import { db } from "../../db/client";
@@ -197,11 +197,52 @@ router.get("/points/my-budget", requireAuth, requirePermission(canAdjustPoints),
       reason_code: r.reasonCode,
       grant_token_id: r.grantTokenId,
       target_user_id: r.targetUserId,
+      // staff self-reverse UI needs the backing ledger id to know which grant it can undo (Gap A)
+      related_ledger_id: r.relatedLedgerId,
       reason: r.reason,
       created_at: r.createdAt.toISOString(),
     })),
   });
 });
+
+// Min 2 chars to avoid trawling the whole table; cap results so the typeahead stays small.
+const studentSearchQuery = z.object({
+  q: z.string().trim().min(2).max(100),
+});
+
+// GET /points/student-search — typeahead for the staff/admin manual-give flow. Gated by the SAME
+// audience that can grant points (canAdjustPoints = staff + admin). Returns ONLY active students
+// and ONLY the minimal fields needed to pick + confirm — no email/phone/balance (no extra PII leak;
+// matches what leaderboard/connect already expose, plus studentId which staff already see in grants).
+router.get(
+  "/points/student-search",
+  requireAuth,
+  requirePermission(canAdjustPoints),
+  zValidator("query", studentSearchQuery),
+  async (c) => {
+    const { q } = c.req.valid("query");
+    const pat = `%${q}%`;
+    const rows = await db
+      .select({
+        id: users.id,
+        fullName: users.fullName,
+        nickname: users.nickname,
+        studentId: users.studentId,
+        groupNumber: users.groupNumber,
+      })
+      .from(users)
+      .where(
+        and(
+          eq(users.role, "student"),
+          eq(users.status, "active"),
+          or(ilike(users.fullName, pat), ilike(users.nickname, pat), ilike(users.studentId, pat)),
+        ),
+      )
+      .orderBy(asc(users.fullName))
+      .limit(20);
+    return c.json({ students: rows });
+  },
+);
 
 const adjustBody = z.object({
   user_id: z.string().uuid(),

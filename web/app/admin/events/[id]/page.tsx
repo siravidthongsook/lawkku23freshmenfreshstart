@@ -15,6 +15,7 @@ import {
   AlertTriangle,
   ChevronRight,
   Loader2,
+  Sparkles,
   Send,
   Ban,
   Archive,
@@ -202,6 +203,12 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
             <Link href={`/admin/events/${id}/registrations`}>
               <Users className="size-4" />
               การลงทะเบียน
+            </Link>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/admin/events/${id}/points`}>
+              <Sparkles className="size-4" />
+              แต้ม
             </Link>
           </Button>
           <Button asChild variant="outline" size="sm">

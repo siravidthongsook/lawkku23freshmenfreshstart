@@ -1,0 +1,311 @@
+"use client";
+
+// Admin > per-event point config (plan §4.x/§7/§14). Toggles (check-in in/out, assessment +
+// requires-checkin), nullable point overrides (blank = use global default), and scan/assessment
+// windows. Mid-event changes are forward-only — we warn about that. Lazy-creates the config row.
+// Renders inside the admin layout (RequireRole + AppShell provided there).
+import { use, useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { toast } from "sonner";
+import { ArrowLeft, AlertTriangle } from "lucide-react";
+import { ApiError } from "@/lib/api";
+import { getEventPointConfig, updateEventPointConfig } from "@/lib/points-api";
+import type { EventPointConfig, EventPointConfigPatch } from "@/lib/points-types";
+import { isoToBangkokInput, bangkokInputToIso } from "@/components/admin-events/datetime";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/ui/error-state";
+
+// Toggle row helper.
+function Toggle({
+  label,
+  help,
+  checked,
+  onChange,
+}: {
+  label: string;
+  help?: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-start justify-between gap-3 rounded-md border p-3">
+      <span>
+        <span className="font-medium">{label}</span>
+        {help ? <span className="block text-xs text-muted-foreground">{help}</span> : null}
+      </span>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-0.5 size-4 rounded border-input accent-primary"
+      />
+    </label>
+  );
+}
+
+export default function EventPointConfigPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  const [config, setConfig] = useState<EventPointConfig | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // Form mirror. Point overrides are strings ("" = use default). Windows are Bangkok wall-clock.
+  const [form, setForm] = useState({
+    checkinInEnabled: true,
+    checkinOutEnabled: false,
+    assessmentEnabled: false,
+    assessmentRequiresCheckin: true,
+    checkinInPoints: "",
+    checkinOutPoints: "",
+    assessmentPoints: "",
+    scanInOpenAt: "",
+    scanInCloseAt: "",
+    scanOutOpenAt: "",
+    scanOutCloseAt: "",
+    assessmentOpenAt: "",
+    assessmentCloseAt: "",
+  });
+
+  const hydrate = useCallback((c: EventPointConfig | null) => {
+    setConfig(c);
+    // null config = no override row yet → fall back to documented defaults (in=on, out/assess=off).
+    setForm({
+      checkinInEnabled: c?.checkinInEnabled ?? true,
+      checkinOutEnabled: c?.checkinOutEnabled ?? false,
+      assessmentEnabled: c?.assessmentEnabled ?? false,
+      assessmentRequiresCheckin: c?.assessmentRequiresCheckin ?? true,
+      checkinInPoints: c?.checkinInPoints != null ? String(c.checkinInPoints) : "",
+      checkinOutPoints: c?.checkinOutPoints != null ? String(c.checkinOutPoints) : "",
+      assessmentPoints: c?.assessmentPoints != null ? String(c.assessmentPoints) : "",
+      scanInOpenAt: isoToBangkokInput(c?.scanInOpenAt),
+      scanInCloseAt: isoToBangkokInput(c?.scanInCloseAt),
+      scanOutOpenAt: isoToBangkokInput(c?.scanOutOpenAt),
+      scanOutCloseAt: isoToBangkokInput(c?.scanOutCloseAt),
+      assessmentOpenAt: isoToBangkokInput(c?.assessmentOpenAt),
+      assessmentCloseAt: isoToBangkokInput(c?.assessmentCloseAt),
+    });
+  }, []);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const res = await getEventPointConfig(id);
+      hydrate(res.config);
+      setLoaded(true);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "ไม่สามารถโหลดการตั้งค่าได้");
+    }
+  }, [id, hydrate]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  function setField<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
+    setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  // Empty point override → null (use global default); window empty → null (use fallback).
+  function numOrNull(v: string): number | null {
+    return v.trim() === "" ? null : Number(v);
+  }
+
+  async function save() {
+    setSaving(true);
+    try {
+      const patch: EventPointConfigPatch = {
+        checkin_in_enabled: form.checkinInEnabled,
+        checkin_out_enabled: form.checkinOutEnabled,
+        assessment_enabled: form.assessmentEnabled,
+        assessment_requires_checkin: form.assessmentRequiresCheckin,
+        checkin_in_points: numOrNull(form.checkinInPoints),
+        checkin_out_points: numOrNull(form.checkinOutPoints),
+        assessment_points: numOrNull(form.assessmentPoints),
+        scan_in_open_at: bangkokInputToIso(form.scanInOpenAt),
+        scan_in_close_at: bangkokInputToIso(form.scanInCloseAt),
+        scan_out_open_at: bangkokInputToIso(form.scanOutOpenAt),
+        scan_out_close_at: bangkokInputToIso(form.scanOutCloseAt),
+        assessment_open_at: bangkokInputToIso(form.assessmentOpenAt),
+        assessment_close_at: bangkokInputToIso(form.assessmentCloseAt),
+      };
+      const res = await updateEventPointConfig(id, patch);
+      hydrate(res.config);
+      toast.success("บันทึกการตั้งค่าแต้มแล้ว");
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "บันทึกไม่สำเร็จ");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (error) return <ErrorState message={error} onRetry={load} />;
+  if (!loaded) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-2">
+        <Button asChild variant="ghost" size="sm">
+          <Link href={`/admin/events/${id}`}>
+            <ArrowLeft className="size-4" /> ย้อนกลับ
+          </Link>
+        </Button>
+        <h1 className="text-xl font-semibold">ตั้งค่าแต้มของกิจกรรม</h1>
+      </div>
+
+      {/* Forward-only warning (plan §10/§14). */}
+      <p className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+        การเปลี่ยนค่าแต้มระหว่างกิจกรรมมีผลเฉพาะรายการใหม่ (forward-only) ไม่ย้อนหลังแต้มที่แจกไปแล้ว
+      </p>
+
+      {/* Toggles */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">เปิด/ปิดการเก็บแต้ม</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-2">
+          <Toggle
+            label="เช็คอินเข้า"
+            checked={form.checkinInEnabled}
+            onChange={(v) => setField("checkinInEnabled", v)}
+          />
+          <Toggle
+            label="เช็คอินออก"
+            checked={form.checkinOutEnabled}
+            onChange={(v) => setField("checkinOutEnabled", v)}
+          />
+          <Toggle
+            label="แบบประเมิน"
+            checked={form.assessmentEnabled}
+            onChange={(v) => setField("assessmentEnabled", v)}
+          />
+          <Toggle
+            label="ต้องเช็คอินก่อนทำแบบประเมิน"
+            help="กันการฟาร์มแต้มข้ามงาน"
+            checked={form.assessmentRequiresCheckin}
+            onChange={(v) => setField("assessmentRequiresCheckin", v)}
+          />
+        </CardContent>
+      </Card>
+
+      {/* Point overrides */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">ค่าแต้มเฉพาะกิจกรรม</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">เว้นว่าง = ใช้ค่าเริ่มต้นทั้งระบบ</p>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <OverrideField
+              label="เช็คอินเข้า"
+              value={form.checkinInPoints}
+              onChange={(v) => setField("checkinInPoints", v)}
+            />
+            <OverrideField
+              label="เช็คอินออก"
+              value={form.checkinOutPoints}
+              onChange={(v) => setField("checkinOutPoints", v)}
+            />
+            <OverrideField
+              label="แบบประเมิน"
+              value={form.assessmentPoints}
+              onChange={(v) => setField("assessmentPoints", v)}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Windows */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">ช่วงเวลา (เวลาไทย)</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            เว้นว่าง = ใช้ช่วงเวลาเริ่มต้น (สแกนเข้า=ช่วงเช็คอินของงาน, สแกนออก=หลังจบงานตาม fallback)
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <WindowField label="สแกนเข้า เปิด" value={form.scanInOpenAt} onChange={(v) => setField("scanInOpenAt", v)} />
+            <WindowField label="สแกนเข้า ปิด" value={form.scanInCloseAt} onChange={(v) => setField("scanInCloseAt", v)} />
+            <WindowField label="สแกนออก เปิด" value={form.scanOutOpenAt} onChange={(v) => setField("scanOutOpenAt", v)} />
+            <WindowField label="สแกนออก ปิด" value={form.scanOutCloseAt} onChange={(v) => setField("scanOutCloseAt", v)} />
+            <WindowField
+              label="แบบประเมิน เปิด"
+              value={form.assessmentOpenAt}
+              onChange={(v) => setField("assessmentOpenAt", v)}
+            />
+            <WindowField
+              label="แบบประเมิน ปิด"
+              value={form.assessmentCloseAt}
+              onChange={(v) => setField("assessmentCloseAt", v)}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="flex items-center justify-between">
+        <Button asChild variant="outline">
+          <Link href={`/admin/events/${id}/assessment`}>แก้แบบประเมิน →</Link>
+        </Button>
+        <Button onClick={save} disabled={saving}>
+          {saving ? "กำลังบันทึก…" : "บันทึก"}
+        </Button>
+      </div>
+      {config == null ? (
+        <p className="text-xs text-muted-foreground">ยังไม่ได้ตั้งค่าเฉพาะกิจกรรมนี้ (ใช้ค่าเริ่มต้นทั้งหมด)</p>
+      ) : null}
+    </div>
+  );
+}
+
+function OverrideField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label>{label}</Label>
+      <Input
+        type="number"
+        inputMode="numeric"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="ค่าเริ่มต้น"
+      />
+    </div>
+  );
+}
+
+function WindowField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label>{label}</Label>
+      <Input type="datetime-local" value={value} onChange={(e) => onChange(e.target.value)} />
+    </div>
+  );
+}

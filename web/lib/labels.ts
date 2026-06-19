@@ -248,6 +248,19 @@ export function pointResultLabel(code: string | null | undefined): string {
   return lookup(POINT_RESULT, code);
 }
 
+// ---- staff budget reason (staff_budget_reason enum, src/db/schema/enums.ts) ----
+// Thai labels for the staff-budget ledger (admin budget detail page).
+const BUDGET_REASON: Record<string, string> = {
+  topup: "เติมงบ",
+  grant_issue: "สร้าง QR แต้ม (หักงบ)",
+  grant_refund: "คืนงบ (สิทธิ์เหลือ)",
+  manual_grant: "แจกมือให้นักศึกษา (หักงบ)",
+  admin_adjust: "ปรับงบโดยผู้ดูแล",
+};
+export function budgetReasonLabel(r: string | null | undefined): string {
+  return lookup(BUDGET_REASON, r);
+}
+
 // ---- audit entity types (entityType literals across src/modules) ----
 const AUDIT_ENTITY: Record<string, string> = {
   auth: "การยืนยันตัวตน",

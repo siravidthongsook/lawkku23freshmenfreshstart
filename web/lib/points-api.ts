@@ -5,18 +5,29 @@
 
 import { apiGet, apiPost, apiPatch, apiPut } from "@/lib/api";
 import type {
+  AdminUserPointsResponse,
   AnswerMap,
+  AssessmentFormResponse,
   AssessmentGetResponse,
   AssessmentSubmitOutcome,
+  BudgetMutationResponse,
   ClaimOutcome,
   ConnectOutcome,
   ConnectQrResponse,
   ConnectionsResponse,
+  EventPointConfigPatch,
+  EventPointConfigResponse,
   FavoriteResponse,
   IssueGrantResponse,
   LeaderboardResponse,
   LedgerDetailResponse,
+  PointSettingsPatch,
+  PointSettingsResponse,
+  StaffBudgetDetailResponse,
   StaffBudgetResponse,
+  StaffBudgetsResponse,
+  StaffGrantsResponse,
+  StudentSearchResponse,
   WalletResponse,
 } from "@/lib/points-types";
 
@@ -126,72 +137,104 @@ export function reverseOwnGrant(ledgerId: string, reason: string): Promise<{ res
   return apiPost<{ result: string }>(`/points/grant/${ledgerId}/reverse`, { reason });
 }
 
+// GET /points/student-search — staff/admin typeahead to pick a student for a manual grant.
+export function searchStudents(q: string): Promise<StudentSearchResponse> {
+  return apiGet<StudentSearchResponse>(`/points/student-search${qs({ q })}`);
+}
+
 // ===================== ADMIN ONLY (Phase 6b) =====================
 
-export function getStaffBudgets(): Promise<{ staff: unknown[] }> {
-  return apiGet<{ staff: unknown[] }>("/admin/staff/budgets");
+// GET /admin/staff/budgets — overview of every staff member's budget (+ low-budget flag).
+export function getStaffBudgets(): Promise<StaffBudgetsResponse> {
+  return apiGet<StaffBudgetsResponse>("/admin/staff/budgets");
 }
-export function getStaffBudget(userId: string): Promise<unknown> {
-  return apiGet<unknown>(`/admin/staff/${userId}/point-budget`);
+// GET /admin/staff/:id/point-budget — budget + full budget ledger + active grant tokens.
+export function getStaffBudget(userId: string): Promise<StaffBudgetDetailResponse> {
+  return apiGet<StaffBudgetDetailResponse>(`/admin/staff/${userId}/point-budget`);
 }
+// POST topup — admin adds to a staff member's budget (+ only); reason required.
 export function topupStaffBudget(
   userId: string,
   body: { amount: number; reason: string },
-): Promise<unknown> {
-  return apiPost<unknown>(`/admin/staff/${userId}/point-budget/topup`, body);
+): Promise<BudgetMutationResponse> {
+  return apiPost<BudgetMutationResponse>(`/admin/staff/${userId}/point-budget/topup`, body);
 }
+// POST adjust — admin signed correction (admin_adjust); rejects would_go_negative.
 export function adjustStaffBudget(
   userId: string,
   body: { delta: number; reason: string },
-): Promise<unknown> {
-  return apiPost<unknown>(`/admin/staff/${userId}/point-budget/adjust`, body);
+): Promise<BudgetMutationResponse> {
+  return apiPost<BudgetMutationResponse>(`/admin/staff/${userId}/point-budget/adjust`, body);
 }
+// POST topup-bulk — event-day: top up many staff in one tx.
 export function topupStaffBudgetBulk(body: {
   user_ids: string[];
   amount: number;
   reason: string;
-}): Promise<unknown> {
-  return apiPost<unknown>("/admin/staff/point-budget/topup-bulk", body);
+}): Promise<{ result: string; updated: { userId: string; budget: number }[] }> {
+  return apiPost("/admin/staff/point-budget/topup-bulk", body);
 }
+// GET /admin/staff/:id/grants — per-head grants this staff member gave (QR + manual).
 export function getStaffGrants(
   userId: string,
   opts: { method?: "qr" | "manual"; q?: string } = {},
-): Promise<unknown> {
-  return apiGet<unknown>(`/admin/staff/${userId}/grants${qs({ method: opts.method, q: opts.q })}`);
+): Promise<StaffGrantsResponse> {
+  return apiGet<StaffGrantsResponse>(
+    `/admin/staff/${userId}/grants${qs({ method: opts.method, q: opts.q })}`,
+  );
 }
-export function getPointSettings(): Promise<unknown> {
-  return apiGet<unknown>("/admin/point-settings");
+// GET /admin/point-settings — singleton settings (cutoff + global defaults).
+export function getPointSettings(): Promise<PointSettingsResponse> {
+  return apiGet<PointSettingsResponse>("/admin/point-settings");
 }
-export function updatePointSettings(patch: Record<string, unknown>): Promise<unknown> {
-  return apiPatch<unknown>("/admin/point-settings", patch);
+// PATCH /admin/point-settings — partial update; cutoff is sensitive (reason recorded).
+export function updatePointSettings(
+  patch: PointSettingsPatch,
+): Promise<{ result: string } & PointSettingsResponse> {
+  return apiPatch("/admin/point-settings", patch);
 }
-export function getEventPointConfig(eventId: string): Promise<unknown> {
-  return apiGet<unknown>(`/admin/events/${eventId}/point-config`);
+// GET /admin/events/:id/point-config — per-event override (null = all defaults).
+export function getEventPointConfig(eventId: string): Promise<EventPointConfigResponse> {
+  return apiGet<EventPointConfigResponse>(`/admin/events/${eventId}/point-config`);
 }
+// PATCH /admin/events/:id/point-config — set/clear per-event overrides (lazy-creates the row).
 export function updateEventPointConfig(
   eventId: string,
-  patch: Record<string, unknown>,
-): Promise<unknown> {
-  return apiPatch<unknown>(`/admin/events/${eventId}/point-config`, patch);
+  patch: EventPointConfigPatch,
+): Promise<{ result: string } & EventPointConfigResponse> {
+  return apiPatch(`/admin/events/${eventId}/point-config`, patch);
 }
-export function getAdminUserPoints(userId: string): Promise<unknown> {
-  return apiGet<unknown>(`/admin/users/${userId}/points`);
+// GET /admin/users/:id/points — full student ledger (review before reverse/correct).
+export function getAdminUserPoints(
+  userId: string,
+  opts: { limit?: number; offset?: number } = {},
+): Promise<AdminUserPointsResponse> {
+  return apiGet<AdminUserPointsResponse>(
+    `/admin/users/${userId}/points${qs({ limit: opts.limit, offset: opts.offset })}`,
+  );
 }
+// POST reverse — admin reverses ANY ledger entry (bypasses cutoff); reason required.
 export function reverseUserPoint(
   userId: string,
   body: { ledger_id: string; reason: string },
-): Promise<unknown> {
-  return apiPost<unknown>(`/admin/users/${userId}/points/reverse`, body);
+): Promise<{ result: string }> {
+  return apiPost<{ result: string }>(`/admin/users/${userId}/points/reverse`, body);
 }
+// POST correct — admin freeform correcting entry (correction_add); reason required.
 export function correctUserPoint(
   userId: string,
   body: { delta: number; reason: string },
-): Promise<unknown> {
-  return apiPost<unknown>(`/admin/users/${userId}/points/correct`, body);
+): Promise<{ result: string }> {
+  return apiPost<{ result: string }>(`/admin/users/${userId}/points/correct`, body);
 }
-export function getAssessmentForm(eventId: string): Promise<unknown> {
-  return apiGet<unknown>(`/admin/events/${eventId}/forms/assessment`);
+// GET /admin/events/:id/forms/assessment — active assessment form (null if none built).
+export function getAssessmentForm(eventId: string): Promise<AssessmentFormResponse> {
+  return apiGet<AssessmentFormResponse>(`/admin/events/${eventId}/forms/assessment`);
 }
-export function putAssessmentForm(eventId: string, schema: unknown): Promise<unknown> {
-  return apiPut<unknown>(`/admin/events/${eventId}/forms/assessment`, { schema });
+// PUT /admin/events/:id/forms/assessment — save assessment form (in-place or fork a version).
+export function putAssessmentForm(
+  eventId: string,
+  schema: unknown,
+): Promise<{ form: NonNullable<AssessmentFormResponse["form"]>; versioned?: boolean }> {
+  return apiPut(`/admin/events/${eventId}/forms/assessment`, { schema });
 }

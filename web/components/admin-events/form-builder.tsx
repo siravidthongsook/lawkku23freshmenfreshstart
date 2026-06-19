@@ -62,6 +62,9 @@ type Props = {
   versionNumber: number | null;
   // Pass the just-saved form row up so the page can set state directly (never refetch-to-empty).
   onSaved: (form: SavedForm) => void;
+  // Assessment mode: single PUT save (no separate "new version" button). When provided this REPLACES
+  // the registration-form PATCH/POST endpoints, so the same builder UI drives the assessment form too.
+  saveSchema?: (schema: FormSchema) => Promise<{ form: SavedForm; versioned?: boolean }>;
 };
 
 // Detect structural diff (mirrors backend isStructuralChange): add/remove key, or type/required/options change.
@@ -88,7 +91,7 @@ function freshKey(): string {
   return `field_${Date.now().toString(36)}_${keyCounter}`;
 }
 
-export function FormBuilder({ eventId, initialFields, versionNumber, onSaved }: Props) {
+export function FormBuilder({ eventId, initialFields, versionNumber, onSaved, saveSchema }: Props) {
   const [fields, setFields] = useState<FormField[]>(initialFields);
   const [saving, setSaving] = useState(false);
   const [reasonOpen, setReasonOpen] = useState(false);
@@ -179,17 +182,20 @@ export function FormBuilder({ eventId, initialFields, versionNumber, onSaved }: 
     return parsed.data;
   }
 
-  // Safe save: PATCH. Backend decides in-place vs auto-version when no submissions exist.
+  // Safe save: PATCH (registration) or the injected saveSchema (assessment PUT). Backend decides
+  // in-place vs auto-version when submissions exist.
   async function handleSave() {
     const schema = buildSchema();
     if (!schema || saving) return;
     setSaving(true);
     try {
       // PATCH returns the resulting form row + whether it forked a version. Hand the row up to re-baseline.
-      const res = await apiPatch<{ form: SavedForm; versioned: boolean }>(
-        `/admin/events/${eventId}/form`,
-        { schema },
-      );
+      const res = saveSchema
+        ? await saveSchema(schema)
+        : await apiPatch<{ form: SavedForm; versioned: boolean }>(
+            `/admin/events/${eventId}/form`,
+            { schema },
+          );
       toast.success(res.versioned ? "บันทึกเป็นฟอร์มเวอร์ชันใหม่แล้ว" : "บันทึกฟอร์มแล้ว");
       onSaved(res.form);
     } catch (err) {
@@ -238,14 +244,17 @@ export function FormBuilder({ eventId, initialFields, versionNumber, onSaved }: 
           <Button onClick={handleSave} disabled={saving}>
             {saving ? "กำลังบันทึก…" : "บันทึก"}
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-muted-foreground"
-            onClick={() => setReasonOpen(true)}
-          >
-            บันทึกเป็นเวอร์ชันใหม่…
-          </Button>
+          {/* Explicit new-version is a registration-form action only; assessment saves via a single PUT. */}
+          {!saveSchema ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground"
+              onClick={() => setReasonOpen(true)}
+            >
+              บันทึกเป็นเวอร์ชันใหม่…
+            </Button>
+          ) : null}
         </div>
       </div>
 

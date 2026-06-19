@@ -156,10 +156,23 @@ export type StaffBudgetResponse = {
     reason_code: string;
     grant_token_id: string | null;
     target_user_id: string | null;
+    // present on the admin detail ledger; the /my-budget endpoint may omit it (self-reverse needs it).
+    related_ledger_id?: string | null;
     reason: string | null;
     created_at: string;
   }[];
 };
+// GET /points/student-search — minimal student row for the staff/admin manual-give typeahead.
+// Only identify-able fields (no email/phone/balance) — mirrors the backend response exactly.
+export type StudentSearchResult = {
+  id: string;
+  fullName: string;
+  nickname: string | null;
+  studentId: string | null;
+  groupNumber: number | null;
+};
+export type StudentSearchResponse = { students: StudentSearchResult[] };
+
 export type IssueGrantResponse = {
   token: string;
   tokenId: string;
@@ -168,5 +181,138 @@ export type IssueGrantResponse = {
   expiresAt: string | null;
 };
 
-// Re-export AnswerMap so assessment-submit callers have one import surface.
-export type { AnswerMap };
+// === Admin staff-budget management (plan §4.7/§14) ===
+
+// GET /admin/staff/budgets — one row per checkin_staff member (overview table).
+export type StaffBudgetOverviewRow = {
+  id: string;
+  fullName: string;
+  username: string | null;
+  budget: number;
+  status: "active" | "disabled";
+  lowBudget: boolean; // server flag: budget < 10 → needs topup
+};
+export type StaffBudgetsResponse = { staff: StaffBudgetOverviewRow[] };
+
+// One row of a staff member's budget ledger (GET /admin/staff/:id/point-budget → ledger[]).
+export type StaffBudgetLedgerRow = {
+  id: string;
+  delta: number; // + topup/refund, − grant_issue/manual_grant
+  reason_code: string; // staff_budget_reason enum
+  grant_token_id: string | null;
+  target_user_id: string | null;
+  related_ledger_id: string | null;
+  reason: string | null;
+  created_by_user_id: string | null;
+  created_at: string;
+};
+
+// One active grant token a staff member issued (GET /admin/staff/:id/point-budget → activeTokens[]).
+export type StaffActiveToken = {
+  id: string;
+  pointsValue: number;
+  maxClaims: number;
+  claimsUsed: number;
+  status: string;
+  createdAt: string;
+};
+
+// GET /admin/staff/:userId/point-budget — detail page payload.
+export type StaffBudgetDetailResponse = {
+  budget: number;
+  ledger: StaffBudgetLedgerRow[];
+  activeTokens: StaffActiveToken[];
+};
+
+// POST topup/adjust budget result.
+export type BudgetMutationResponse = { result: string; budget: number };
+
+// GET /admin/staff/:userId/grants — per-head grants this staff member gave (QR + manual).
+export type StaffGrantRow = {
+  method: "qr" | "manual";
+  studentUserId: string;
+  studentName: string;
+  studentNickname: string | null;
+  groupNumber: number | null;
+  points: number;
+  eventId: string | null;
+  grantTokenId: string | null;
+  ledgerId: string | null;
+  reason: string | null;
+  createdAt: string;
+};
+export type StaffGrantsResponse = { grants: StaffGrantRow[] };
+
+// === Admin point-settings (plan §5/§7) ===
+export type PointSettings = {
+  cutoffAt: string | null;
+  defaultCheckinInPoints: number;
+  defaultCheckinOutPoints: number;
+  defaultAssessmentPoints: number;
+  scanOutFallbackHours: number;
+  peerEnabled: boolean;
+  peerPoints: number;
+  peerCooldownSec: number;
+  staffReverseWindowMin: number;
+  updatedAt: string;
+};
+export type PointSettingsResponse = { settings: PointSettings };
+// PATCH body — all optional; snake_case wire keys (mirrors pointSettingsPatchBody on the backend).
+export type PointSettingsPatch = Partial<{
+  cutoff_at: string | null;
+  default_checkin_in_points: number;
+  default_checkin_out_points: number;
+  default_assessment_points: number;
+  scan_out_fallback_hours: number;
+  peer_enabled: boolean;
+  peer_points: number;
+  peer_cooldown_sec: number;
+  staff_reverse_window_min: number;
+  reason: string;
+}>;
+
+// === Admin per-event point-config (plan §4.x/§7) ===
+export type EventPointConfig = {
+  eventId: string;
+  checkinInEnabled: boolean;
+  checkinOutEnabled: boolean;
+  assessmentEnabled: boolean;
+  assessmentRequiresCheckin: boolean;
+  checkinInPoints: number | null; // null = use global default
+  checkinOutPoints: number | null;
+  assessmentPoints: number | null;
+  scanInOpenAt: string | null;
+  scanInCloseAt: string | null;
+  scanOutOpenAt: string | null;
+  scanOutCloseAt: string | null;
+  assessmentOpenAt: string | null;
+  assessmentCloseAt: string | null;
+  updatedAt: string;
+};
+// null config = no override row yet (all global defaults).
+export type EventPointConfigResponse = { config: EventPointConfig | null };
+export type EventPointConfigPatch = Partial<{
+  checkin_in_enabled: boolean;
+  checkin_out_enabled: boolean;
+  assessment_enabled: boolean;
+  assessment_requires_checkin: boolean;
+  checkin_in_points: number | null;
+  checkin_out_points: number | null;
+  assessment_points: number | null;
+  scan_in_open_at: string | null;
+  scan_in_close_at: string | null;
+  scan_out_open_at: string | null;
+  scan_out_close_at: string | null;
+  assessment_open_at: string | null;
+  assessment_close_at: string | null;
+}>;
+
+// === Admin user-ledger view (plan §4.8) — same wire shape as the wallet. ===
+export type AdminUserPointsResponse = WalletResponse;
+
+// === Admin assessment form builder (reuses form-version machinery, formType="assessment") ===
+export type AssessmentFormRow = { id: string; versionNumber: number; schemaJson: FormSchema } | null;
+export type AssessmentFormResponse = { form: AssessmentFormRow };
+
+// Re-export AnswerMap + FormSchema so callers have one import surface.
+export type { AnswerMap, FormSchema };

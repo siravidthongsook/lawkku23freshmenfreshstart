@@ -3,9 +3,11 @@
 // /leaderboard — app-wide ranked students (balance DESC, earliest-to-reach tiebreak). Login-only (any role).
 // Sticky "my rank" strip so the caller sees where they stand even off-page (plan §14); optional บรรพ filter.
 import { useCallback, useEffect, useState } from "react";
-import { Trophy, Medal } from "lucide-react";
+import { Trophy, Medal, Download } from "lucide-react";
+import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { ApiError } from "@/lib/api";
+import { downloadFile } from "@/components/admin-tools/download";
 import { getLeaderboard } from "@/lib/points-api";
 import type { LeaderboardRow } from "@/lib/points-types";
 import { RequireRole } from "@/components/guards";
@@ -96,10 +98,34 @@ function LeaderboardInner() {
   }, [load, group, reloadKey]);
 
   const hasMore = rows.length < total;
+  const isAdmin = user?.role === "admin";
+  const [exporting, setExporting] = useState(false);
+
+  // Admin CSV export — respects the current บรรพ filter (plan §5/§8). Goes through the /api proxy.
+  async function exportCsv() {
+    setExporting(true);
+    try {
+      const query = group === "all" ? "" : `?group_number=${group}`;
+      const { rowCount } = await downloadFile(`/admin/leaderboard/export${query}`, "leaderboard.csv");
+      toast.success(rowCount != null ? `ส่งออก ${rowCount} รายการแล้ว` : "ส่งออกแล้ว");
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "ส่งออกไม่สำเร็จ");
+    } finally {
+      setExporting(false);
+    }
+  }
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold">อันดับแต้ม</h1>
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="text-xl font-semibold">อันดับแต้ม</h1>
+        {isAdmin ? (
+          <Button variant="outline" size="sm" onClick={exportCsv} disabled={exporting}>
+            <Download className="size-4" />
+            {exporting ? "กำลังส่งออก…" : "ส่งออก CSV"}
+          </Button>
+        ) : null}
+      </div>
 
       {/* Sticky my-rank strip (plan §14) — only meaningful for ranked students. */}
       {myRank && (
