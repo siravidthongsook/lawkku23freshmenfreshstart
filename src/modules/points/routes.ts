@@ -10,12 +10,24 @@ import { requireAuth, requirePermission } from "../../lib/auth-middleware";
 import {
   canAdjustPoints,
   canDeductPoints,
+  canManagePointConfig,
   canReverseOwnRecentGrant,
   canTopupStaffBudget,
 } from "../../lib/permissions";
 import { AppError } from "../../lib/errors";
 import { getBalance, listUserLedger, serializeLedgerEntry } from "./service";
 import { adjustBudget, getStaffBudget } from "./budget-service";
+import {
+  getEventPointConfig,
+  getPointSettings,
+  serializeEventPointConfig,
+  serializePointSettings,
+  updatePointSettings,
+  upsertEventPointConfig,
+} from "./config-service";
+import { listLeaderboard, listLeaderboardForExport, rankOf } from "./leaderboard-service";
+import { listStaffGrants } from "./grants-report-service";
+import { toCsv } from "../exports/csv-out";
 import { claimGrantToken, issueGrantToken, revokeGrantToken } from "./grant-service";
 import {
   adminCorrect,
@@ -52,6 +64,36 @@ router.get("/me/points", requireAuth, zValidator("query", ledgerQuery), async (c
     total: page.total,
     limit,
     offset,
+  });
+});
+
+// =====================================================================
+// LEADERBOARD — app-wide ranked students (plan §5). Authenticated users only (§12.3 "login only");
+// no special permission — any role may view (staff/admin just won't appear in it).
+// =====================================================================
+
+const leaderboardQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+  group_number: z.coerce.number().int().min(1).optional(), // optional view-by-group filter
+});
+
+// GET /leaderboard — ranked active students (balance DESC, earliest-to-reach tiebreak), paginated.
+// Also returns the CALLER'S own app-wide rank ("myRank") so they see where they stand off-page;
+// null when the caller isn't a ranked student (staff/admin/disabled).
+router.get("/leaderboard", requireAuth, zValidator("query", leaderboardQuery), async (c) => {
+  const user = c.get("user");
+  const { limit, offset, group_number } = c.req.valid("query");
+  const [page, mine] = await Promise.all([
+    listLeaderboard({ groupNumber: group_number ?? null, limit, offset }),
+    rankOf(user.id),
+  ]);
+  return c.json({
+    leaderboard: page.rows,
+    total: page.total,
+    limit,
+    offset,
+    myRank: mine, // { rank, pointsBalance } | null
   });
 });
 
@@ -515,6 +557,179 @@ router.post(
     // Scoped to the caller — a connection id they don't own returns not_found (404), not someone else's row.
     const res = await setFavorite({ scannerUserId: user.id, connectionId: id, favorite });
     return c.json(res, res.result === "not_found" ? 404 : 200);
+  },
+);
+
+// =====================================================================
+// ADMIN — point-settings (cutoff freeze + global defaults), per-event config,
+// staff grants listing, leaderboard export (plan §5/§7)
+// =====================================================================
+
+// GET /admin/point-settings — current singleton settings (lazy-creates row 1 on first read).
+router.get(
+  "/admin/point-settings",
+  requireAuth,
+  requirePermission(canManagePointConfig),
+  async (c) => {
+    const settings = await getPointSettings();
+    return c.json({ settings: serializePointSettings(settings) });
+  },
+);
+
+// PATCH body — all fields optional; cutoff_at accepts null (= unfreeze). Bounds mirror the schema.
+const pointSettingsPatchBody = z
+  .object({
+    cutoff_at: z.coerce.date().nullable().optional(),
+    default_checkin_in_points: z.coerce.number().int().min(0).max(100000).optional(),
+    default_checkin_out_points: z.coerce.number().int().min(0).max(100000).optional(),
+    default_assessment_points: z.coerce.number().int().min(0).max(100000).optional(),
+    scan_out_fallback_hours: z.coerce.number().int().min(0).max(168).optional(),
+    peer_enabled: z.boolean().optional(),
+    peer_points: z.coerce.number().int().min(0).max(100000).optional(),
+    peer_cooldown_sec: z.coerce.number().int().min(0).max(86400).optional(),
+    staff_reverse_window_min: z.coerce.number().int().min(0).max(1440).optional(),
+    reason: z.string().min(1).optional(), // recorded with the audit entry (cutoff is sensitive)
+  })
+  .refine((b) => Object.keys(b).some((k) => k !== "reason"), {
+    message: "at least one setting must be provided",
+  });
+
+// PATCH /admin/point-settings — edit cutoff + global defaults/peer/reverse-window (plan §5/§7).
+router.patch(
+  "/admin/point-settings",
+  requireAuth,
+  requirePermission(canManagePointConfig),
+  zValidator("json", pointSettingsPatchBody),
+  async (c) => {
+    const admin = c.get("user");
+    const b = c.req.valid("json");
+    // Map snake_case wire keys → camelCase patch (only include keys actually present).
+    const patch: Record<string, unknown> = {};
+    if ("cutoff_at" in b) patch.cutoffAt = b.cutoff_at ?? null;
+    if (b.default_checkin_in_points !== undefined) patch.defaultCheckinInPoints = b.default_checkin_in_points;
+    if (b.default_checkin_out_points !== undefined) patch.defaultCheckinOutPoints = b.default_checkin_out_points;
+    if (b.default_assessment_points !== undefined) patch.defaultAssessmentPoints = b.default_assessment_points;
+    if (b.scan_out_fallback_hours !== undefined) patch.scanOutFallbackHours = b.scan_out_fallback_hours;
+    if (b.peer_enabled !== undefined) patch.peerEnabled = b.peer_enabled;
+    if (b.peer_points !== undefined) patch.peerPoints = b.peer_points;
+    if (b.peer_cooldown_sec !== undefined) patch.peerCooldownSec = b.peer_cooldown_sec;
+    if (b.staff_reverse_window_min !== undefined) patch.staffReverseWindowMin = b.staff_reverse_window_min;
+    const settings = await updatePointSettings({
+      patch,
+      actorUserId: admin.id,
+      reason: b.reason ?? null,
+    });
+    return c.json({ result: "updated", settings: serializePointSettings(settings) });
+  },
+);
+
+const eventIdParam = z.object({ eventId: z.string().uuid() });
+
+// GET /admin/events/:eventId/point-config — per-event override row (null = all global defaults).
+router.get(
+  "/admin/events/:eventId/point-config",
+  requireAuth,
+  requirePermission(canManagePointConfig),
+  async (c) => {
+    const { eventId } = eventIdParam.parse(c.req.param());
+    const config = await getEventPointConfig(eventId);
+    return c.json({ config: serializeEventPointConfig(config) });
+  },
+);
+
+// PATCH body — toggles + nullable point/window overrides. Point values & windows accept null (= use default).
+const eventConfigPatchBody = z
+  .object({
+    checkin_in_enabled: z.boolean().optional(),
+    checkin_out_enabled: z.boolean().optional(),
+    assessment_enabled: z.boolean().optional(),
+    assessment_requires_checkin: z.boolean().optional(),
+    checkin_in_points: z.coerce.number().int().min(0).max(100000).nullable().optional(),
+    checkin_out_points: z.coerce.number().int().min(0).max(100000).nullable().optional(),
+    assessment_points: z.coerce.number().int().min(0).max(100000).nullable().optional(),
+    scan_in_open_at: z.coerce.date().nullable().optional(),
+    scan_in_close_at: z.coerce.date().nullable().optional(),
+    scan_out_open_at: z.coerce.date().nullable().optional(),
+    scan_out_close_at: z.coerce.date().nullable().optional(),
+    assessment_open_at: z.coerce.date().nullable().optional(),
+    assessment_close_at: z.coerce.date().nullable().optional(),
+  })
+  .refine((b) => Object.keys(b).length > 0, { message: "at least one field must be provided" });
+
+// PATCH /admin/events/:eventId/point-config — set per-event overrides (lazy-creates the row, §15.3).
+router.patch(
+  "/admin/events/:eventId/point-config",
+  requireAuth,
+  requirePermission(canManagePointConfig),
+  zValidator("json", eventConfigPatchBody),
+  async (c) => {
+    const { eventId } = eventIdParam.parse(c.req.param());
+    const admin = c.get("user");
+    const b = c.req.valid("json");
+    // snake_case wire → camelCase column patch (only present keys; null is meaningful = clear override).
+    const patch: Record<string, unknown> = {};
+    if (b.checkin_in_enabled !== undefined) patch.checkinInEnabled = b.checkin_in_enabled;
+    if (b.checkin_out_enabled !== undefined) patch.checkinOutEnabled = b.checkin_out_enabled;
+    if (b.assessment_enabled !== undefined) patch.assessmentEnabled = b.assessment_enabled;
+    if (b.assessment_requires_checkin !== undefined)
+      patch.assessmentRequiresCheckin = b.assessment_requires_checkin;
+    if ("checkin_in_points" in b) patch.checkinInPoints = b.checkin_in_points ?? null;
+    if ("checkin_out_points" in b) patch.checkinOutPoints = b.checkin_out_points ?? null;
+    if ("assessment_points" in b) patch.assessmentPoints = b.assessment_points ?? null;
+    if ("scan_in_open_at" in b) patch.scanInOpenAt = b.scan_in_open_at ?? null;
+    if ("scan_in_close_at" in b) patch.scanInCloseAt = b.scan_in_close_at ?? null;
+    if ("scan_out_open_at" in b) patch.scanOutOpenAt = b.scan_out_open_at ?? null;
+    if ("scan_out_close_at" in b) patch.scanOutCloseAt = b.scan_out_close_at ?? null;
+    if ("assessment_open_at" in b) patch.assessmentOpenAt = b.assessment_open_at ?? null;
+    if ("assessment_close_at" in b) patch.assessmentCloseAt = b.assessment_close_at ?? null;
+    const config = await upsertEventPointConfig({ eventId, patch, actorUserId: admin.id });
+    return c.json({ result: "updated", config: serializeEventPointConfig(config) });
+  },
+);
+
+const staffGrantsQuery = z.object({
+  method: z.enum(["qr", "manual"]).optional(),
+  q: z.string().optional(),
+});
+
+// GET /admin/staff/:userId/grants — every student this staff member granted to (QR + manual), §14.
+router.get(
+  "/admin/staff/:userId/grants",
+  requireAuth,
+  requirePermission(canTopupStaffBudget),
+  zValidator("query", staffGrantsQuery),
+  async (c) => {
+    const { userId } = userIdParam.parse(c.req.param());
+    const { method, q } = c.req.valid("query");
+    const res = await listStaffGrants({ staffUserId: userId, method, q: q ?? null });
+    return c.json(res);
+  },
+);
+
+const exportQuery = z.object({ group_number: z.coerce.number().int().min(1).optional() });
+
+// GET /admin/leaderboard/export — full ranked CSV for results announcement (plan §5). Admin only.
+router.get(
+  "/admin/leaderboard/export",
+  requireAuth,
+  requirePermission(canManagePointConfig),
+  zValidator("query", exportQuery),
+  async (c) => {
+    const { group_number } = c.req.valid("query");
+    const rows = await listLeaderboardForExport(group_number ?? null);
+    const records = rows.map((r) => ({
+      rank: r.rank,
+      full_name: r.fullName,
+      nickname: r.nickname ?? "",
+      group_number: r.groupNumber ?? "",
+      points_balance: r.pointsBalance,
+    }));
+    const csv = toCsv(records, ["rank", "full_name", "nickname", "group_number", "points_balance"]);
+    c.header("Content-Type", "text/csv; charset=utf-8");
+    c.header("Content-Disposition", `attachment; filename="leaderboard.csv"`);
+    c.header("X-Row-Count", String(records.length));
+    c.header("Access-Control-Expose-Headers", "X-Row-Count, Content-Disposition");
+    return c.body(csv);
   },
 );
 

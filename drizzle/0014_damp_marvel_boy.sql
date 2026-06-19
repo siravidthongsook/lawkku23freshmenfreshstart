@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS "users_leaderboard_idx" ON "users" USING btree ("role","status","points_balance" DESC NULLS LAST,"last_positive_at");

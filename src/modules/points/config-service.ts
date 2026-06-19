@@ -7,6 +7,7 @@ import {
   type PointSettingsRow,
 } from "../../db/schema/point-config";
 import type { Event } from "../../db/schema/events";
+import { writeAudit } from "../../lib/audit";
 
 type Exec = Tx | typeof db;
 
@@ -120,4 +121,144 @@ export function scanOutWindow(
   if (event.eventEndAt == null) return { open: null, close: null };
   const close = new Date(event.eventEndAt.getTime() + settings.scanOutFallbackHours * 60 * 60 * 1000);
   return { open: event.eventEndAt, close };
+}
+
+// === Admin mutations (plan §7, gated canManagePointConfig in the routes) ===
+
+// Patchable global point-settings fields. Only these keys are accepted from the wire; everything
+// else (id, updatedAt) is server-managed. cutoffAt accepts null = "unfreeze".
+export type PointSettingsPatch = Partial<{
+  cutoffAt: Date | null;
+  defaultCheckinInPoints: number;
+  defaultCheckinOutPoints: number;
+  defaultAssessmentPoints: number;
+  scanOutFallbackHours: number;
+  peerEnabled: boolean;
+  peerPoints: number;
+  peerCooldownSec: number;
+  staffReverseWindowMin: number;
+}>;
+
+// Update the singleton point-settings (plan §5/§7). Lazy-creates row 1 first so a PATCH on a fresh
+// DB works. cutoffAt is the reward-deciding freeze time → change is audited with the actor's reason.
+export async function updatePointSettings(args: {
+  patch: PointSettingsPatch;
+  actorUserId: string;
+  reason: string | null;
+}): Promise<PointSettingsRow> {
+  return db.transaction(async (tx) => {
+    const before = await getPointSettings(tx); // lazy-creates the singleton if missing
+    await tx
+      .update(pointSettings)
+      .set({ ...args.patch, updatedAt: new Date() })
+      .where(eq(pointSettings.id, 1));
+    const after = await getPointSettings(tx);
+    // Audit the change; cutoff is sensitive (decides the leaderboard freeze) so we record old→new.
+    await writeAudit(
+      {
+        actorUserId: args.actorUserId,
+        action: "point_settings_update",
+        entityType: "point_settings",
+        // entityId is a uuid column; the settings row is the singleton (id=1), so leave it null
+        // and record old→new in the value fields (cutoff is the sensitive, reward-deciding change).
+        entityId: null,
+        oldValue: { cutoffAt: before.cutoffAt },
+        newValue: args.patch,
+        reason: args.reason,
+      },
+      tx,
+    );
+    return after;
+  });
+}
+
+// Patchable per-event point-config fields (nullable point/window overrides + toggles).
+export type EventPointConfigPatch = Partial<{
+  checkinInEnabled: boolean;
+  checkinOutEnabled: boolean;
+  assessmentEnabled: boolean;
+  assessmentRequiresCheckin: boolean;
+  checkinInPoints: number | null;
+  checkinOutPoints: number | null;
+  assessmentPoints: number | null;
+  scanInOpenAt: Date | null;
+  scanInCloseAt: Date | null;
+  scanOutOpenAt: Date | null;
+  scanOutCloseAt: Date | null;
+  assessmentOpenAt: Date | null;
+  assessmentCloseAt: Date | null;
+}>;
+
+// Upsert per-event config (plan §7/§15.3 lazy-create). Absent row = all global defaults; this writes
+// (or merges) the override row. Forward-only — changing values mid-event does NOT rewrite past ledger.
+export async function upsertEventPointConfig(args: {
+  eventId: string;
+  patch: EventPointConfigPatch;
+  actorUserId: string;
+}): Promise<EventPointConfigRow> {
+  return db.transaction(async (tx) => {
+    await tx
+      .insert(eventPointConfig)
+      .values({ eventId: args.eventId, ...args.patch })
+      .onConflictDoUpdate({
+        target: eventPointConfig.eventId,
+        set: { ...args.patch, updatedAt: new Date() },
+      });
+    const [row] = await tx
+      .select()
+      .from(eventPointConfig)
+      .where(eq(eventPointConfig.eventId, args.eventId))
+      .limit(1);
+    await writeAudit(
+      {
+        actorUserId: args.actorUserId,
+        action: "event_point_config_update",
+        entityType: "event_point_config",
+        entityId: args.eventId,
+        eventId: args.eventId,
+        newValue: args.patch,
+      },
+      tx,
+    );
+    if (!row) throw new Error("upsertEventPointConfig: row missing after upsert");
+    return row;
+  });
+}
+
+// Wire shape for a point-settings row (UTC ISO timestamps).
+export function serializePointSettings(s: PointSettingsRow) {
+  return {
+    cutoffAt: s.cutoffAt?.toISOString() ?? null,
+    defaultCheckinInPoints: s.defaultCheckinInPoints,
+    defaultCheckinOutPoints: s.defaultCheckinOutPoints,
+    defaultAssessmentPoints: s.defaultAssessmentPoints,
+    scanOutFallbackHours: s.scanOutFallbackHours,
+    peerEnabled: s.peerEnabled,
+    peerPoints: s.peerPoints,
+    peerCooldownSec: s.peerCooldownSec,
+    staffReverseWindowMin: s.staffReverseWindowMin,
+    updatedAt: s.updatedAt.toISOString(),
+  };
+}
+
+// Wire shape for an event point-config row (null when no override row exists → all defaults).
+export function serializeEventPointConfig(c: EventPointConfigRow | null) {
+  if (!c) return null;
+  return {
+    eventId: c.eventId,
+    checkinInEnabled: c.checkinInEnabled,
+    checkinOutEnabled: c.checkinOutEnabled,
+    assessmentEnabled: c.assessmentEnabled,
+    assessmentRequiresCheckin: c.assessmentRequiresCheckin,
+    checkinInPoints: c.checkinInPoints,
+    checkinOutPoints: c.checkinOutPoints,
+    assessmentPoints: c.assessmentPoints,
+    scanInOpenAt: c.scanInOpenAt?.toISOString() ?? null,
+    scanInCloseAt: c.scanInCloseAt?.toISOString() ?? null,
+    scanOutOpenAt: c.scanOutOpenAt?.toISOString() ?? null,
+    scanOutCloseAt: c.scanOutCloseAt?.toISOString() ?? null,
+    assessmentOpenAt: c.assessmentOpenAt?.toISOString() ?? null,
+    assessmentCloseAt: c.assessmentCloseAt?.toISOString() ?? null,
+    updatedAt: c.updatedAt.toISOString(),
+  };
 }

@@ -1,4 +1,4 @@
-import { boolean, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, index, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { userRole, userStatus } from "./enums";
 
 // Internal identity + profile + auth state. Referenced everywhere by id (uuid) only.
@@ -32,7 +32,17 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   // Last authenticated request seen for this user; null until first activity. Throttled write in requireAuth.
   lastActiveAt: timestamp("last_active_at", { withTimezone: true }),
-});
+}, (t) => [
+  // Leaderboard covering index (plan §15.4): rank ordering is balance DESC, then earliest-to-reach
+  // (lastPositiveAt ASC). Leading (role, status) matches the active-student filter; column order
+  // here matches the ORDER BY so Postgres can scan it in rank order. Final tiebreak (id) is the PK.
+  index("users_leaderboard_idx").on(
+    t.role,
+    t.status,
+    t.pointsBalance.desc(),
+    t.lastPositiveAt.asc(),
+  ),
+]);
 
 // Encrypted temp password kept ONLY until user changes password (enables re-export).
 export const temporaryPasswords = pgTable("temporary_passwords", {
