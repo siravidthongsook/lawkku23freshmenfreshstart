@@ -9,3 +9,4 @@ export * from "./files";
 export * from "./qr";
 export * from "./audit";
 export * from "./imports";
+export * from "./points";

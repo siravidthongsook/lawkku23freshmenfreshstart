@@ -23,6 +23,10 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash"), // nullable: NULL = account not yet claimed
   passwordMustChange: boolean("password_must_change").notNull().default(false),
   status: userStatus("status").notNull().default("active"),
+  // Points/rewards caches — truth is SUM(ledger.delta); synced in the same tx as every ledger write.
+  pointsBalance: integer("points_balance").notNull().default(0),
+  lastPositiveAt: timestamp("last_positive_at", { withTimezone: true }), // tie-break: time of last POSITIVE entry (reverse/correct must not move it)
+  staffPointBudget: integer("staff_point_budget").notNull().default(0), // cache of staff grant budget
   createdByAdminId: uuid("created_by_admin_id"), // self-ref → users.id (nullable for seed admin)
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

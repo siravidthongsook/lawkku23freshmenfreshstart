@@ -17,6 +17,7 @@ import uploadsRoutes from "./modules/uploads/routes";
 import importsRoutes from "./modules/imports/routes";
 import exportsRoutes from "./modules/exports/routes";
 import auditRoutes from "./modules/audit-logs/routes";
+import pointsRoutes from "./modules/points/routes";
 
 export function createApp() {
   const app = new Hono<{ Variables: AppVariables }>();
@@ -56,6 +57,7 @@ export function createApp() {
   app.route("/", importsRoutes);
   app.route("/", exportsRoutes);
   app.route("/", auditRoutes);
+  app.route("/", pointsRoutes);
 
   app.notFound((c) => c.json({ error: "not_found", message: "Route not found" }, 404));
 

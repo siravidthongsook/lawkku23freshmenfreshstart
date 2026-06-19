@@ -28,3 +28,24 @@ export const importStatus = pgEnum("import_status", [
   "confirmed",
   "failed",
 ]);
+
+// Points/rewards — reason for each point_ledger entry (see plan §3.1).
+export const pointReason = pgEnum("point_reason", [
+  "checkin_in",
+  "checkin_out",
+  "assessment_completed",
+  "staff_grant_qr", // student scans a staff grant QR
+  "manual_adjust", // staff/admin manual give (+)
+  "peer_connect", // scanner earns on connecting a peer
+  "correction_add", // admin tops up a system miss (+)
+  "correction_reverse", // admin reverses a wrong entry (negative delta)
+]);
+
+// Staff budget ledger reasons (budget tables land in a later phase; enum defined here per plan §3.1).
+export const staffBudgetReason = pgEnum("staff_budget_reason", [
+  "topup", // admin tops up budget (+)
+  "grant_issue", // staff issues a grant QR (−)
+  "grant_refund", // unused grant returned (+)
+  "manual_grant", // staff manual give to student (−)
+  "admin_adjust", // admin adjusts budget (+/−), reason required
+]);

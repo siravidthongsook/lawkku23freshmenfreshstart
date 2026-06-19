@@ -64,6 +64,13 @@
       "when": 1781873630153,
       "tag": "0008_vengeful_freak",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1781879621287,
+      "tag": "0009_abnormal_shen",
+      "breakpoints": true
     }
   ]
 }
