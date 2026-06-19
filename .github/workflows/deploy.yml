@@ -48,6 +48,42 @@ jobs:
           # api auto-runs `pnpm db:migrate` on boot (see Dockerfile CMD).
           docker compose up -d --build ${{ github.event.inputs.services }}
 
-      - name: Verify
+      # Real smoke test: container "Up" != serving. Poll actual HTTP, fail the job if down.
+      - name: Verify — containers healthy + HTTP serving
         working-directory: /home/siravid/projects/eticket
-        run: docker compose ps
+        run: |
+          set -euo pipefail
+          docker compose ps
+
+          # Migration crash-loops the api (CMD: db:migrate && start). Catch a restarting/exited container.
+          bad=$(docker compose ps --format '{{.Service}} {{.State}}' | awk '$2 != "running" {print}')
+          if [ -n "$bad" ]; then
+            echo "::error::container(s) not running (migration crash or boot failure):"
+            echo "$bad"
+            docker compose logs --tail=80 api
+            exit 1
+          fi
+
+          # Poll api /health (host port 33491 -> api :3000). Retry: build/migrate takes a beat to serve.
+          for i in $(seq 1 30); do
+            if curl -fsS -m 5 http://localhost:33491/health >/dev/null; then echo "api ok"; break; fi
+            if [ "$i" = 30 ]; then
+              echo "::error::api /health never came up after 30 tries"
+              docker compose logs --tail=80 api
+              exit 1
+            fi
+            sleep 2
+          done
+
+          # Poll web root (host port 33490).
+          for i in $(seq 1 30); do
+            if curl -fsS -m 5 -o /dev/null http://localhost:33490/; then echo "web ok"; break; fi
+            if [ "$i" = 30 ]; then
+              echo "::error::web never came up after 30 tries"
+              docker compose logs --tail=80 web
+              exit 1
+            fi
+            sleep 2
+          done
+
+          echo "Deploy verified: containers running + api/web serving HTTP."
