@@ -54,6 +54,17 @@ The workflow's `runs-on: [self-hosted, eticket]` is what keeps eticket deploys o
 
 ---
 
+## Backup DB before every deploy
+
+Filename bakes in the **current commit SHA** so each snapshot self-identifies the code it pairs with; `--clean` makes the dump restorable over a live DB.
+
+```bash
+cd /home/siravid/projects/eticket
+SHA=$(git rev-parse --short HEAD)
+docker compose exec -T db pg_dump -U lawkku_freshstart23 --clean --if-exists lawkku_freshstart23 \
+  | gzip > ~/eticket-db-backup-$(date +%Y%m%d-%H%M%S)-$SHA.sql.gz
+```
+
 ## Deploying
 
 Manual only:
@@ -73,6 +84,23 @@ api auto-runs `pnpm db:migrate` on boot. `concurrency: prod-deploy` blocks overl
 > `--ff-only`: if the deploy clone has local commits/uncommitted changes, pull fails fast instead of merging. If that happens, SSH in and reconcile by hand.
 
 ---
+
+## Rollback
+
+Each backup is named `…-<TS>-<SHA>.sql.gz` — `<SHA>` = the code commit live when it was taken. Roll **code + DB** back together:
+
+```bash
+cd /home/siravid/projects/eticket
+# 1. code
+git checkout <SHA>              # detached at the good commit
+docker compose up -d --build    # rebuild old images
+# 2. DB (only if the new migration actually broke things — overwrites data since backup)
+gunzip -c ~/eticket-db-backup-<TS>-<SHA>.sql.gz \
+  | docker compose exec -T db psql -U lawkku_freshstart23 -d lawkku_freshstart23
+```
+
+Code-only rollback is enough when the schema is still compatible. Back to normal later:
+`git checkout main && git pull --ff-only && docker compose up -d --build`.
 
 ## Ops
 
