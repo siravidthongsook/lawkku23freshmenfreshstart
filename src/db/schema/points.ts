@@ -10,7 +10,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { grantTokenStatus, pointReason, staffBudgetReason } from "./enums";
+import { grantTokenStatus, pointReason, qrTokenStatus, staffBudgetReason } from "./enums";
 import { events } from "./events";
 import { users } from "./users";
 
@@ -114,3 +114,52 @@ export const pointGrantClaims = pgTable(
 );
 
 export type PointGrantClaimRow = typeof pointGrantClaims.$inferSelect;
+
+// === Peer connect (plan §3.2, §4.8) — ข้อ6 ===
+// Personal "add-me" QR per student: opaque token only (no PII), reusable + revocable.
+// Mirrors the grant/QR crypto: store the hash for scan lookup + AES-encrypted plaintext for owner re-display.
+// One active token per user (partial unique index) — lazily (re)issued when the student opens /me/connect-qr.
+export const userConnectTokens = pgTable(
+  "user_connect_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    tokenHash: text("token_hash").notNull().unique(), // SHA-256 for connect-scan lookup
+    tokenEnc: text("token_enc").notNull(), // AES-GCM encrypted plaintext for owner re-display (never logged)
+    status: qrTokenStatus("status").notNull().default("active"), // reuse active/revoked
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // max 1 active connect token per user (rotation revokes the old one in the same tx)
+    uniqueIndex("user_connect_one_active_uq").on(t.userId).where(sql`status = 'active'`),
+  ],
+);
+
+export type UserConnectTokenRow = typeof userConnectTokens.$inferSelect;
+
+// Records an ordered scanner→scanned connection. The SCANNER earns +peerPoints (plan §0/§4.8).
+// Unique (scanner, scanned) → A connects to B at most once ever (re-scan returns the existing row, no 2nd award).
+// favoritedAt: scanner-owned "save to favourite" flag (null = not favourited); indexed for fast favourites list.
+export const peerConnections = pgTable(
+  "peer_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    scannerUserId: uuid("scanner_user_id")
+      .notNull()
+      .references(() => users.id), // who scanned (earns +5)
+    scannedUserId: uuid("scanned_user_id")
+      .notNull()
+      .references(() => users.id), // the connect-QR owner
+    favoritedAt: timestamp("favorited_at", { withTimezone: true }), // null = not favourited
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("peer_conn_pair_uq").on(t.scannerUserId, t.scannedUserId), // can't rescan the same person
+    index("peer_conn_scanner_idx").on(t.scannerUserId, t.createdAt), // retro list + cooldown lookup
+    index("peer_conn_fav_idx").on(t.scannerUserId, t.favoritedAt), // favourites list
+  ],
+);
+
+export type PeerConnectionRow = typeof peerConnections.$inferSelect;

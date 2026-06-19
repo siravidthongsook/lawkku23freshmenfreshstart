@@ -23,6 +23,12 @@ import {
   manualAdjust,
   staffSelfReverse,
 } from "./adjust-service";
+import {
+  connectPeer,
+  getOrCreateConnectToken,
+  listConnections,
+  setFavorite,
+} from "./peer-service";
 
 const router = new Hono<{ Variables: AppVariables }>();
 
@@ -450,6 +456,65 @@ router.post(
     });
     const status = res.result === "corrected" ? 200 : res.result === "not_found" ? 404 : 400;
     return c.json(res, status);
+  },
+);
+
+// =====================================================================
+// STUDENT — peer connect (add-friend), connect-QR, retroactive list, favourites (plan §4.5/§4.8)
+// =====================================================================
+
+// GET /me/connect-qr — caller's personal connect token (lazy-created); ?rotate=1 mints a fresh one.
+router.get("/me/connect-qr", requireAuth, async (c) => {
+  const user = c.get("user");
+  const rotate = c.req.query("rotate") === "1" || c.req.query("rotate") === "true";
+  const { token, plaintext } = await getOrCreateConnectToken(user.id, rotate);
+  // plaintext is the QR payload; only the hash is persisted (no-PII QR invariant).
+  return c.json({ token: plaintext, tokenId: token.id, status: token.status });
+});
+
+const connectBody = z.object({ token: z.string().min(1) });
+
+// POST /points/connect — scanner connects a peer; scanner earns +peerPoints once per ordered pair.
+// Always HTTP 200 with a result code (mirror scan/claim — UI branches on result).
+router.post("/points/connect", requireAuth, zValidator("json", connectBody), async (c) => {
+  const user = c.get("user");
+  const { token } = c.req.valid("json");
+  const res = await connectPeer({
+    plaintext: token,
+    scannerUserId: user.id,
+    scannerRole: user.role,
+  });
+  return c.json(res);
+});
+
+const connectionsQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+  favorite: z.coerce.boolean().optional(), // true = favourites only
+});
+
+// GET /me/connections — caller's scanned-people history (newest first), with the peer's contact. Own list only.
+router.get("/me/connections", requireAuth, zValidator("query", connectionsQuery), async (c) => {
+  const user = c.get("user");
+  const { limit, offset, favorite } = c.req.valid("query");
+  const page = await listConnections(user.id, { limit, offset, favoritesOnly: favorite === true });
+  return c.json({ connections: page.rows, total: page.total, limit, offset });
+});
+
+const favoriteBody = z.object({ favorite: z.boolean() });
+
+// POST /me/connections/:id/favorite — set/unset favourite on one of the caller's own connections.
+router.post(
+  "/me/connections/:id/favorite",
+  requireAuth,
+  zValidator("json", favoriteBody),
+  async (c) => {
+    const id = z.string().uuid().parse(c.req.param("id"));
+    const user = c.get("user");
+    const { favorite } = c.req.valid("json");
+    // Scoped to the caller — a connection id they don't own returns not_found (404), not someone else's row.
+    const res = await setFavorite({ scannerUserId: user.id, connectionId: id, favorite });
+    return c.json(res, res.result === "not_found" ? 404 : 200);
   },
 );
 

@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "../src/db/client";
 import { users } from "../src/db/schema/users";
-import { pointLedger, pointGrantClaims, staffBudgetLedger } from "../src/db/schema/points";
+import { pointLedger, pointGrantClaims, staffBudgetLedger, peerConnections } from "../src/db/schema/points";
+import { pointSettings } from "../src/db/schema/point-config";
 import { request } from "./helpers/db";
 import { loginAs } from "./helpers/auth";
 
@@ -53,6 +54,25 @@ async function claimRowCount(tokenId: string): Promise<number> {
     .select({ c: sql<number>`count(*)::int` })
     .from(pointGrantClaims)
     .where(eq(pointGrantClaims.grantTokenId, tokenId));
+  return r!.c;
+}
+
+// Peer-connect helpers (cooldown race test): force point_settings + scanner-scoped connection count.
+async function setSettings(patch: Record<string, unknown>) {
+  await db
+    .insert(pointSettings)
+    .values({ id: 1, ...patch })
+    .onConflictDoUpdate({ target: pointSettings.id, set: patch });
+}
+async function connectQr(cookie: string): Promise<string> {
+  const res = await request("/me/connect-qr", { cookie });
+  return ((await res.json()) as { token: string }).token;
+}
+async function peerConnCountForScanner(scannerUserId: string): Promise<number> {
+  const [r] = await db
+    .select({ c: sql<number>`count(*)::int` })
+    .from(peerConnections)
+    .where(eq(peerConnections.scannerUserId, scannerUserId));
   return r!.c;
 }
 
@@ -210,5 +230,51 @@ describe("points concurrency: concurrent issue can't overspend budget (staff row
     expect(await budgetOf(staff.user.id)).toBe(0);
     expect(await budgetSum(staff.user.id)).toBe(0);
     expect(await budgetSum(staff.user.id)).toBeGreaterThanOrEqual(0);
+  });
+});
+
+// =====================================================================
+// Concurrent peer connects by ONE scanner — cooldown must NOT be bypassed
+// (regression for F1: FOR UPDATE on scanner's users row serializes connects)
+// =====================================================================
+describe("points concurrency: one scanner's concurrent connects respect the cooldown (no burst bypass)", () => {
+  it("concurrent peer connects by one scanner respect the cooldown (no burst bypass)", async () => {
+    const PEER_POINTS = 5; // default peerPoints (matches peer suite's +5 awards)
+    await setSettings({ peerEnabled: true, cutoffAt: null, peerCooldownSec: 3600 }); // huge cooldown: only the first connect may award
+
+    const a = await loginAs("student"); // scanner
+    const b = await loginAs("student");
+    const c = await loginAs("student");
+    const bToken = await connectQr(b.cookie);
+    const cToken = await connectQr(c.cookie);
+
+    // Fire A→B and A→C simultaneously: without the scanner-row lock both read an empty
+    // "last connect" and bypass the cooldown gate (double award). With the FOR UPDATE fix
+    // they serialize: the 2nd sees the 1st's connection and is rejected as connect_cooldown.
+    const [rB, rC] = await Promise.all([
+      request("/points/connect", { method: "POST", cookie: a.cookie, body: { token: bToken } }),
+      request("/points/connect", { method: "POST", cookie: a.cookie, body: { token: cToken } }),
+    ]);
+
+    // No 500 under the race — both return a clean 200 result code.
+    expect(rB.status).toBe(200);
+    expect(rC.status).toBe(200);
+    const results = [
+      (await rB.json()) as { result: string; pointsAwarded: number },
+      (await rC.json()) as { result: string; pointsAwarded: number },
+    ];
+
+    const succeeded = results.filter((r) => r.result === "connected_success");
+    const cooled = results.filter((r) => r.result === "connect_cooldown");
+    // Exactly one award, the other rejected by cooldown — NOT both succeeding.
+    expect(succeeded.length).toBe(1);
+    expect(cooled.length).toBe(1);
+    expect(succeeded[0]!.pointsAwarded).toBe(PEER_POINTS);
+    expect(cooled[0]!.pointsAwarded).toBe(0);
+
+    // One award only: balance == peerPoints == ledger sum, and exactly one connection row for A.
+    expect(await balanceOf(a.user.id)).toBe(PEER_POINTS);
+    expect(await ledgerSum(a.user.id)).toBe(PEER_POINTS);
+    expect(await peerConnCountForScanner(a.user.id)).toBe(1);
   });
 });
