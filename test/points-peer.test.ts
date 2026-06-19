@@ -303,3 +303,56 @@ describe("peer connect: retroactive list + favourites", () => {
     expect(res.status).toBe(404);
   });
 });
+
+// =====================================================================
+// GET /me/points/:ledgerId — hydrated single-entry detail (own only); 404 for others (Phase 6a)
+// =====================================================================
+describe("wallet detail: GET /me/points/:ledgerId", () => {
+  it("returns own entry with hydrated source context (peer connect → counterpart in metadata)", async () => {
+    await setSettings({ peerCooldownSec: 0 });
+    const a = await loginAs("student");
+    const b = await loginAs("student");
+    await request("/points/connect", { method: "POST", cookie: a.cookie, body: { token: await connectQr(b.cookie) } });
+
+    // Find A's peer_connect ledger entry id via the wallet list.
+    const wallet = (await (await request("/me/points", { cookie: a.cookie })).json()) as {
+      history: { id: string; reason_code: string }[];
+    };
+    const peerEntry = wallet.history.find((h) => h.reason_code === "peer_connect")!;
+    expect(peerEntry).toBeTruthy();
+
+    const res = await request(`/me/points/${peerEntry.id}`, { cookie: a.cookie });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      entry: {
+        id: string;
+        delta: number;
+        reasonCode: string;
+        createdAt: string;
+        metadata: Record<string, unknown> | null;
+        reversed: boolean;
+      };
+    };
+    expect(body.entry.id).toBe(peerEntry.id);
+    expect(body.entry.reasonCode).toBe("peer_connect");
+    expect(body.entry.delta).toBe(5);
+    expect(body.entry.metadata?.counterpartName).toBe(b.user.fullName); // hydrated source context
+    expect(body.entry.reversed).toBe(false);
+  });
+
+  it("another user's entry returns 404 (ownership-scoped, no enumeration)", async () => {
+    await setSettings({ peerCooldownSec: 0 });
+    const a = await loginAs("student");
+    const b = await loginAs("student");
+    const intruder = await loginAs("student");
+    await request("/points/connect", { method: "POST", cookie: a.cookie, body: { token: await connectQr(b.cookie) } });
+
+    const wallet = (await (await request("/me/points", { cookie: a.cookie })).json()) as {
+      history: { id: string }[];
+    };
+    const entryId = wallet.history[0]!.id;
+
+    const res = await request(`/me/points/${entryId}`, { cookie: intruder.cookie });
+    expect(res.status).toBe(404);
+  });
+});

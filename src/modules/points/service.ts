@@ -1,4 +1,4 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db, type Tx } from "../../db/client";
 import { pointLedger, type PointLedgerRow } from "../../db/schema/points";
 import { users } from "../../db/schema/users";
@@ -144,5 +144,68 @@ export function serializeLedgerEntry(r: PointLedgerRow) {
     metadata: r.metadata,
     created_by_user_id: r.createdByUserId,
     created_at: r.createdAt.toISOString(),
+  };
+}
+
+// === Hydrated single-entry detail (plan §3.2a / §7 / §14 wallet detail view) ===
+// One of the caller's OWN ledger entries with human-friendly source context resolved for display.
+// Authorization is by ownership: the row is fetched WHERE userId = caller → a missing/other-user id
+// returns null (the route maps that to 404, no enumeration). Hydration sources:
+//  - the entry's metadata snapshot (immutable "how it looked at award time"),
+//  - the actor (createdByUserId) joined LIVE for a current display name (null = system-awarded),
+//  - whether this entry was later reversed (a correction_reverse row points back at it).
+export type LedgerEntryDetail = {
+  id: string;
+  delta: number;
+  reasonCode: PointLedgerRow["reasonCode"];
+  reason: string | null; // free-text reason (manual/correction); metadata.reason fallback
+  createdAt: string; // UTC ISO (UI renders Bangkok)
+  metadata: Record<string, unknown> | null;
+  actor: { id: string; fullName: string } | null; // who created it (staff/admin); null = system
+  reversed: boolean; // a correction_reverse entry references this one
+  reversalEntryId: string | null;
+};
+
+export async function getLedgerEntryDetail(
+  userId: string,
+  ledgerId: string,
+): Promise<LedgerEntryDetail | null> {
+  // Ownership-scoped fetch: not-found OR another user's entry both yield no row → null → 404.
+  const [row] = await db
+    .select()
+    .from(pointLedger)
+    .where(and(eq(pointLedger.id, ledgerId), eq(pointLedger.userId, userId)))
+    .limit(1);
+  if (!row) return null;
+
+  // Resolve the actor LIVE (current name) when present; system awards have no actor.
+  let actor: LedgerEntryDetail["actor"] = null;
+  if (row.createdByUserId) {
+    const [a] = await db
+      .select({ id: users.id, fullName: users.fullName })
+      .from(users)
+      .where(eq(users.id, row.createdByUserId))
+      .limit(1);
+    if (a) actor = a;
+  }
+
+  // Was this entry later reversed? (correction_reverse points back via reversalOfLedgerId.)
+  const [rev] = await db
+    .select({ id: pointLedger.id })
+    .from(pointLedger)
+    .where(eq(pointLedger.reversalOfLedgerId, row.id))
+    .limit(1);
+
+  const meta = (row.metadata ?? null) as Record<string, unknown> | null;
+  return {
+    id: row.id,
+    delta: row.delta,
+    reasonCode: row.reasonCode,
+    reason: (meta?.reason as string | undefined) ?? null,
+    createdAt: row.createdAt.toISOString(),
+    metadata: meta,
+    actor,
+    reversed: rev != null,
+    reversalEntryId: rev?.id ?? null,
   };
 }

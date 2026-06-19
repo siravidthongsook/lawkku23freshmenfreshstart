@@ -15,7 +15,7 @@ import {
   canTopupStaffBudget,
 } from "../../lib/permissions";
 import { AppError } from "../../lib/errors";
-import { getBalance, listUserLedger, serializeLedgerEntry } from "./service";
+import { getBalance, getLedgerEntryDetail, listUserLedger, serializeLedgerEntry } from "./service";
 import { adjustBudget, getStaffBudget } from "./budget-service";
 import {
   getEventPointConfig,
@@ -65,6 +65,16 @@ router.get("/me/points", requireAuth, zValidator("query", ledgerQuery), async (c
     limit,
     offset,
   });
+});
+
+// GET /me/points/:ledgerId — hydrated detail of ONE of the caller's own ledger entries (wallet detail view).
+// Ownership-scoped: an id that isn't the caller's own returns 404 (no enumeration). Param is uuid-validated.
+router.get("/me/points/:ledgerId", requireAuth, async (c) => {
+  const user = c.get("user");
+  const ledgerId = z.string().uuid().parse(c.req.param("ledgerId"));
+  const detail = await getLedgerEntryDetail(user.id, ledgerId);
+  if (!detail) return c.json({ error: "not_found", message: "Ledger entry not found" }, 404);
+  return c.json({ entry: detail });
 });
 
 // =====================================================================

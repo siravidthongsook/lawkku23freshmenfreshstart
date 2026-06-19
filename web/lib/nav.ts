@@ -8,15 +8,20 @@ export const NAV_BY_ROLE: Record<Role, NavLink[]> = {
   student: [
     { href: "/events", label: "กิจกรรม" },
     { href: "/me/registrations", label: "กิจกรรมของฉัน" },
+    { href: "/me/points", label: "แต้ม" },
+    { href: "/me/connect", label: "เพิ่มเพื่อน" },
+    { href: "/leaderboard", label: "อันดับ" },
     { href: "/me", label: "บัญชีของฉัน" },
   ],
   checkin_staff: [
     { href: "/staff/events", label: "เช็คอิน" },
+    { href: "/leaderboard", label: "อันดับ" },
     { href: "/me", label: "บัญชีของฉัน" },
   ],
   admin: [
     { href: "/admin/events", label: "กิจกรรม" },
     { href: "/admin/users", label: "ผู้ใช้" },
+    { href: "/leaderboard", label: "อันดับ" },
     { href: "/admin/audit-logs", label: "บันทึกการตรวจสอบ" },
     { href: "/me", label: "บัญชีของฉัน" },
   ],

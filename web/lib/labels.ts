@@ -199,6 +199,55 @@ export function auditActionLabel(a: string | null | undefined): string {
   return lookup(AUDIT_ACTION, a);
 }
 
+// ---- point reason (point_reason enum, src/db/schema/enums.ts) ----
+// Thai labels for the wallet history + detail. Falls back to raw code when unmapped.
+const POINT_REASON: Record<string, string> = {
+  checkin_in: "เช็คอินเข้างาน",
+  checkin_out: "เช็คอินออกงาน",
+  assessment_completed: "ทำแบบประเมิน",
+  staff_grant_qr: "รับแต้มจากสตาฟ",
+  manual_adjust: "ปรับแต้มโดยทีมงาน",
+  peer_connect: "เพิ่มเพื่อน",
+  correction_add: "ปรับแก้ (เพิ่ม)",
+  correction_reverse: "ปรับแก้ (ถอนรายการ)",
+};
+export function pointReasonLabel(r: string | null | undefined): string {
+  return lookup(POINT_REASON, r);
+}
+
+// ---- point/connect/claim/assessment result codes (returned in response bodies; UI branches on these) ----
+// One map across the earning flows — each code maps to a short Thai message for toasts/result panels.
+const POINT_RESULT: Record<string, string> = {
+  // grant claim
+  granted_success: "รับแต้มสำเร็จ",
+  already_claimed: "รับแต้มนี้ไปแล้ว",
+  grant_exhausted: "โควตาแต้มเต็มแล้ว",
+  grant_expired: "QR หมดอายุแล้ว",
+  grant_revoked: "QR ถูกยกเลิกแล้ว",
+  grant_invalid: "QR ไม่ถูกต้อง",
+  // peer connect
+  connected_success: "เพิ่มเพื่อนสำเร็จ",
+  already_connected: "เพิ่มเพื่อนคนนี้ไปแล้ว",
+  cannot_connect_self: "สแกน QR ตัวเองไม่ได้",
+  connect_cooldown: "รอสักครู่ก่อนสแกนคนต่อไป",
+  connect_invalid: "QR ไม่ถูกต้อง",
+  peer_disabled: "ปิดการเพิ่มเพื่อนชั่วคราว",
+  not_student: "เฉพาะนักศึกษาเท่านั้นที่ได้รับแต้ม",
+  // assessment submit
+  submitted_success: "ส่งแบบประเมินสำเร็จ",
+  already_submitted: "ทำแบบประเมินนี้ไปแล้ว",
+  assessment_not_open: "ยังไม่เปิดให้ทำแบบประเมิน",
+  assessment_closed: "ปิดรับแบบประเมินแล้ว",
+  no_assessment_form: "ยังไม่มีแบบประเมินสำหรับงานนี้",
+  checkin_required: "ต้องเช็คอินงานนี้ก่อนทำแบบประเมิน",
+  // shared
+  points_closed: "ปิดการเก็บแต้มแล้ว (ตัดยอดแล้ว)",
+  network_error: "การเชื่อมต่อมีปัญหา ลองใหม่อีกครั้ง",
+};
+export function pointResultLabel(code: string | null | undefined): string {
+  return lookup(POINT_RESULT, code);
+}
+
 // ---- audit entity types (entityType literals across src/modules) ----
 const AUDIT_ENTITY: Record<string, string> = {
   auth: "การยืนยันตัวตน",
