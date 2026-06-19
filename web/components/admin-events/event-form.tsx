@@ -127,9 +127,8 @@ export function EventForm({ mode, eventId, initial }: Props) {
       const form = new FormData();
       form.append("file", file);
       const res = await apiPostForm<{ event: EventAdmin }>(`/admin/events/${eventId}/poster`, form);
-      // Poster URL is stable per event → cache-bust so the browser shows the new image, not the old cached one.
-      const next = res.event.posterImageUrl ? `${res.event.posterImageUrl}?t=${Date.now()}` : null;
-      setPosterUrl(next);
+      // Backend now embeds a ?v= cache-bust in posterImageUrl, so use it as-is.
+      setPosterUrl(res.event.posterImageUrl ?? null);
       toast.success("อัปโหลดรูปภาพแล้ว");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "อัปโหลดไม่สำเร็จ");

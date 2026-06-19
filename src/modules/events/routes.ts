@@ -143,6 +143,8 @@ router.get("/events/:publicId/poster", async (c) => {
 
   const nodeStream = storage.getStream(event.posterObjectKey);
   c.header("Content-Type", event.posterObjectKey.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg");
+  // posterImageUrl carries a ?v= that changes each upload, so the bytes for a given URL never change → cache hard.
+  c.header("Cache-Control", "public, max-age=31536000, immutable");
   return stream(c, async (s) => {
     for await (const chunk of nodeStream) {
       await s.write(chunk as Uint8Array);
@@ -393,7 +395,8 @@ router.post("/admin/events/:eventId/poster", async (c) => {
   await storage.put(objectKey, buffer);
 
   // posterImageUrl points at the stable public serve endpoint (by publicId).
-  const posterUrl = `/events/${event.publicId}/poster`;
+  // ?v= cache-bust: URL changes each upload so Next/browser image caches don't serve the stale poster.
+  const posterUrl = `/events/${event.publicId}/poster?v=${Date.now()}`;
   const [updated] = await db
     .update(events)
     .set({ posterObjectKey: objectKey, posterImageUrl: posterUrl, updatedAt: new Date() })
