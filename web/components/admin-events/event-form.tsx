@@ -2,7 +2,7 @@
 
 // Shared create/edit event form. Used by /admin/events/new (mode="create") and /admin/events/[id]/edit.
 // Validates with createEventSchema/updateEventSchema before sending; sends ISO-UTC strings (backend coerces).
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { toast } from "sonner";
@@ -28,6 +28,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { eventThumbnail } from "@/components/public/event-helpers";
+import { PosterCropDialog } from "./poster-crop-dialog";
 import { isoToBangkokInput, bangkokInputToIso } from "./datetime";
 
 type Mode = "create" | "edit";
@@ -99,18 +100,33 @@ export function EventForm({ mode, eventId, initial }: Props) {
   );
   const [editCloseAt, setEditCloseAt] = useState(isoToBangkokInput(initial?.editRegistrationCloseAt));
 
-  // Poster upload state — self-contained (uploads instantly, not part of bind/dirty form machinery).
+  // Poster state — DRAFT model: pick → crop → stage locally; only uploaded inside handleSubmit after the event PATCH.
   const posterInputRef = useRef<HTMLInputElement>(null);
   const [posterUrl, setPosterUrl] = useState<string | null>(initial?.posterImageUrl ?? null);
-  const [uploading, setUploading] = useState(false);
+  // Crop modal: objectURL of the raw picked file + its mime (preserved on export for the allow-list).
+  const [cropSrc, setCropSrc] = useState<string | null>(null);
+  const [cropMime, setCropMime] = useState<string>("image/jpeg");
+  const [cropOpen, setCropOpen] = useState(false);
+  // Staged (not-yet-uploaded) cropped poster + its preview objectURL.
+  const [pendingBlob, setPendingBlob] = useState<Blob | null>(null);
+  const [pendingPreviewUrl, setPendingPreviewUrl] = useState<string | null>(null);
 
   // Warn before leaving with unsaved edits (tab close / in-app link). See use-unsaved-changes.
   useUnsavedChanges(dirty);
 
-  // Upload the selected poster immediately (independent of the main form submit — intended).
-  async function handlePosterChange(e: React.ChangeEvent<HTMLInputElement>) {
+  // Revoke any live objectURLs on unmount (raw crop src + staged preview) to avoid leaks.
+  useEffect(() => {
+    return () => {
+      if (cropSrc) URL.revokeObjectURL(cropSrc);
+      if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cleanup-only; refs read at unmount
+  }, []);
+
+  // Pick a file → validate → open the crop modal. No upload here (draft model).
+  function handlePosterChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (!file || !eventId) return;
+    if (!file) return;
     // Client-side guards mirror the backend allow-list (JPG/PNG, max 5MB).
     if (!["image/png", "image/jpeg"].includes(file.type)) {
       toast.error("รองรับเฉพาะไฟล์ PNG หรือ JPG เท่านั้น");
@@ -122,20 +138,31 @@ export function EventForm({ mode, eventId, initial }: Props) {
       if (posterInputRef.current) posterInputRef.current.value = "";
       return;
     }
-    setUploading(true);
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      const res = await apiPostForm<{ event: EventAdmin }>(`/admin/events/${eventId}/poster`, form);
-      // Backend now embeds a ?v= cache-bust in posterImageUrl, so use it as-is.
-      setPosterUrl(res.event.posterImageUrl ?? null);
-      toast.success("อัปโหลดรูปภาพแล้ว");
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "อัปโหลดไม่สำเร็จ");
-    } finally {
-      setUploading(false);
-      if (posterInputRef.current) posterInputRef.current.value = "";
-    }
+    // Replace any previous raw src before staging the new one.
+    if (cropSrc) URL.revokeObjectURL(cropSrc);
+    setCropSrc(URL.createObjectURL(file));
+    setCropMime(file.type);
+    setCropOpen(true);
+  }
+
+  // Cancel crop → discard raw src, reset input so the same file can be re-picked.
+  function handleCropCancel() {
+    setCropOpen(false);
+    if (cropSrc) URL.revokeObjectURL(cropSrc);
+    setCropSrc(null);
+    if (posterInputRef.current) posterInputRef.current.value = "";
+  }
+
+  // Confirm crop → stage the blob + a fresh preview objectURL; mark dirty so Save (and the guard) fire.
+  function handleCropConfirm(blob: Blob) {
+    setCropOpen(false);
+    if (cropSrc) URL.revokeObjectURL(cropSrc);
+    setCropSrc(null);
+    if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl);
+    setPendingBlob(blob);
+    setPendingPreviewUrl(URL.createObjectURL(blob));
+    setDirty(true);
+    if (posterInputRef.current) posterInputRef.current.value = "";
   }
 
   // Wrap a setter so any edit marks the form dirty + clears that field's inline error.
@@ -251,7 +278,32 @@ export function EventForm({ mode, eventId, initial }: Props) {
         toast.success("สร้างกิจกรรมเป็นฉบับร่างแล้ว");
         router.push(`/admin/events/${res.event.id}`);
       } else {
+        // 1) Event fields first.
         await apiPatch(`/admin/events/${eventId}`, payload);
+        // 2) Then the staged poster (if any). If it fails, the event is already saved — warn, don't lose it.
+        if (pendingBlob && eventId) {
+          try {
+            const fd = new FormData();
+            // Filename ext MUST match the blob mime or the backend allow-list rejects it.
+            const ext = pendingBlob.type === "image/png" ? "png" : "jpg";
+            fd.append("file", pendingBlob, `poster.${ext}`);
+            const res = await apiPostForm<{ event: EventAdmin }>(
+              `/admin/events/${eventId}/poster`,
+              fd,
+            );
+            // Backend embeds a ?v= cache-bust in posterImageUrl — use it as-is.
+            setPosterUrl(res.event.posterImageUrl ?? null);
+            if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl);
+            setPendingPreviewUrl(null);
+            setPendingBlob(null);
+          } catch (err) {
+            toast.warning(
+              err instanceof ApiError
+                ? `บันทึกกิจกรรมแล้ว แต่ไม่สามารถอัปโหลดรูปภาพได้: ${err.message}`
+                : "บันทึกกิจกรรมแล้ว แต่ไม่สามารถอัปโหลดรูปภาพได้",
+            );
+          }
+        }
         setDirty(false);
         toast.success("อัปเดตกิจกรรมแล้ว");
         router.push(`/admin/events/${eventId}`);
@@ -274,7 +326,7 @@ export function EventForm({ mode, eventId, initial }: Props) {
 
   return (
     <form ref={formRef} onSubmit={handleSubmit} className="space-y-6">
-      {/* Poster upload — edit mode only (needs an existing eventId; create has none yet). Uploads instantly. */}
+      {/* Poster — edit mode only (needs an existing eventId). Draft model: pick → crop → stage; upload on Save. */}
       {mode === "edit" && eventId ? (
         <Card>
           <CardHeader>
@@ -282,22 +334,37 @@ export function EventForm({ mode, eventId, initial }: Props) {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="relative aspect-[16/9] w-full max-w-md overflow-hidden rounded-lg border bg-muted">
-              <Image
-                src={
-                  posterUrl
-                    ? `/api${posterUrl}`
-                    : eventThumbnail({
-                        posterImageUrl: null,
-                        publicId: initial?.publicId ?? "",
-                        publicSlug: initial?.publicSlug ?? "",
-                        id: initial?.id ?? eventId,
-                      })
-                }
-                alt="ภาพปกกิจกรรม"
-                fill
-                sizes="(max-width: 768px) 100vw, 28rem"
-                className="object-cover"
-              />
+              {pendingPreviewUrl ? (
+                // Staged crop: blob: URL can't go through next/image, use a plain <img>.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={pendingPreviewUrl}
+                  alt="ตัวอย่างภาพปกที่ยังไม่บันทึก"
+                  className="absolute inset-0 h-full w-full object-cover"
+                />
+              ) : (
+                <Image
+                  src={
+                    posterUrl
+                      ? `/api${posterUrl}`
+                      : eventThumbnail({
+                          posterImageUrl: null,
+                          publicId: initial?.publicId ?? "",
+                          publicSlug: initial?.publicSlug ?? "",
+                          id: initial?.id ?? eventId,
+                        })
+                  }
+                  alt="ภาพปกกิจกรรม"
+                  fill
+                  sizes="(max-width: 768px) 100vw, 28rem"
+                  className="object-cover"
+                />
+              )}
+              {pendingPreviewUrl ? (
+                <span className="absolute left-2 top-2 rounded bg-amber-500 px-2 py-0.5 text-xs font-medium text-white shadow">
+                  ยังไม่บันทึก
+                </span>
+              ) : null}
             </div>
             <input
               ref={posterInputRef}
@@ -310,16 +377,25 @@ export function EventForm({ mode, eventId, initial }: Props) {
               <Button
                 type="button"
                 variant="outline"
-                disabled={uploading}
                 onClick={() => posterInputRef.current?.click()}
               >
-                {uploading ? "กำลังอัปโหลด…" : "อัปโหลดรูปภาพ"}
+                อัปโหลดรูปภาพ
               </Button>
-              <span className="text-xs text-muted-foreground">PNG หรือ JPG • สูงสุด 5MB</span>
+              <span className="text-xs text-muted-foreground">
+                PNG หรือ JPG • สูงสุด 5MB • บันทึกเมื่อกด “บันทึกการเปลี่ยนแปลง”
+              </span>
             </div>
           </CardContent>
         </Card>
       ) : null}
+
+      <PosterCropDialog
+        open={cropOpen}
+        src={cropSrc}
+        mime={cropMime}
+        onCancel={handleCropCancel}
+        onConfirm={handleCropConfirm}
+      />
 
       <Card>
         <CardHeader>
