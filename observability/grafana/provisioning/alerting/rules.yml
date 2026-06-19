@@ -1,7 +1,7 @@
 # Alert rules as code (design §5 + §13 runbooks).
 # EVERY rule carries a runbook_url annotation pointing at the §13 first-move —
 # an alert without a next-action is noise. Thresholds match the design
-# (disk 70% per §12, error-rate 2%, p99 1s, DB conns 80%).
+# (disk 85% — shared box baseline ~73%, see host-disk rule; error-rate 2%, p99 1s, DB conns 80%).
 #
 # All Prometheus rules use datasourceUid: prometheus + the expression model that
 # Grafana provisioning expects (query A -> reduce B -> threshold C).
@@ -202,15 +202,18 @@ groups:
               conditions:
                 - evaluator: { type: gt, params: [80] }
 
-      # --- Host disk > 70% (design §12 wants 70, not 85) ---------------------
+      # --- Host disk > 85% --------------------------------------------------
+      # §12 suggested 70%, but this is a SHARED box whose baseline is already ~73%
+      # (many compose projects) — 70% would fire on day 1. 85% gives real headroom
+      # over the obs stack's bounded ~5-10GB footprint without false idle alerts.
       - uid: host-disk-high
-        title: Host disk >70%
+        title: Host disk >85%
         condition: C
         for: 10m
         labels: { severity: warning }
         annotations:
-          summary: "Host disk usage above 70% — monitoring disk creep is the likely cause."
-          runbook_url: "§13 Disk >70%: docker system df + which volume grew; check Loki ingestion rate (§12)."
+          summary: "Host disk usage above 85% — check for runaway volume growth (Loki/Tempo/Prometheus retention, §12)."
+          runbook_url: "§13 Disk: docker system df + which volume grew; check Loki ingestion rate (§12)."
         data:
           - refId: A
             relativeTimeRange: { from: 600, to: 0 }
@@ -230,7 +233,7 @@ groups:
               expression: B
               refId: C
               conditions:
-                - evaluator: { type: gt, params: [70] }
+                - evaluator: { type: gt, params: [85] }
 
       # --- Login-failure spike (brute force) ---------------------------------
       - uid: login-failure-spike
