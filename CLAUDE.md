@@ -65,6 +65,10 @@ Frontend imports backend Zod schemas directly via path alias `@be/*` → `../src
 
 Follow phases in `docs/04-implementation-tasks.md`: Foundation → Events → Forms/Registration → Files → Check-in → Import/Export → Polish/Hardening.
 
+Deploy/rollback hardening: migrations run as an explicit deploy step (not on container boot) and
+auto-rollback is code-only — so every migration MUST be expand-only. See `docs/migrations-policy.md`
+and `docs/deploy-runner.md`.
+
 ---
 
 ## V1 Non-goals (don't build)

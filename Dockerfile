@@ -17,5 +17,5 @@ COPY . .
 # private file storage volume mount point
 RUN mkdir -p /data/storage
 EXPOSE 3000
-# run migrations then start
-CMD ["sh", "-c", "pnpm db:migrate && pnpm start"]
+# start only; migrations run as an explicit deploy step (see deploy.yml)
+CMD ["pnpm", "start"]

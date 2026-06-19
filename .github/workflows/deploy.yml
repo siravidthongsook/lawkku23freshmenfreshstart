@@ -77,45 +77,113 @@ jobs:
     needs: gate # no deploy unless the gate (confirm + typecheck + test) passed
     # Custom label so this hits ONLY the eticket runner, not the shared ITL runner.
     runs-on: [self-hosted, eticket]
-    steps:
-      # Operate on the real deploy clone, NOT the runner's _work checkout.
-      - name: Pull latest main
+    # Single working dir for every step: the real deploy clone (tracks main), NOT _work checkout.
+    defaults:
+      run:
         working-directory: /home/siravid/projects/eticket
+    steps:
+      # 1. Record where prod is BEFORE we pull. Used by auto-rollback to return to known-good code.
+      - name: Capture FROM_SHA (current live commit)
+        id: from
+        run: |
+          set -euo pipefail
+          echo "from_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      # 2. Block a partial-services deploy that would skip api while migrations are pending.
+      # Recreating web/db (but not api) against an un-migrated schema mismatches the running api.
+      - name: Guard — no pending migrations on a partial deploy that excludes api
+        env:
+          SERVICES: ${{ github.event.inputs.services }}
+        run: |
+          set -euo pipefail
+          # Empty services = full deploy (api included) -> always safe, skip the guard.
+          if [ -z "$SERVICES" ]; then echo "full deploy — guard n/a"; exit 0; fi
+          # If api is in the subset, it gets rebuilt+migrated -> safe.
+          if echo " $SERVICES " | grep -qw api; then echo "api included — guard n/a"; exit 0; fi
+          # Fail-safe: anything that is NOT exactly the literal `none` (incl. a script error) counts as pending.
+          pend="$(bash scripts/migrations-pending.sh || echo pending)"
+          if [ "$pend" != "none" ]; then
+            echo "::error::pending migrations (or check failed: '$pend') but this deploy excludes 'api'. Include api or run a full deploy."
+            exit 1
+          fi
+          echo "no pending migrations — partial deploy ok"
+
+      # 3. Snapshot DB + storage tagged with FROM_SHA before any change. Capture filenames.
+      - name: Backup DB + storage
+        id: backup
+        run: |
+          set -euo pipefail
+          # Script prints `db_backup=<path>` / `storage_backup=<path>` KEY lines on stdout (human log -> stderr).
+          # grep the keys so stray docker stdout can't shift positions like the old sed -n 1p/2p did.
+          out=$(bash scripts/db-backup.sh "${{ steps.from.outputs.from_sha }}")
+          echo "$out" | grep -E '^db_backup=' | cut -d= -f2- | sed 's/^/db_backup=/' >> "$GITHUB_OUTPUT"
+          echo "$out" | grep -E '^storage_backup=' | cut -d= -f2- | sed 's/^/storage_backup=/' >> "$GITHUB_OUTPUT"
+
+      # 4. Retag current images as :prev so auto-rollback can `up --no-build` instantly.
+      - name: Retag current images for fast rollback
+        run: |
+          set -euo pipefail
+          docker image tag eticket-api:latest eticket-api:prev || true
+          docker image tag eticket-web:latest eticket-web:prev || true
+
+      # 5. Pull the dispatched main. --ff-only fails fast if the clone diverged.
+      - name: Pull latest main
+        id: pull
         run: |
           set -euo pipefail
           git fetch origin main
           git checkout main
           git pull --ff-only origin main
+          echo "to_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           echo "Now at: $(git rev-parse --short HEAD) — $(git log -1 --pretty=%s)"
 
-      - name: Build & recreate containers
-        working-directory: /home/siravid/projects/eticket
+      # 6. Build only — DO NOT recreate yet. A build failure here leaves prod serving old code.
+      - name: Build images (no recreate)
         run: |
           set -euo pipefail
-          # api auto-runs `pnpm db:migrate` on boot (see Dockerfile CMD).
-          docker compose up -d --build ${{ github.event.inputs.services }}
+          docker compose build ${{ github.event.inputs.services }}
 
-      # Real smoke test: container "Up" != serving. Poll actual HTTP, fail the job if down.
+      # 7. Migrate as an explicit one-shot, BEFORE recreate. drizzle migrate is atomic per run.
+      # Failure here aborts with nothing recreated -> old app still serves old code on the intact
+      # schema -> safe, no rollback needed. Steps 6+7 stay coupled so we never migrate a stale image.
+      - name: Migrate DB (one-shot)
+        run: |
+          set -euo pipefail
+          if ! docker compose run --rm api pnpm db:migrate; then
+            echo "::error::migration failed — NOTHING recreated, old app still serving on intact schema."
+            echo "::error::db backup: ${{ steps.backup.outputs.db_backup }}"
+            exit 1
+          fi
+
+      # 8. Recreate containers with the freshly built images. Brief downtime is accepted.
+      - name: Recreate containers
+        id: recreate
+        run: |
+          set -euo pipefail
+          docker compose up -d ${{ github.event.inputs.services }}
+
+      # 9. Verify: container "Up" != serving. /ready is DB-backed (catches broken schema/connection
+      # that static /health would mask). Fail the job if anything is down.
       - name: Verify — containers healthy + HTTP serving
-        working-directory: /home/siravid/projects/eticket
+        id: verify
         run: |
           set -euo pipefail
           docker compose ps
 
-          # Migration crash-loops the api (CMD: db:migrate && start). Catch a restarting/exited container.
+          # Catch a restarting/exited container (boot failure).
           bad=$(docker compose ps --format '{{.Service}} {{.State}}' | awk '$2 != "running" {print}')
           if [ -n "$bad" ]; then
-            echo "::error::container(s) not running (migration crash or boot failure):"
+            echo "::error::container(s) not running:"
             echo "$bad"
             docker compose logs --tail=80 api
             exit 1
           fi
 
-          # Poll api /health (host port 33491 -> api :3000). Retry: build/migrate takes a beat to serve.
+          # Poll api /ready (DB-backed). Retry: build/migrate takes a beat to serve.
           for i in $(seq 1 30); do
-            if curl -fsS -m 5 http://localhost:33491/health >/dev/null; then echo "api ok"; break; fi
+            if curl -fsS -m 5 http://localhost:33491/ready >/dev/null; then echo "api ready"; break; fi
             if [ "$i" = 30 ]; then
-              echo "::error::api /health never came up after 30 tries"
+              echo "::error::api /ready never came up after 30 tries"
               docker compose logs --tail=80 api
               exit 1
             fi
@@ -134,3 +202,64 @@ jobs:
           done
 
           echo "Deploy verified: containers running + api/web serving HTTP."
+          echo "Deployed ${{ steps.pull.outputs.to_sha }} | db backup: ${{ steps.backup.outputs.db_backup }} | storage backup: ${{ steps.backup.outputs.storage_backup }}"
+
+      # 10. AUTO-ROLLBACK (code-only) — scoped to post-recreate failures (step 8 or 9). Migrate-fail
+      # (step 7) aborts before this point and needs no rollback. Auto-rollback is code-only: we
+      # re-checkout FROM_SHA and reuse the :prev images (instant, no rebuild). DB is NOT auto-restored
+      # because that is destructive (overwrites rows) — restore is a deliberate manual rollback.yml run.
+      - name: Auto-rollback (code-only) on recreate/verify failure
+        if: failure() && (steps.recreate.outcome == 'failure' || steps.verify.outcome == 'failure')
+        env:
+          SERVICES: ${{ github.event.inputs.services }}
+        run: |
+          set -euo pipefail
+          echo "Rolling back code to ${{ steps.from.outputs.from_sha }} using :prev images..."
+          git checkout "${{ steps.from.outputs.from_sha }}"
+
+          # Scope rollback to EXACTLY the services that were deployed — never recreate db on a code-only rollback.
+          # Empty SERVICES = full deploy -> roll back api+web. Non-empty -> only the {api,web} subset that was deployed.
+          if [ -z "$SERVICES" ]; then
+            ROLL="api web"
+          else
+            ROLL=""
+            echo " $SERVICES " | grep -qw api && ROLL="$ROLL api"
+            echo " $SERVICES " | grep -qw web && ROLL="$ROLL web"
+          fi
+          ROLL="$(echo "$ROLL" | xargs)" # trim
+          echo "Rolling back services: ${ROLL:-<none>}"
+
+          # Nothing code-rollable (e.g. a db-only deploy) -> no code to revert. Bail WITHOUT a bare
+          # `up --no-build` (which, with no service arg, would recreate every service incl. db).
+          if [ -z "$ROLL" ]; then
+            echo "::error::deploy of [$SERVICES] failed but has no code-rollable service (api/web) — manual intervention required. DB was NOT restored."
+            exit 1
+          fi
+
+          # Retag each rolled-back service's :prev -> :latest. Guard first: a missing :prev (first-ever deploy)
+          # means `up --no-build` would re-run the BAD image while falsely claiming success — so fail loud instead.
+          # No `|| true` on the retag: a genuinely missing tag must be loud.
+          for svc in $ROLL; do
+            if ! docker image inspect "eticket-$svc:prev" >/dev/null 2>&1; then
+              echo "::error::no eticket-$svc:prev image to roll back to (first deploy?) — manual intervention required"
+              exit 1
+            fi
+            docker image tag "eticket-$svc:prev" "eticket-$svc:latest"
+          done
+
+          docker compose up -d --no-build $ROLL
+
+          # Re-verify the rolled-back stack. (best-effort: don't let a failed poll mask the rollback report)
+          for i in $(seq 1 30); do
+            if curl -fsS -m 5 http://localhost:33491/ready >/dev/null; then echo "api ready (rolled back)"; break; fi
+            if [ "$i" = 30 ]; then echo "::error::api /ready did not recover after rollback"; docker compose logs --tail=80 api; fi
+            sleep 2
+          done
+          for i in $(seq 1 30); do
+            if curl -fsS -m 5 -o /dev/null http://localhost:33490/; then echo "web ok (rolled back)"; break; fi
+            if [ "$i" = 30 ]; then echo "::error::web did not recover after rollback"; docker compose logs --tail=80 web; fi
+            sleep 2
+          done
+
+          echo "::error::Rolled back code to ${{ steps.from.outputs.from_sha }}. DB was NOT restored (db backup: ${{ steps.backup.outputs.db_backup }}). The bad commit is STILL on origin/main — git revert it before the next deploy or it will re-ship. If the schema is incompatible, manually run rollback.yml with restore_db=true."
+          exit 1

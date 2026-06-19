@@ -1,0 +1,110 @@
+# Manual prod rollback. Reverts code to a chosen SHA and OPTIONALLY restores the DB/storage.
+# Use when deploy's code-only auto-rollback isn't enough (e.g. a bad migration that succeeded
+# and now needs the pre-deploy DB snapshot). Never triggers automatically.
+name: Rollback prod (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      to_sha:
+        description: 'Commit SHA to roll back to (the known-good one)'
+        required: true
+      restore_db:
+        description: 'Also restore the DB from a backup (DESTRUCTIVE — overwrites current data)'
+        type: boolean
+        required: false
+        default: false
+      db_backup_file:
+        description: 'DB backup path (required if restore_db). e.g. /home/siravid/eticket-backups/db-...sql.gz'
+        required: false
+        default: ''
+      storage_backup_file:
+        description: 'Storage backup path (optional). e.g. /home/siravid/eticket-backups/storage-...tar.gz'
+        required: false
+        default: ''
+      confirm:
+        description: 'Type ROLLBACK to confirm (destructive on prod)'
+        required: true
+        default: ''
+
+# Shared with deploy -> the two are mutually exclusive (no rollback mid-deploy).
+concurrency:
+  group: prod-deploy
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    runs-on: [self-hosted, eticket]
+    defaults:
+      run:
+        working-directory: /home/siravid/projects/eticket
+    steps:
+      # 1. Guard against accidental clicks + a sane restore_db combo.
+      - name: Guard — require ROLLBACK confirm
+        env:
+          CONFIRM: ${{ github.event.inputs.confirm }}
+          RESTORE_DB: ${{ github.event.inputs.restore_db }}
+          DB_BACKUP: ${{ github.event.inputs.db_backup_file }}
+        run: |
+          set -euo pipefail
+          if [ "$CONFIRM" != "ROLLBACK" ]; then
+            echo "::error::confirm must be 'ROLLBACK' (got '$CONFIRM'). Aborting."
+            exit 1
+          fi
+          if [ "$RESTORE_DB" = "true" ] && [ -z "$DB_BACKUP" ]; then
+            echo "::error::restore_db=true but db_backup_file is empty."
+            exit 1
+          fi
+
+      # 2. Check out the known-good commit (detached HEAD).
+      - name: Checkout target SHA
+        run: |
+          set -euo pipefail
+          git fetch origin
+          git checkout "${{ github.event.inputs.to_sha }}"
+          echo "Now at: $(git rev-parse --short HEAD) — $(git log -1 --pretty=%s)"
+
+      # 3. Optional DB/storage restore. Destructive — db-restore.sh validates the backup first.
+      - name: Restore DB + storage (if requested)
+        if: ${{ github.event.inputs.restore_db == 'true' }}
+        run: |
+          set -euo pipefail
+          echo "DESTRUCTIVE: restoring DB (and storage if provided) — overwrites current data."
+          bash scripts/db-restore.sh "${{ github.event.inputs.db_backup_file }}" "${{ github.event.inputs.storage_backup_file }}"
+
+      # 4. Build + recreate. The rollback target may have no prebuilt image, so build here.
+      # Acceptable on this deliberate manual path.
+      - name: Build + recreate containers
+        run: |
+          set -euo pipefail
+          docker compose up -d --build
+
+      # 5. Verify the rolled-back stack is actually serving.
+      - name: Verify — HTTP serving
+        run: |
+          set -euo pipefail
+          docker compose ps
+          for i in $(seq 1 30); do
+            if curl -fsS -m 5 http://localhost:33491/ready >/dev/null; then echo "api ready"; break; fi
+            if [ "$i" = 30 ]; then
+              echo "::error::api /ready never came up after 30 tries"
+              docker compose logs --tail=80 api
+              exit 1
+            fi
+            sleep 2
+          done
+          for i in $(seq 1 30); do
+            if curl -fsS -m 5 -o /dev/null http://localhost:33490/; then echo "web ok"; break; fi
+            if [ "$i" = 30 ]; then
+              echo "::error::web never came up after 30 tries"
+              docker compose logs --tail=80 web
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "Rollback verified: serving at ${{ github.event.inputs.to_sha }}."
+
+      # 6. Remind: detached HEAD + origin/main still holds the bad commit.
+      - name: Caveat reminder
+        run: |
+          echo "::warning::Prod is at detached HEAD ${{ github.event.inputs.to_sha }}. origin/main is UNCHANGED — revert the bad commit there or the next deploy will re-ship it."

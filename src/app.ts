@@ -1,4 +1,6 @@
+import { sql } from "drizzle-orm";
 import { Hono } from "hono";
+import { db } from "./db/client";
 import type { AppVariables } from "./lib/context";
 import { errorHandler } from "./lib/errors";
 import { requestLogger } from "./lib/request-log";
@@ -23,6 +25,18 @@ export function createApp() {
   app.onError(errorHandler);
 
   app.get("/health", (c) => c.json({ ok: true }));
+
+  // Readiness hits the DB so deploy verify catches a broken-schema/connection rollback that static /health would mask.
+  app.get("/ready", async (c) => {
+    try {
+      await db.execute(sql`SELECT 1`); // reuse shared pool — no new connection pool
+      return c.json({ ready: true });
+    } catch (err) {
+      // Log the real cause server-side (request log line) but keep the client response generic — no detail leak.
+      c.get("log").event("ready_db_check_failed", { error: err instanceof Error ? err.message : String(err) });
+      return c.json({ ready: false, error: "db" }, 503);
+    }
+  });
 
   // Order matters only for overlapping path patterns; these are disjoint.
   app.route("/", authRoutes);
