@@ -34,6 +34,13 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
       # Exemplar (metric->trace) + trace->log correlation needs these datasource features on.
       GF_FEATURE_TOGGLES_ENABLE: "traceToMetrics traceToLogs"
+      # Passed into the container so Grafana expands these ${...} refs in the provisioning YAML
+      # (audit Postgres datasource + Discord contact point). Without the passthrough they expand
+      # to empty -> broken audit datasource / silent alerts.
+      GRAFANA_PG_USER: ${GRAFANA_PG_USER}
+      GRAFANA_PG_PASSWORD: ${GRAFANA_PG_PASSWORD}
+      GRAFANA_PG_DATABASE: ${GRAFANA_PG_DATABASE}
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL}
     volumes:
       - grafana-data:/var/lib/grafana
       # grafana/ provisioning (datasources/dashboards/alerts) is owned by another worker — mounted here.
