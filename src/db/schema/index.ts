@@ -11,3 +11,4 @@ export * from "./audit";
 export * from "./imports";
 export * from "./points";
 export * from "./point-config";
+export * from "./assessments";

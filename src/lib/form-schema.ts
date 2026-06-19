@@ -33,6 +33,10 @@ export const formSchema = z.object({
 });
 export type FormSchema = z.infer<typeof formSchema>;
 
+// Discriminates the two form kinds an event can hold (mirrors the `form_type` pgEnum).
+export const FORM_TYPES = ["registration", "assessment"] as const;
+export type FormType = (typeof FORM_TYPES)[number];
+
 // Fields whose value is a file id (validated/resolved by uploads module).
 export const isFileField = (f: FormField) => f.type === "file_upload";
 

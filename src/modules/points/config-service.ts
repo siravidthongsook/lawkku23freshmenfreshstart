@@ -51,6 +51,14 @@ export function effectiveCheckinOutPoints(
   return config?.checkinOutPoints ?? settings.defaultCheckinOutPoints;
 }
 
+// Assessment award (§4.3): per-event override wins, else global default (100).
+export function effectiveAssessmentPoints(
+  config: EventPointConfigRow | null,
+  settings: PointSettingsRow,
+): number {
+  return config?.assessmentPoints ?? settings.defaultAssessmentPoints;
+}
+
 // Toggles default when no config row exists: in=enabled, out=disabled (matches schema defaults).
 export function isCheckinInEnabled(config: EventPointConfigRow | null): boolean {
   return config?.checkinInEnabled ?? true;
@@ -58,6 +66,29 @@ export function isCheckinInEnabled(config: EventPointConfigRow | null): boolean 
 
 export function isCheckinOutEnabled(config: EventPointConfigRow | null): boolean {
   return config?.checkinOutEnabled ?? false;
+}
+
+// Assessment toggle default when no config row exists: disabled (matches schema default).
+export function isAssessmentEnabled(config: EventPointConfigRow | null): boolean {
+  return config?.assessmentEnabled ?? false;
+}
+
+// Anti-farm gate (H3) default: assessment requires the student be checked in for the event.
+export function assessmentRequiresCheckin(config: EventPointConfigRow | null): boolean {
+  return config?.assessmentRequiresCheckin ?? true;
+}
+
+// Assessment window (§4.3): override [assessmentOpenAt..assessmentCloseAt], else open from event.eventStartAt,
+// never closing (until the global cutoff). null open = not yet open if eventStartAt is also null? — see handler.
+export function assessmentWindow(
+  config: EventPointConfigRow | null,
+  event: Pick<Event, "eventStartAt">,
+): { open: Date | null; close: Date | null } {
+  if (config?.assessmentOpenAt != null || config?.assessmentCloseAt != null) {
+    return { open: config.assessmentOpenAt ?? null, close: config.assessmentCloseAt ?? null };
+  }
+  // Default: opens at eventStartAt (null = unbounded open), never auto-closes.
+  return { open: event.eventStartAt, close: null };
 }
 
 // Cutoff freeze (§5/§10): once cutoffAt has passed, all STUDENT earning is rejected.

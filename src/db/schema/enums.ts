@@ -22,6 +22,9 @@ export const checkinMethod = pgEnum("checkin_method", ["qr_scan", "manual_search
 
 export const qrTokenStatus = pgEnum("qr_token_status", ["active", "revoked"]);
 
+// Form kind per event — the existing registration form + a separate assessment form (plan §3.1).
+export const formType = pgEnum("form_type", ["registration", "assessment"]);
+
 export const importStatus = pgEnum("import_status", [
   "pending",
   "previewed",
