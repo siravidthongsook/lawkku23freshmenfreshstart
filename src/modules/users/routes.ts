@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, ilike, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { AppVariables } from "../../lib/context";
 import { db } from "../../db/client";
 import { temporaryPasswords, users, type User } from "../../db/schema/users";
@@ -13,13 +13,18 @@ import { revokeAllSessions } from "../../lib/session";
 import { writeAudit } from "../../lib/audit";
 import { tempPwIssuedTotal } from "../../lib/metrics";
 import { clearLockout, getLockoutState } from "../auth/service";
+import { toBangkokString } from "../../lib/time";
+import { toCsv } from "../exports/csv-out";
+import { buildUserFilters } from "./query";
 import {
   changeRoleSchema,
   createUserSchema,
+  exportUsersQuery,
   listUsersQuery,
   reasonSchema,
   resetPasswordSchema,
   updateUserSchema,
+  USER_EXPORT_COLUMNS,
 } from "./schema";
 
 const router = new Hono<{ Variables: AppVariables }>();
@@ -39,23 +44,8 @@ router.use("/admin/users", requireAuth, requirePermission(canManageUsers));
 // Each row carries has_pending_temp_password so the list can badge users awaiting first login.
 router.get("/admin/users", zValidator("query", listUsersQuery), async (c) => {
   const { q, role, status, claimed, sort, order, limit, offset } = c.req.valid("query");
-  const conds = [];
-  if (role) conds.push(eq(users.role, role));
-  if (status) conds.push(eq(users.status, status));
-  // claimed=no -> never-claimed accounts (no password); claimed=yes -> password set.
-  if (claimed === "no") conds.push(isNull(users.passwordHash));
-  if (claimed === "yes") conds.push(isNotNull(users.passwordHash));
-  if (q) {
-    const pat = `%${q}%`;
-    conds.push(
-      or(
-        ilike(users.email, pat),
-        ilike(users.studentId, pat),
-        ilike(users.username, pat), // staff login id searchable too
-        ilike(users.fullName, pat),
-      ),
-    );
-  }
+  // Shared with the export endpoint so the list and the CSV always match for identical filters.
+  const conds = buildUserFilters({ q, role, status, claimed });
   const where = conds.length ? and(...conds) : undefined;
 
   const [countRow] = await db.select({ c: sql<number>`count(*)::int` }).from(users).where(where);
@@ -67,6 +57,9 @@ router.get("/admin/users", zValidator("query", listUsersQuery), async (c) => {
     last_active_at: users.lastActiveAt,
     full_name: users.fullName,
     student_id: users.studentId,
+    email: users.email,
+    username: users.username,
+    status: users.status,
   }[sort];
   const orderBy = sql`${sortCol} ${sql.raw(order === "asc" ? "asc" : "desc")} nulls last`;
 
@@ -213,6 +206,88 @@ router.get("/admin/users/temp-passwords/export", async (c) => {
     ...meta,
   });
   return c.json({ users: exported });
+});
+
+// GET /admin/users/export — full filtered user list as CSV (NO pagination). Mirrors the list's
+// filters via buildUserFilters so export == what the admin sees. Secrets are never exportable.
+// NOTE: registered before the `/:userId` route so the literal path isn't captured as a param.
+const USER_EXPORT_HARD_CAP = 50_000; // bound memory/response; warn + truncate beyond this.
+router.get("/admin/users/export", zValidator("query", exportUsersQuery), async (c) => {
+  const admin = c.get("user");
+  const meta = requestMeta(c);
+  const log = c.get("log");
+  const f = c.req.valid("query");
+  const { columns: requested, ...filters } = f;
+
+  const conds = buildUserFilters(filters);
+  const where = conds.length ? and(...conds) : undefined;
+
+  // Pull one row over the cap so we can detect (and warn on) truncation deterministically.
+  const rows = await db
+    .select()
+    .from(users)
+    .where(where)
+    .orderBy(desc(users.createdAt))
+    .limit(USER_EXPORT_HARD_CAP + 1);
+
+  const truncated = rows.length > USER_EXPORT_HARD_CAP;
+  if (truncated) {
+    rows.length = USER_EXPORT_HARD_CAP; // keep only the first 50k
+    log?.set("export_truncated", true);
+    log?.event("users_export_truncated", { cap: USER_EXPORT_HARD_CAP });
+  }
+
+  // Resolve pending temp-pw flags for the exported rows in one query (mirror the list pattern).
+  const ids = rows.map((r) => r.id);
+  const pendingIds = new Set<string>();
+  if (ids.length) {
+    const pendingRows = await db
+      .select({ userId: temporaryPasswords.userId })
+      .from(temporaryPasswords)
+      .where(inArray(temporaryPasswords.userId, ids));
+    for (const p of pendingRows) pendingIds.add(p.userId);
+  }
+
+  // Build the full allow-listed record per row. NO secret fields exist here by construction.
+  const records = rows.map((u) => ({
+    student_id: u.studentId ?? "",
+    full_name: u.fullName,
+    email: u.email ?? "",
+    username: u.username ?? "",
+    role: u.role,
+    status: u.status,
+    group_number: u.groupNumber ?? "",
+    faculty: u.faculty ?? "",
+    department: u.department ?? "",
+    phone: u.phone ?? "",
+    instagram: u.instagram ?? "",
+    claimed: u.passwordHash !== null ? "yes" : "no",
+    pending_temp_pw: pendingIds.has(u.id) ? "yes" : "no",
+    created_at_bangkok: toBangkokString(u.createdAt),
+    last_active_at_bangkok: toBangkokString(u.lastActiveAt),
+  }));
+
+  // Columns = requested subset (already allow-list-validated) else the full stable order.
+  const columns = requested ?? [...USER_EXPORT_COLUMNS];
+  const csv = toCsv(records, columns);
+
+  // Audit COUNT + filter summary only — never row content / PII / secrets.
+  log?.event("export", { kind: "users", rowCount: records.length });
+  await writeAudit({
+    actorUserId: admin.id,
+    actorRole: admin.role,
+    action: "users_exported",
+    entityType: "user",
+    metadata: { row_count: records.length, truncated, filters, columns },
+    ...meta,
+  });
+
+  const filename = `users-export-${exportDateStamp()}.csv`;
+  c.header("Content-Type", "text/csv; charset=utf-8");
+  c.header("Content-Disposition", `attachment; filename="${filename}"`);
+  c.header("X-Row-Count", String(records.length));
+  c.header("Access-Control-Expose-Headers", "X-Row-Count, Content-Disposition");
+  return c.body(csv);
 });
 
 // GET /admin/users/:userId — detail (also surfaces pending temp-password flag + lockout state).
@@ -501,6 +576,12 @@ router.post(
 );
 
 // ---- helpers ----
+
+// Filename date stamp YYYYMMDD in Bangkok time (display/export tz per CLAUDE.md).
+function exportDateStamp(): string {
+  const bkk = new Date(Date.now() + 7 * 60 * 60 * 1000);
+  return bkk.toISOString().slice(0, 10).replace(/-/g, "");
+}
 
 // Rate-limit/lockout key for a user. Mirrors login's `user?.email ?? identifier`:
 // email when present, else the login identifier (student_id or username) — email-less imported users.

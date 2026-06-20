@@ -4,7 +4,15 @@ const roleEnum = z.enum(["student", "checkin_staff", "admin"]);
 const statusEnum = z.enum(["active", "disabled"]);
 
 // Sortable columns for the user list. Maps 1:1 to a users column in routes.ts.
-const userSortEnum = z.enum(["created_at", "last_active_at", "full_name", "student_id"]);
+const userSortEnum = z.enum([
+  "created_at",
+  "last_active_at",
+  "full_name",
+  "student_id",
+  "email",
+  "username",
+  "status",
+]);
 
 // List/search filter for GET /admin/users. limit/offset paginate like audit-logs.
 export const listUsersQuery = z.object({
@@ -18,6 +26,60 @@ export const listUsersQuery = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
+
+// Allow-listed CSV export columns (stable order). Secrets (password_hash / temp-pw / tokens) are
+// NEVER in this list — there is no way to request them. `columns` param intersects with this set.
+export const USER_EXPORT_COLUMNS = [
+  "student_id",
+  "full_name",
+  "email",
+  "username",
+  "role",
+  "status",
+  "group_number",
+  "faculty",
+  "department",
+  "phone",
+  "instagram",
+  "claimed",
+  "pending_temp_pw",
+  "created_at_bangkok",
+  "last_active_at_bangkok",
+] as const;
+export type UserExportColumn = (typeof USER_EXPORT_COLUMNS)[number];
+const EXPORT_COLUMN_SET = new Set<string>(USER_EXPORT_COLUMNS);
+
+// BKK-local calendar date (YYYY-MM-DD) — converted to UTC bounds in the query builder.
+const bkkDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+// Export filter = the list filters (sans pagination/sort) + extra export-only narrowing + columns.
+export const exportUsersQuery = z.object({
+  q: z.string().trim().min(1).optional(),
+  role: roleEnum.optional(),
+  status: statusEnum.optional(),
+  claimed: z.enum(["yes", "no"]).optional(),
+  // pending_temp_pw: yes = admin issued a temp pw not yet consumed; no = none pending.
+  pending_temp_pw: z.enum(["yes", "no"]).optional(),
+  // group_number (บรรพ) 1..16.
+  group_number: z.coerce.number().int().min(1).max(16).optional(),
+  created_from: bkkDate.optional(),
+  created_to: bkkDate.optional(),
+  // never_active=true filters users who have never been seen since launch (lastActiveAt NULL).
+  never_active: z.preprocess((v) => v === "true" || v === true, z.boolean()).optional(),
+  // Comma-separated subset of USER_EXPORT_COLUMNS; unknown keys ignored. Omit = all columns.
+  columns: z.preprocess(
+    (v) =>
+      typeof v === "string"
+        ? v
+            .split(",")
+            .map((s) => s.trim())
+            .filter((s) => EXPORT_COLUMN_SET.has(s))
+        : undefined,
+    z.array(z.enum(USER_EXPORT_COLUMNS)).min(1).optional(),
+  ),
+});
+
+export type ExportUsersQuery = z.infer<typeof exportUsersQuery>;
 
 // How a new/reset account gets its first password:
 //  - temp_password: admin-issued temp pw (hash set now, must_change=true) — user logs in + changes it.

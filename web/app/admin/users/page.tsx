@@ -38,12 +38,22 @@ import type { Role } from "@/lib/types";
 const PAGE_SIZE = 50;
 
 // Sortable columns — must match userSortEnum in src/modules/users/schema.ts.
-type SortKey = "student_id" | "full_name" | "created_at" | "last_active_at";
+type SortKey =
+  | "student_id"
+  | "full_name"
+  | "email"
+  | "username"
+  | "status"
+  | "created_at"
+  | "last_active_at";
 type SortOrder = "asc" | "desc";
-// Date columns default to newest-first; text columns to A→Z on first click.
+// Date columns default to newest-first; text/status columns to A→Z on first click.
 const DEFAULT_ORDER: Record<SortKey, SortOrder> = {
   student_id: "asc",
   full_name: "asc",
+  email: "asc",
+  username: "asc",
+  status: "asc",
   created_at: "desc",
   last_active_at: "desc",
 };
@@ -191,6 +201,9 @@ export default function UsersPage() {
           <Button variant="outline" asChild>
             <Link href="/admin/users/temp-passwords">รหัสผ่านชั่วคราว</Link>
           </Button>
+          <Button variant="outline" asChild>
+            <Link href="/admin/users/export">ส่งออกผู้ใช้</Link>
+          </Button>
           <Button onClick={() => setCreateOpen(true)}>สร้างผู้ใช้</Button>
         </div>
       </div>
@@ -301,10 +314,25 @@ export default function UsersPage() {
                         order={order}
                         onClick={() => toggleSort("full_name")}
                       />
-                      <TableHead>อีเมล</TableHead>
-                      <TableHead>ชื่อผู้ใช้</TableHead>
+                      <SortHeader
+                        label="อีเมล"
+                        active={sort === "email"}
+                        order={order}
+                        onClick={() => toggleSort("email")}
+                      />
+                      <SortHeader
+                        label="ชื่อผู้ใช้"
+                        active={sort === "username"}
+                        order={order}
+                        onClick={() => toggleSort("username")}
+                      />
                       <TableHead>บทบาท</TableHead>
-                      <TableHead>สถานะ</TableHead>
+                      <SortHeader
+                        label="สถานะ"
+                        active={sort === "status"}
+                        order={order}
+                        onClick={() => toggleSort("status")}
+                      />
                       <SortHeader
                         label="สร้างเมื่อ"
                         active={sort === "created_at"}
