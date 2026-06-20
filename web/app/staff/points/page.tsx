@@ -207,9 +207,10 @@ function StaffPointsInner() {
   }
 
   // Active grant tokens surfaced from the budget ledger (grant_issue rows carry the token id).
-  // We can revoke any of these; the backend no-ops/refunds correctly if already done.
+  // Show only still-active tokens — revoked/exhausted ones drop off (older backend lacks the flag →
+  // default to showing, so behaviour degrades gracefully rather than hiding everything).
   const issuedTokens = data.history.filter(
-    (r) => r.reason_code === "grant_issue" && r.grant_token_id,
+    (r) => r.reason_code === "grant_issue" && r.grant_token_id && r.grant_token_active !== false,
   );
   // Recent manual grants the staff member can self-reverse (within the window the server enforces).
   const manualGrants = data.history.filter((r) => r.reason_code === "manual_grant");
@@ -296,8 +297,11 @@ function StaffPointsInner() {
                   <p className="font-medium">หักงบ {Math.abs(g.delta)} แต้ม</p>
                   <p className="text-xs text-muted-foreground">{formatBangkok(g.created_at)}</p>
                 </div>
-                {/* The related point-ledger id is needed to reverse; budget rows carry it when present. */}
-                {g.related_ledger_id ? (
+                {/* The related point-ledger id is needed to reverse; budget rows carry it when present.
+                    Hide the button once reversed (else it lingers and a re-press → already_reversed). */}
+                {g.reversed ? (
+                  <span className="shrink-0 text-xs text-muted-foreground">ถอนแล้ว</span>
+                ) : g.related_ledger_id ? (
                   <Button
                     variant="ghost"
                     size="sm"

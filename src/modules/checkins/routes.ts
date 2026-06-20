@@ -1,10 +1,12 @@
 import { Hono } from "hono";
-import { and, eq, ilike, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import type { AppVariables } from "../../lib/context";
 import { db } from "../../db/client";
 import { events, type Event } from "../../db/schema/events";
 import { registrations } from "../../db/schema/registrations";
+import { auditLogs } from "../../db/schema/audit";
 import { registrationQrTokens } from "../../db/schema/qr";
 import { users } from "../../db/schema/users";
 import { requireAuth, requirePermission, requestMeta } from "../../lib/auth-middleware";
@@ -112,9 +114,13 @@ router.get("/staff/events", requireAuth, requirePermission(canScanCheckin), asyn
   const settings = await getPointSettings();
   const now = new Date();
   const checkoutByEvent = new Map<string, CheckoutState>();
+  // Resolved scan-out window per event so the card can show the check-out time range (not just check-in).
+  const outWinByEvent = new Map<string, { open: string | null; close: string | null }>();
   for (const e of capable) {
     const config = await getEventPointConfig(e.id);
     checkoutByEvent.set(e.id, checkoutStateOf(config, e, settings, now));
+    const w = scanOutWindow(config, e, settings);
+    outWinByEvent.set(e.id, { open: w.open?.toISOString() ?? null, close: w.close?.toISOString() ?? null });
   }
 
   return c.json({
@@ -130,6 +136,9 @@ router.get("/staff/events", requireAuth, requirePermission(canScanCheckin), asyn
         checkinOpen: isWithinWindow(now, e.checkinOpenAt, effectiveCheckinClose(e.checkinCloseAt, e.eventEndAt)),
         // Check-out availability/state for the UI badge ("disabled" = no check-out for this event).
         checkoutState: checkoutByEvent.get(e.id) ?? "disabled",
+        // Resolved scan-out window (null when no check-out) so the card can show the check-out range.
+        scanOutOpenAt: outWinByEvent.get(e.id)?.open ?? null,
+        scanOutCloseAt: outWinByEvent.get(e.id)?.close ?? null,
         // Always present (0 when no regs) so the UI can distinguish a real zero from a missing field.
         registeredCount: ct?.registered ?? 0,
         checkedInCount: ct?.checkedIn ?? 0,
@@ -184,6 +193,76 @@ router.get(
         checkedIn: counts?.checkedIn ?? 0,
         checkedOut: counts?.checkedOut ?? 0,
       },
+    });
+  },
+);
+
+// My check-in/out action history for one event — what the CURRENT staff did here (persistent, survives
+// reload, unlike the in-memory recent-scans strip). Backs the "ประวัติ" tab so staff can find + undo
+// their own mistakes. Scoped to actorUserId = me; both directions (in + out) + their undos, newest first.
+const MY_HISTORY_ACTIONS = [
+  "qr_scan_checkin",
+  "qr_scan_checkout",
+  "manual_checkin",
+  "manual_checkout",
+  "manual_checkin_undo",
+  "manual_checkout_undo",
+] as const;
+const MY_HISTORY_LIMIT = 50;
+
+router.get(
+  "/staff/events/:eventId/my-history",
+  requireAuth,
+  requirePermission(canScanCheckin),
+  async (c) => {
+    const { eventId } = eventIdParam.parse(c.req.param());
+    const staff = c.get("user");
+    const target = alias(users, "target_user");
+
+    const rows = await db
+      .select({
+        id: auditLogs.id,
+        action: auditLogs.action,
+        createdAt: auditLogs.createdAt,
+        registrationId: auditLogs.registrationId,
+        // Current reg stamps drive whether the action is still reversible (avoid offering undo on stale rows).
+        regStatus: registrations.status,
+        regCheckedInAt: registrations.checkedInAt,
+        regCheckedOutAt: registrations.checkedOutAt,
+        fullName: target.fullName,
+        studentId: target.studentId,
+        pointsAwarded: sql<number | null>`(${auditLogs.newValue} ->> 'pointsAwarded')::int`,
+      })
+      .from(auditLogs)
+      .leftJoin(registrations, eq(registrations.id, auditLogs.registrationId))
+      .leftJoin(target, eq(target.id, auditLogs.targetUserId))
+      .where(
+        and(
+          eq(auditLogs.actorUserId, staff.id),
+          eq(auditLogs.eventId, eventId),
+          inArray(auditLogs.action, [...MY_HISTORY_ACTIONS]),
+        ),
+      )
+      .orderBy(desc(auditLogs.createdAt))
+      .limit(MY_HISTORY_LIMIT);
+
+    return c.json({
+      items: rows.map((r) => ({
+        id: r.id,
+        action: r.action,
+        at: r.createdAt.toISOString(),
+        registrationId: r.registrationId,
+        fullName: r.fullName,
+        studentId: r.studentId,
+        pointsAwarded: r.pointsAwarded ?? null,
+        // Reversible now? IN action → still checked_in; OUT action → still has a checkout stamp. Undo rows: never.
+        canUndoCheckin: r.action === "qr_scan_checkin" || r.action === "manual_checkin"
+          ? r.regStatus === "checked_in"
+          : false,
+        canUndoCheckout: r.action === "qr_scan_checkout" || r.action === "manual_checkout"
+          ? r.regCheckedOutAt != null
+          : false,
+      })),
     });
   },
 );

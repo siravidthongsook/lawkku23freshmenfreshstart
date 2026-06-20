@@ -4,7 +4,7 @@
 // check-IN and check-OUT scanners, with per-event in/out status badges.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { CalendarClock, MapPin, ScanLine, LogOut, RefreshCw } from "lucide-react";
+import { MapPin, ScanLine, LogOut, RefreshCw } from "lucide-react";
 import { apiGet, ApiError } from "@/lib/api";
 import { RequireRole } from "@/components/guards";
 import { AppShell } from "@/components/app-shell";
@@ -21,6 +21,17 @@ const STAFF_ROLES = ["checkin_staff", "admin"] as const;
 function CheckinWindow({ e }: { e: StaffEventListItem }) {
   const open = formatBangkok(e.checkinOpenAt);
   const close = formatBangkok(e.checkinCloseAt);
+  if (!open && !close) return <span className="text-muted-foreground">ยังไม่ได้กำหนดช่วงเวลา</span>;
+  return (
+    <span>
+      {open || "—"} → {close || "—"}
+    </span>
+  );
+}
+
+function CheckoutWindow({ e }: { e: StaffEventListItem }) {
+  const open = formatBangkok(e.scanOutOpenAt ?? null);
+  const close = formatBangkok(e.scanOutCloseAt ?? null);
   if (!open && !close) return <span className="text-muted-foreground">ยังไม่ได้กำหนดช่วงเวลา</span>;
   return (
     <span>
@@ -95,9 +106,18 @@ function EventsList() {
                   <MapPin className="size-4 shrink-0" /> {e.location}
                 </p>
               )}
+              {/* Check-IN window, prefixed so it's not confused with the check-out line below it. */}
               <p className="flex items-center gap-1.5">
-                <CalendarClock className="size-4 shrink-0" /> <CheckinWindow e={e} />
+                <ScanLine className="size-4 shrink-0" />
+                <span className="shrink-0">เช็คอิน:</span> <CheckinWindow e={e} />
               </p>
+              {/* Check-OUT window — only when the event actually has check-out configured. */}
+              {e.checkoutState !== "disabled" && (
+                <p className="flex items-center gap-1.5">
+                  <LogOut className="size-4 shrink-0" />
+                  <span className="shrink-0">เช็คเอาท์:</span> <CheckoutWindow e={e} />
+                </p>
+              )}
             </div>
 
             {/* Backend always sends counts now (0 when none) — render only when present so a real 0 shows

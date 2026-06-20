@@ -156,8 +156,13 @@ export type StaffBudgetResponse = {
     reason_code: string;
     grant_token_id: string | null;
     target_user_id: string | null;
+    // true when this grant_issue's token is still active → list it under "QR ที่สร้างไว้"
+    // (revoked/exhausted drop off). Absent on older backend → treat as active to stay safe.
+    grant_token_active?: boolean;
     // present on the admin detail ledger; the /my-budget endpoint may omit it (self-reverse needs it).
     related_ledger_id?: string | null;
+    // true once a manual_grant has been reversed → UI hides the "ถอน" button (absent on older backend).
+    reversed?: boolean;
     reason: string | null;
     created_at: string;
   }[];
