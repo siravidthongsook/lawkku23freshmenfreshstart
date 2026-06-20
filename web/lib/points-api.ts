@@ -18,6 +18,7 @@ import type {
   EventPointConfigPatch,
   EventPointConfigResponse,
   FavoriteResponse,
+  GrantQrResponse,
   IssueGrantResponse,
   LeaderboardResponse,
   LedgerDetailResponse,
@@ -121,6 +122,11 @@ export function issueGrantToken(body: {
 // POST /points/grant-tokens/:id/revoke — revoke a token (refunds unclaimed seats).
 export function revokeGrantToken(id: string, reason: string): Promise<{ result: string }> {
   return apiPost<{ result: string }>(`/points/grant-tokens/${id}/revoke`, { reason });
+}
+
+// GET /points/grant-tokens/:id/qr — re-display an active QR (issuer/admin), no new token.
+export function getGrantTokenQr(id: string): Promise<GrantQrResponse> {
+  return apiGet<GrantQrResponse>(`/points/grant-tokens/${id}/qr`);
 }
 
 // POST /points/adjust — manual give/deduct (staff +only from budget; admin unlimited).

@@ -15,10 +15,14 @@ import {
   getMyBudget,
   issueGrantToken,
   revokeGrantToken,
+  getGrantTokenQr,
   adjustPoints,
   reverseOwnGrant,
 } from "@/lib/points-api";
-import type { StaffBudgetResponse, IssueGrantResponse } from "@/lib/points-types";
+import type { StaffBudgetResponse } from "@/lib/points-types";
+
+// Minimal shape the QR dialog needs — satisfied by both issue + re-display responses.
+type GrantQrView = { token: string; pointsValue: number; maxClaims: number };
 import { budgetReasonLabel } from "@/lib/labels";
 import { formatBangkok } from "@/lib/time";
 import { copyText } from "@/lib/clipboard";
@@ -44,16 +48,16 @@ import { StudentPicker } from "@/components/points/student-picker";
 
 const STAFF_ROLES = ["checkin_staff", "admin"] as const;
 
-// === One-time grant QR reveal — shown ONCE; the plaintext is never retrievable again. ===
-function GrantQrDialog({ grant, onClose }: { grant: IssueGrantResponse; onClose: () => void }) {
+// === Grant QR reveal — re-displayable from the list below until scanned/exhausted/revoked. ===
+function GrantQrDialog({ grant, onClose }: { grant: GrantQrView; onClose: () => void }) {
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>QR แต้ม ({grant.pointsValue} แต้ม × {grant.maxClaims} สิทธิ์)</DialogTitle>
-          <DialogDescription className="flex items-start gap-2 text-amber-700">
+          <DialogDescription className="flex items-start gap-2 text-muted-foreground">
             <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-            QR นี้แสดงเพียงครั้งเดียว ปิดแล้วจะดูซ้ำไม่ได้ — ให้น้องสแกนตอนนี้ หรือคัดลอกเก็บไว้
+            ให้น้องสแกน QR นี้ — ปิดแล้วเปิดดูซ้ำได้จากรายการ “QR ที่สร้างไว้” ด้านล่าง
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col items-center gap-3">
@@ -81,8 +85,8 @@ function StaffPointsInner() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // One-time grant QR being shown.
-  const [grantQr, setGrantQr] = useState<IssueGrantResponse | null>(null);
+  // Grant QR currently shown (from a fresh issue or a re-display).
+  const [grantQr, setGrantQr] = useState<GrantQrView | null>(null);
   // Token pending revoke (reason-gated); holds the grant_token_id.
   const [revokeTarget, setRevokeTarget] = useState<string | null>(null);
   // Ledger entry pending self-reverse (a manual grant within the window).
@@ -110,11 +114,25 @@ function StaffPointsInner() {
     setBusy(true);
     try {
       const res = await issueGrantToken({ points_value: value, max_claims: claims });
-      setGrantQr(res); // reveal once
+      // reused = an identical unscanned QR already existed → re-shown, no budget spent.
+      if (res.reused) toast.info("ใช้ QR เดิมที่ยังไม่ถูกสแกน (ไม่หักงบเพิ่ม)");
+      setGrantQr(res);
       await load();
     } catch (e) {
       // insufficient_budget bubbles up here.
       toast.error(e instanceof ApiError ? e.message : "สร้าง QR ไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Re-display an existing active QR (no new token, no debit).
+  async function doShowQr(tokenId: string) {
+    setBusy(true);
+    try {
+      setGrantQr(await getGrantTokenQr(tokenId));
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "เปิด QR ไม่สำเร็จ");
     } finally {
       setBusy(false);
     }
@@ -237,13 +255,23 @@ function StaffPointsInner() {
                   <p className="font-medium">หักงบ {Math.abs(t.delta)} แต้ม</p>
                   <p className="text-xs text-muted-foreground">{formatBangkok(t.created_at)}</p>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setRevokeTarget(t.grant_token_id)}
-                >
-                  ยกเลิก (คืนงบ)
-                </Button>
+                <div className="flex shrink-0 gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => void doShowQr(t.grant_token_id!)}
+                  >
+                    ดู QR
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setRevokeTarget(t.grant_token_id)}
+                  >
+                    ยกเลิก (คืนงบ)
+                  </Button>
+                </div>
               </div>
             ))
           )}

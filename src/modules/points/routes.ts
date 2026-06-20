@@ -31,7 +31,7 @@ import {
 import { listLeaderboard, listLeaderboardForExport, rankOf } from "./leaderboard-service";
 import { listStaffGrants } from "./grants-report-service";
 import { toCsv } from "../exports/csv-out";
-import { claimGrantToken, issueGrantToken, revokeGrantToken } from "./grant-service";
+import { claimGrantToken, getGrantTokenQr, issueGrantToken, revokeGrantToken } from "./grant-service";
 import {
   adminCorrect,
   adminReverseLedgerEntry,
@@ -132,14 +132,14 @@ router.post(
     const user = c.get("user");
     const body = c.req.valid("json");
     try {
-      const { token, plaintext } = await issueGrantToken({
+      const { token, plaintext, reused } = await issueGrantToken({
         issuerUserId: user.id,
         pointsValue: body.points_value,
         maxClaims: body.max_claims,
         eventId: body.event_id ?? null,
         expiresAt: body.expires_at ?? null,
       });
-      // plaintext returned exactly once — only the hash is persisted (QR invariant).
+      // New token → 201. Reused (an identical unscanned QR existed) → 200, no budget spent.
       return c.json(
         {
           token: plaintext,
@@ -147,8 +147,9 @@ router.post(
           pointsValue: token.pointsValue,
           maxClaims: token.maxClaims,
           expiresAt: token.expiresAt?.toISOString() ?? null,
+          reused,
         },
-        201,
+        reused ? 200 : 201,
       );
     } catch (e) {
       // insufficient_budget from adjustBudget → 400; everything else bubbles to errorHandler.
@@ -178,6 +179,33 @@ router.post(
     });
     const status = res.result === "revoked" ? 200 : res.result === "grant_not_found" ? 404 : 400;
     return c.json(res, status);
+  },
+);
+
+// GET /points/grant-tokens/:id/qr — issuer (or admin) re-displays an active QR's plaintext (no new token).
+router.get(
+  "/points/grant-tokens/:id/qr",
+  requireAuth,
+  requirePermission(canAdjustPoints),
+  async (c) => {
+    const id = z.string().uuid().parse(c.req.param("id"));
+    const user = c.get("user");
+    const res = await getGrantTokenQr({
+      tokenId: id,
+      actorUserId: user.id,
+      actorIsAdmin: user.role === "admin",
+    });
+    if (res.result !== "ok") {
+      return c.json({ error: res.result }, res.result === "grant_not_found" ? 404 : 400);
+    }
+    return c.json({
+      token: res.plaintext,
+      tokenId: res.token.id,
+      pointsValue: res.token.pointsValue,
+      maxClaims: res.token.maxClaims,
+      claimsUsed: res.token.claimsUsed,
+      expiresAt: res.token.expiresAt?.toISOString() ?? null,
+    });
   },
 );
 

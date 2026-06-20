@@ -1,11 +1,13 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { db, type Tx } from "../../db/client";
 import {
   pointGrantClaims,
   pointGrantTokens,
+  staffBudgetLedger,
   type PointGrantTokenRow,
 } from "../../db/schema/points";
-import { encryptSecret, generateToken, hashToken } from "../../lib/crypto";
+import { users } from "../../db/schema/users";
+import { decryptSecret, encryptSecret, generateToken, hashToken } from "../../lib/crypto";
 import { writeAudit } from "../../lib/audit";
 import { adjustBudget } from "./budget-service";
 import { addPoints } from "./service";
@@ -28,13 +30,45 @@ export type IssueGrantArgs = {
 
 export async function issueGrantToken(
   args: IssueGrantArgs,
-): Promise<{ token: PointGrantTokenRow; plaintext: string }> {
+): Promise<{ token: PointGrantTokenRow; plaintext: string; reused: boolean }> {
   const cost = args.pointsValue * args.maxClaims;
-  const plaintext = generateToken();
 
-  const token = await db.transaction(async (tx) => {
+  return db.transaction(async (tx) => {
+    // Lock the issuer row first so the reuse-vs-create decision (and the debit) serialize.
+    await tx.select({ id: users.id }).from(users).where(eq(users.id, args.issuerUserId)).for("update");
+
+    // Reuse: if an identical token is still active AND nobody has scanned it yet, re-show that one
+    // (decrypt the stored plaintext) instead of minting+debiting again — avoids double-spend & orphans.
+    const eventCond =
+      args.eventId == null
+        ? isNull(pointGrantTokens.eventId)
+        : eq(pointGrantTokens.eventId, args.eventId);
+    const [existing] = await tx
+      .select()
+      .from(pointGrantTokens)
+      .where(
+        and(
+          eq(pointGrantTokens.createdByUserId, args.issuerUserId),
+          eq(pointGrantTokens.pointsValue, args.pointsValue),
+          eq(pointGrantTokens.maxClaims, args.maxClaims),
+          eq(pointGrantTokens.claimsUsed, 0), // unscanned only — any claim → mint fresh next time
+          eq(pointGrantTokens.status, "active"),
+          eventCond,
+        ),
+      )
+      .orderBy(desc(pointGrantTokens.createdAt))
+      .limit(1);
+    if (
+      existing &&
+      existing.tokenEnc && // need the stored ciphertext to re-show the same QR
+      (!existing.expiresAt || existing.expiresAt.getTime() > Date.now())
+    ) {
+      return { token: existing, plaintext: decryptSecret(existing.tokenEnc), reused: true };
+    }
+
+    const plaintext = generateToken();
     // Debit budget first — adjustBudget locks the staff row and rejects if budget < cost (insufficient_budget).
-    await adjustBudget(
+    const debit = await adjustBudget(
       {
         staffUserId: args.issuerUserId,
         delta: -cost,
@@ -61,7 +95,13 @@ export async function issueGrantToken(
       .returning();
     if (!row) throw new Error("issueGrantToken: insert returned no row");
 
-    // Backfill the budget row's grantTokenId so refund can find it (and audit cross-link).
+    // Backfill the budget row's grantTokenId (token id only exists after insert above).
+    // Staff "QR ที่สร้างไว้" list + self-revoke key off this link, so it must be set.
+    await tx
+      .update(staffBudgetLedger)
+      .set({ grantTokenId: row.id })
+      .where(eq(staffBudgetLedger.id, debit.entry.id));
+
     await writeAudit(
       {
         actorUserId: args.issuerUserId,
@@ -74,10 +114,36 @@ export async function issueGrantToken(
       },
       tx,
     );
-    return row;
+    return { token: row, plaintext, reused: false };
   });
+}
 
-  return { token, plaintext };
+// === RE-DISPLAY (issuer reopens an unscanned/active QR) ===
+// Decrypts the stored plaintext so the issuer can show the SAME QR again — no new token, no debit.
+// Only the issuer (or an admin) can re-display, and only while the token is still active.
+export type GrantQrResult =
+  | { result: "ok"; token: PointGrantTokenRow; plaintext: string }
+  | { result: "grant_not_found" }
+  | { result: "grant_not_active" };
+
+export async function getGrantTokenQr(args: {
+  tokenId: string;
+  actorUserId: string;
+  actorIsAdmin: boolean;
+}): Promise<GrantQrResult> {
+  const [token] = await db
+    .select()
+    .from(pointGrantTokens)
+    .where(eq(pointGrantTokens.id, args.tokenId))
+    .limit(1);
+  // Not found OR not the issuer (non-admin) → same 404 shape, no enumeration.
+  if (!token || (!args.actorIsAdmin && token.createdByUserId !== args.actorUserId)) {
+    return { result: "grant_not_found" };
+  }
+  // Revoked/exhausted/expired (or missing ciphertext) can't be re-shown (would be a dead QR).
+  const expired = !!token.expiresAt && token.expiresAt.getTime() <= Date.now();
+  if (token.status !== "active" || expired || !token.tokenEnc) return { result: "grant_not_active" };
+  return { result: "ok", token, plaintext: decryptSecret(token.tokenEnc) };
 }
 
 // === CLAIM (plan §4.4) ===

@@ -179,6 +179,17 @@ export type IssueGrantResponse = {
   pointsValue: number;
   maxClaims: number;
   expiresAt: string | null;
+  reused?: boolean; // true = an identical unscanned QR was re-shown (no budget spent)
+};
+
+// GET /points/grant-tokens/:id/qr — issuer re-displays an active QR's plaintext.
+export type GrantQrResponse = {
+  token: string;
+  tokenId: string;
+  pointsValue: number;
+  maxClaims: number;
+  claimsUsed: number;
+  expiresAt: string | null;
 };
 
 // === Admin staff-budget management (plan §4.7/§14) ===

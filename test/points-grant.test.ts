@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../src/db/client";
 import { users } from "../src/db/schema/users";
 import { pointLedger, staffBudgetLedger } from "../src/db/schema/points";
@@ -90,6 +90,19 @@ describe("points grant: issue debits budget; can't issue beyond budget", () => {
     expect(body.tokenId).toBeTruthy();
     expect(await budgetOf(staff.user.id)).toBe(0); // 25 - 25
     expect(await budgetSum(staff.user.id)).toBe(0);
+
+    // The grant_issue budget row must be backfilled with the new token id —
+    // staff "QR ที่สร้างไว้" list + self-revoke key off this link.
+    const [issueRow] = await db
+      .select({ tokenId: staffBudgetLedger.grantTokenId })
+      .from(staffBudgetLedger)
+      .where(
+        and(
+          eq(staffBudgetLedger.staffUserId, staff.user.id),
+          eq(staffBudgetLedger.reasonCode, "grant_issue"),
+        ),
+      );
+    expect(issueRow?.tokenId).toBe(body.tokenId);
   });
 
   it("issuing beyond budget is rejected with insufficient_budget; budget untouched", async () => {
@@ -105,6 +118,86 @@ describe("points grant: issue debits budget; can't issue beyond budget", () => {
     expect(res.status).toBe(400);
     expect((await res.json()) as { error: string }).toMatchObject({ error: "insufficient_budget" });
     expect(await budgetOf(staff.user.id)).toBe(10);
+  });
+});
+
+// =====================================================================
+// Reuse on create + issuer re-display (better UX: don't double-spend / orphan unscanned QRs)
+// =====================================================================
+describe("points grant: reuse unscanned QR on re-create; re-display the same QR", () => {
+  it("re-creating an identical unscanned QR reuses it (200, reused, same token, debit once)", async () => {
+    const admin = await loginAs("admin");
+    const staff = await loginAs("checkin_staff");
+    await topup(admin.cookie, staff.user.id, 50);
+
+    const first = await request("/points/grant-tokens", {
+      method: "POST",
+      cookie: staff.cookie,
+      body: { points_value: 5, max_claims: 1 },
+    });
+    expect(first.status).toBe(201);
+    const a = (await first.json()) as { tokenId: string; token: string; reused: boolean };
+    expect(a.reused).toBe(false);
+    expect(await budgetOf(staff.user.id)).toBe(45); // 50 - 5
+
+    const second = await request("/points/grant-tokens", {
+      method: "POST",
+      cookie: staff.cookie,
+      body: { points_value: 5, max_claims: 1 },
+    });
+    expect(second.status).toBe(200); // reused → not 201
+    const b = (await second.json()) as { tokenId: string; token: string; reused: boolean };
+    expect(b.reused).toBe(true);
+    expect(b.tokenId).toBe(a.tokenId); // same token
+    expect(b.token).toBe(a.token); // same plaintext (decrypted)
+    expect(await budgetOf(staff.user.id)).toBe(45); // NOT debited again
+  });
+
+  it("after a scan, re-creating mints a fresh token (debits again)", async () => {
+    const admin = await loginAs("admin");
+    const staff = await loginAs("checkin_staff");
+    await topup(admin.cookie, staff.user.id, 50);
+
+    const first = await request("/points/grant-tokens", {
+      method: "POST",
+      cookie: staff.cookie,
+      body: { points_value: 5, max_claims: 1 },
+    });
+    const a = (await first.json()) as { tokenId: string; token: string };
+
+    const student = await loginAs("student");
+    await request("/points/claim", { method: "POST", cookie: student.cookie, body: { token: a.token } });
+
+    const second = await request("/points/grant-tokens", {
+      method: "POST",
+      cookie: staff.cookie,
+      body: { points_value: 5, max_claims: 1 },
+    });
+    expect(second.status).toBe(201); // claimed → no reuse, fresh mint
+    const b = (await second.json()) as { tokenId: string; reused: boolean };
+    expect(b.reused).toBe(false);
+    expect(b.tokenId).not.toBe(a.tokenId);
+    expect(await budgetOf(staff.user.id)).toBe(40); // 50 - 5 - 5
+  });
+
+  it("issuer re-displays an active QR's plaintext; non-owner gets 404", async () => {
+    const admin = await loginAs("admin");
+    const staff = await loginAs("checkin_staff");
+    const other = await loginAs("checkin_staff");
+    await topup(admin.cookie, staff.user.id, 50);
+    const issued = await request("/points/grant-tokens", {
+      method: "POST",
+      cookie: staff.cookie,
+      body: { points_value: 5, max_claims: 1 },
+    });
+    const a = (await issued.json()) as { tokenId: string; token: string };
+
+    const qr = await request(`/points/grant-tokens/${a.tokenId}/qr`, { cookie: staff.cookie });
+    expect(qr.status).toBe(200);
+    expect((await qr.json()) as { token: string }).toMatchObject({ token: a.token });
+
+    const denied = await request(`/points/grant-tokens/${a.tokenId}/qr`, { cookie: other.cookie });
+    expect(denied.status).toBe(404); // not the issuer → no enumeration
   });
 });
 
