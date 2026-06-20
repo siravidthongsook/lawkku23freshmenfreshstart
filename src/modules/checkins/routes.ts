@@ -13,7 +13,7 @@ import { badRequest, notFound } from "../../lib/errors";
 import { writeAudit } from "../../lib/audit";
 import { checkinsTotal } from "../../lib/metrics";
 import { hashToken } from "../../lib/crypto";
-import { isWithinWindow } from "../../lib/time";
+import { isWithinWindow, effectiveCheckinClose } from "../../lib/time";
 import { awardCheckinIn, awardCheckinOut, reverseCheckinOnUndo } from "../points/checkin-award";
 import { getEventPointConfig, getPointSettings, isCheckinOutEnabled, isPastCutoff, scanOutWindow } from "../points/config-service";
 
@@ -95,7 +95,8 @@ router.get("/staff/events", requireAuth, requirePermission(canScanCheckin), asyn
         location: e.location,
         checkinOpenAt: e.checkinOpenAt?.toISOString() ?? null,
         checkinCloseAt: e.checkinCloseAt?.toISOString() ?? null,
-        checkinOpen: isWithinWindow(new Date(), e.checkinOpenAt, e.checkinCloseAt),
+        // Open-now uses effective close (blank close = event end) so it matches the scan gate.
+        checkinOpen: isWithinWindow(new Date(), e.checkinOpenAt, effectiveCheckinClose(e.checkinCloseAt, e.eventEndAt)),
         // Always present (0 when no regs) so the UI can distinguish a real zero from a missing field.
         registeredCount: ct?.registered ?? 0,
         checkedInCount: ct?.checkedIn ?? 0,
@@ -129,7 +130,8 @@ router.get(
         status: event.status,
         checkinOpenAt: event.checkinOpenAt?.toISOString() ?? null,
         checkinCloseAt: event.checkinCloseAt?.toISOString() ?? null,
-        checkinOpen: isWithinWindow(new Date(), event.checkinOpenAt, event.checkinCloseAt),
+        // Open-now uses effective close (blank close = event end) so it matches the scan gate.
+        checkinOpen: isWithinWindow(new Date(), event.checkinOpenAt, effectiveCheckinClose(event.checkinCloseAt, event.eventEndAt)),
       },
       counts: { registered: counts?.registered ?? 0, checkedIn: counts?.checkedIn ?? 0 },
     });
@@ -258,9 +260,11 @@ router.post(
       }
 
       // ----- SCAN IN (default): check-in window, then check-in + points award. -----
+      // Effective close = explicit close, else event end (scan-in must not outlast the event).
+      const checkinClose = effectiveCheckinClose(event.checkinCloseAt, event.eventEndAt);
       if (event.checkinOpenAt && now < event.checkinOpenAt)
         return { result: "checkin_not_open", ...who };
-      if (event.checkinCloseAt && now > event.checkinCloseAt)
+      if (checkinClose && now > checkinClose)
         return { result: "checkin_closed", ...who };
 
       if (reg.status === "checked_in") {
@@ -417,7 +421,8 @@ router.post(
       if (!event) throw notFound("Event not found");
       if (event.status !== "published")
         throw badRequest("event_not_published", "Event is not published");
-      if (!isWithinWindow(now, event.checkinOpenAt, event.checkinCloseAt))
+      // Effective close = explicit close, else event end (scan-in must not outlast the event).
+      if (!isWithinWindow(now, event.checkinOpenAt, effectiveCheckinClose(event.checkinCloseAt, event.eventEndAt)))
         throw badRequest("checkin_not_open", "Check-in window is not open");
 
       if (reg.status === "cancelled")

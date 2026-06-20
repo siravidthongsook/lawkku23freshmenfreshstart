@@ -354,6 +354,25 @@ describe("checkins: invalid / revoked / ineligible token rejection", () => {
     const res = await scan(event.id, qrToken, staff.cookie);
     expect((await res.json()) as { result: string }).toMatchObject({ result: "checkin_closed" });
   });
+
+  // Blank checkinCloseAt falls back to eventEndAt: scan-in must not outlast the event.
+  it("blank checkinCloseAt + PAST eventEndAt → checkin_closed (scan-in ends at event end)", async () => {
+    const past = new Date(Date.now() - 60 * 60 * 1000);
+    const event = await makeCheckinEvent({ checkinOpenAt: new Date(Date.now() - 120 * 60 * 1000), eventEndAt: past });
+    const { qrToken } = await registerStudent(event);
+    const staff = await loginAs("checkin_staff");
+    const res = await scan(event.id, qrToken, staff.cookie);
+    expect((await res.json()) as { result: string }).toMatchObject({ result: "checkin_closed" });
+  });
+
+  // Blank checkinCloseAt + FUTURE eventEndAt → still open.
+  it("blank checkinCloseAt + FUTURE eventEndAt → checked_in_success", async () => {
+    const event = await makeCheckinEvent({ checkinOpenAt: new Date(Date.now() - 60 * 60 * 1000), eventEndAt: new Date(Date.now() + 60 * 60 * 1000) });
+    const { qrToken } = await registerStudent(event);
+    const staff = await loginAs("checkin_staff");
+    const res = await scan(event.id, qrToken, staff.cookie);
+    expect((await res.json()) as { result: string }).toMatchObject({ result: "checked_in_success" });
+  });
 });
 
 // =====================================================================

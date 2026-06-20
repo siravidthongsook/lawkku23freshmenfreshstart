@@ -16,7 +16,9 @@ import {
   canReverseOwnRecentGrant,
   canTopupStaffBudget,
 } from "../../lib/permissions";
-import { AppError } from "../../lib/errors";
+import { AppError, badRequest, notFound } from "../../lib/errors";
+import { events } from "../../db/schema/events";
+import { validatePointWindowTiming } from "../events/timing";
 import { pointRateLimit } from "../../lib/point-rate-limit";
 import { getBalance, getLedgerEntryDetail, listUserLedger, serializeLedgerEntry } from "./service";
 import { adjustBudget, getStaffBudget } from "./budget-service";
@@ -816,6 +818,25 @@ router.patch(
     if ("scan_out_close_at" in b) patch.scanOutCloseAt = b.scan_out_close_at ?? null;
     if ("assessment_open_at" in b) patch.assessmentOpenAt = b.assessment_open_at ?? null;
     if ("assessment_close_at" in b) patch.assessmentCloseAt = b.assessment_close_at ?? null;
+
+    // Validate scan-out/assessment windows against the event timeline (anti-overlap + sane assessment
+    // close). Cross-table: merge the incoming patch over the existing config row, then check vs the event.
+    const [event] = await db
+      .select({ eventStartAt: events.eventStartAt, eventEndAt: events.eventEndAt, checkinCloseAt: events.checkinCloseAt })
+      .from(events)
+      .where(eq(events.id, eventId))
+      .limit(1);
+    if (!event) throw notFound("Event not found");
+    const existingCfg = await getEventPointConfig(eventId);
+    const mergedWin = {
+      scanOutOpenAt: "scan_out_open_at" in b ? (b.scan_out_open_at ?? null) : (existingCfg?.scanOutOpenAt ?? null),
+      scanOutCloseAt: "scan_out_close_at" in b ? (b.scan_out_close_at ?? null) : (existingCfg?.scanOutCloseAt ?? null),
+      assessmentOpenAt: "assessment_open_at" in b ? (b.assessment_open_at ?? null) : (existingCfg?.assessmentOpenAt ?? null),
+      assessmentCloseAt: "assessment_close_at" in b ? (b.assessment_close_at ?? null) : (existingCfg?.assessmentCloseAt ?? null),
+    };
+    const violations = validatePointWindowTiming(mergedWin, event);
+    if (violations.length > 0) throw badRequest("invalid_timing", violations[0]!.message);
+
     const config = await upsertEventPointConfig({ eventId, patch, actorUserId: admin.id });
     return c.json({ result: "updated", config: serializeEventPointConfig(config) });
   },

@@ -7,6 +7,10 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { toast } from "sonner";
 import { apiPost, apiPatch, apiPostForm, apiDelete, ApiError } from "@/lib/api";
+import { updateEventPointConfig } from "@/lib/points-api";
+import type { EventPointConfig } from "@/lib/points-types";
+// Shared time-ordering rules — single source of truth with the backend handlers.
+import { validateEventTiming, validatePointWindowTiming } from "@be/modules/events/timing";
 import {
   createEventSchema,
   updateEventSchema,
@@ -27,7 +31,7 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { ImageOff } from "lucide-react";
+import { ImageOff, AlertTriangle } from "lucide-react";
 import { PosterCropDialog } from "./poster-crop-dialog";
 import { isoToBangkokInput, bangkokInputToIso } from "./datetime";
 
@@ -38,6 +42,11 @@ type Props = {
   mode: Mode;
   eventId?: string;
   initial?: Partial<EventAdmin> | null;
+  // Per-event point/scan windows live in a separate table (eventPointConfig) + endpoint.
+  // Edit mode loads it and we PATCH it alongside the event so all timing sits on one page.
+  pointConfig?: EventPointConfig | null;
+  // Global points cutoff (ISO) — used only to warn when a window close lands past it.
+  cutoffAt?: string | null;
 };
 
 // public_self_register = self-register, but only existing (admin-provisioned + claimed) accounts; no public signup exists.
@@ -56,7 +65,7 @@ function omit(obj: Record<string, string>, key: string): Record<string, string> 
   return rest;
 }
 
-export function EventForm({ mode, eventId, initial }: Props) {
+export function EventForm({ mode, eventId, initial, pointConfig, cutoffAt }: Props) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   // Per-field validation errors (keyed by field name). Cleared on edit + before each submit.
@@ -84,6 +93,14 @@ export function EventForm({ mode, eventId, initial }: Props) {
   const [checkinCloseAt, setCheckinCloseAt] = useState(isoToBangkokInput(initial?.checkinCloseAt));
   const [eventStartAt, setEventStartAt] = useState(isoToBangkokInput(initial?.eventStartAt));
   const [eventEndAt, setEventEndAt] = useState(isoToBangkokInput(initial?.eventEndAt));
+  // Point/scan windows (from eventPointConfig). Blank = inherit event defaults — see hints below.
+  // NOTE: scan-IN has no field — it always tracks the event check-in window above (would be redundant).
+  const [scanOutOpenAt, setScanOutOpenAt] = useState(isoToBangkokInput(pointConfig?.scanOutOpenAt));
+  const [scanOutCloseAt, setScanOutCloseAt] = useState(isoToBangkokInput(pointConfig?.scanOutCloseAt));
+  const [assessmentOpenAt, setAssessmentOpenAt] = useState(isoToBangkokInput(pointConfig?.assessmentOpenAt));
+  const [assessmentCloseAt, setAssessmentCloseAt] = useState(isoToBangkokInput(pointConfig?.assessmentCloseAt));
+  // Auto-open = no open override → backend opens assessment at event start. Default ON (null override).
+  const [assessmentAutoOpen, setAssessmentAutoOpen] = useState(pointConfig?.assessmentOpenAt == null);
   const [capacityEnabled, setCapacityEnabled] = useState(initial?.capacityEnabled ?? false);
   const [capacityLimit, setCapacityLimit] = useState<string>(
     initial?.capacityLimit != null ? String(initial.capacityLimit) : "",
@@ -212,6 +229,16 @@ export function EventForm({ mode, eventId, initial }: Props) {
     [publicSlug],
   );
 
+  // Non-blocking warning: a scan-out / assessment close set AFTER the global cutoff is "open but
+  // useless" — students can scan/submit but earn nothing (cutoff freezes earning). Just warn.
+  const cutoffWarning = useMemo(() => {
+    if (!cutoffAt) return false;
+    const cut = new Date(cutoffAt).getTime();
+    const so = bangkokInputToIso(scanOutCloseAt);
+    const ac = bangkokInputToIso(assessmentCloseAt);
+    return Boolean((so && new Date(so).getTime() > cut) || (ac && new Date(ac).getTime() > cut));
+  }, [cutoffAt, scanOutCloseAt, assessmentCloseAt]);
+
   // Scroll to + focus the first field that has an error (by name attribute).
   function scrollToFirstError(errs: Record<string, string>) {
     const first = Object.keys(errs)[0];
@@ -259,27 +286,45 @@ export function EventForm({ mode, eventId, initial }: Props) {
       fieldErrors.capacityLimit = "จำนวนที่รับต้องมากกว่า 0 เมื่อเปิดการจำกัดจำนวน";
     }
 
-    // Each window's open must precede its close (only when both ends present).
-    if (
-      payload.registrationOpenAt &&
-      payload.registrationCloseAt &&
-      payload.registrationOpenAt >= payload.registrationCloseAt
-    ) {
-      fieldErrors.registrationCloseAt = "เวลาปิดลงทะเบียนต้องอยู่หลังเวลาเปิดลงทะเบียน";
+    // Shared cross-field time-ordering rules (same source of truth as the backend, via @be/*).
+    const toDate = (s: string | null) => (s ? new Date(s) : null);
+    const eventTiming = {
+      registrationOpenAt: toDate(payload.registrationOpenAt),
+      registrationCloseAt: toDate(payload.registrationCloseAt),
+      checkinOpenAt: toDate(payload.checkinOpenAt),
+      checkinCloseAt: toDate(payload.checkinCloseAt),
+      eventStartAt: toDate(payload.eventStartAt),
+      eventEndAt: toDate(payload.eventEndAt),
+    };
+    for (const vio of validateEventTiming(eventTiming)) {
+      if (!fieldErrors[vio.field]) fieldErrors[vio.field] = vio.message;
     }
-    if (
-      payload.checkinOpenAt &&
-      payload.checkinCloseAt &&
-      payload.checkinOpenAt >= payload.checkinCloseAt
-    ) {
-      fieldErrors.checkinCloseAt = "เวลาปิดเช็คอินต้องอยู่หลังเวลาเปิดเช็คอิน";
-    }
-    if (
-      payload.eventStartAt &&
-      payload.eventEndAt &&
-      payload.eventStartAt >= payload.eventEndAt
-    ) {
-      fieldErrors.eventEndAt = "เวลาสิ้นสุดกิจกรรมต้องอยู่หลังเวลาเริ่มกิจกรรม";
+
+    // Point/scan windows (edit only — those fields exist then). Validated against the event timeline.
+    const win = {
+      scanOutOpenAt: bangkokInputToIso(scanOutOpenAt),
+      scanOutCloseAt: bangkokInputToIso(scanOutCloseAt),
+      // Auto-open ON → clear the override (null) so backend opens at event start.
+      assessmentOpenAt: assessmentAutoOpen ? null : bangkokInputToIso(assessmentOpenAt),
+      assessmentCloseAt: bangkokInputToIso(assessmentCloseAt),
+    };
+    if (mode === "edit") {
+      const winViolations = validatePointWindowTiming(
+        {
+          scanOutOpenAt: toDate(win.scanOutOpenAt),
+          scanOutCloseAt: toDate(win.scanOutCloseAt),
+          assessmentOpenAt: toDate(win.assessmentOpenAt),
+          assessmentCloseAt: toDate(win.assessmentCloseAt),
+        },
+        {
+          eventStartAt: eventTiming.eventStartAt,
+          eventEndAt: eventTiming.eventEndAt,
+          checkinCloseAt: eventTiming.checkinCloseAt,
+        },
+      );
+      for (const vio of winViolations) {
+        if (!fieldErrors[vio.field]) fieldErrors[vio.field] = vio.message;
+      }
     }
 
     // Validate against the shared zod schema (coerces dates); map any issues onto their field.
@@ -331,6 +376,27 @@ export function EventForm({ mode, eventId, initial }: Props) {
               err instanceof ApiError
                 ? `บันทึกกิจกรรมแล้ว แต่ไม่สามารถอัปโหลดรูปภาพได้: ${err.message}`
                 : "บันทึกกิจกรรมแล้ว แต่ไม่สามารถอัปโหลดรูปภาพได้",
+            );
+          }
+        }
+        // 3) Then the point/scan windows (separate table). Event is already saved — warn, don't lose it.
+        if (eventId) {
+          try {
+            await updateEventPointConfig(eventId, {
+              // scan-IN window = the event check-in window. Force-clear any legacy override (the field
+              // was removed from this UI) so it can never silently win over checkinOpenAt/CloseAt.
+              scan_in_open_at: null,
+              scan_in_close_at: null,
+              scan_out_open_at: win.scanOutOpenAt,
+              scan_out_close_at: win.scanOutCloseAt,
+              assessment_open_at: win.assessmentOpenAt,
+              assessment_close_at: win.assessmentCloseAt,
+            });
+          } catch (err) {
+            toast.warning(
+              err instanceof ApiError
+                ? `บันทึกกิจกรรมแล้ว แต่ไม่สามารถบันทึกช่วงเวลาแต้มได้: ${err.message}`
+                : "บันทึกกิจกรรมแล้ว แต่ไม่สามารถบันทึกช่วงเวลาแต้มได้",
             );
           }
         }
@@ -528,7 +594,7 @@ export function EventForm({ mode, eventId, initial }: Props) {
 
       <Card>
         <CardHeader>
-          <CardTitle>เวลากิจกรรมและเช็คอิน</CardTitle>
+          <CardTitle>เวลากิจกรรม (เวลาไทย)</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -551,7 +617,36 @@ export function EventForm({ mode, eventId, initial }: Props) {
                 onChange={(e) => bind(setEventEndAt, "eventEndAt")(e.target.value)}
               />
             </Field>
-            <Field label="เปิดเช็คอิน (เวลาไทย)" hint="เว้นว่าง = ไม่มีกำหนด">
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Scan/assessment windows — scan-IN (= check-in window, an event field) grouped here with
+          scan-OUT + assessment so all "when can we scan/assess" timing lives in one place. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>ช่วงเวลาสแกน/แบบประเมิน (เวลาไทย)</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            ควบคุมว่าสแกนเข้า/ออก และทำแบบประเมินได้ช่วงไหน — ไม่ใช่จำนวนแต้ม (ตั้งจำนวนที่หน้า “ตั้งค่าแต้ม”)
+          </p>
+          {/* Scan-out/assessment fallbacks only apply in edit mode (those fields are hidden in create). */}
+          {mode === "edit" && eventId ? (
+            <p className="text-xs text-muted-foreground">
+              ถ้าเว้นว่าง: สแกนออก = เปิดตอนจบงาน แล้วปิดเองตามจำนวนชั่วโมงที่ตั้งในหน้า “ตั้งค่าแต้ม” · แบบประเมิน = เปิดตั้งแต่เวลาเริ่มงาน
+            </p>
+          ) : null}
+          {cutoffWarning ? (
+            <p className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+              ช่วงเวลาปิดบางช่องเลยเวลาตัดแต้มของระบบ (cutoff) — สแกน/ทำแบบประเมินได้ แต่จะไม่ได้แต้ม
+            </p>
+          ) : null}
+          <div className="grid gap-4 sm:grid-cols-2">
+            {/* Scan-IN window = the event check-in window (checkinOpenAt/CloseAt → events table).
+                Note: blank on BOTH ends hides the event from the staff scanner list (needs ≥1 bound). */}
+            <Field label="สแกนเข้า เปิด (เวลาไทย)" hint="เว้นว่าง = ไม่มีกำหนด • ต้องตั้งอย่างน้อย 1 ช่อง (เปิด/ปิด) จึงจะขึ้นในรายการสแกนของสตาฟ">
               <Input
                 type="datetime-local"
                 value={checkinOpenAt}
@@ -559,10 +654,10 @@ export function EventForm({ mode, eventId, initial }: Props) {
               />
             </Field>
             <Field
-              label="ปิดเช็คอิน (เวลาไทย)"
+              label="สแกนเข้า ปิด (เวลาไทย)"
               name="checkinCloseAt"
               error={errors.checkinCloseAt}
-              hint="เว้นว่าง = ไม่มีกำหนด"
+              hint="เว้นว่าง = ปิดเมื่อถึงเวลาจบงาน (ถ้าไม่ได้ตั้งเวลาจบงาน = ไม่มีกำหนด)"
             >
               <Input
                 type="datetime-local"
@@ -570,6 +665,52 @@ export function EventForm({ mode, eventId, initial }: Props) {
                 onChange={(e) => bind(setCheckinCloseAt, "checkinCloseAt")(e.target.value)}
               />
             </Field>
+            {mode === "edit" && eventId ? (
+              <>
+              <Field label="สแกนออก เปิด (เวลาไทย)" hint="เว้นว่าง = เปิดเมื่อจบงาน แล้วปิดตามชั่วโมงที่ตั้งใน “ตั้งค่าแต้ม” (ถ้าไม่ได้ตั้งเวลาจบงาน = เปิดตลอด)">
+                <Input
+                  type="datetime-local"
+                  value={scanOutOpenAt}
+                  onChange={(e) => bind(setScanOutOpenAt)(e.target.value)}
+                />
+              </Field>
+              <Field label="สแกนออก ปิด (เวลาไทย)" name="scanOutCloseAt" error={errors.scanOutCloseAt} hint="เว้นว่าง = เปิดเมื่อจบงาน แล้วปิดตามชั่วโมงที่ตั้งใน “ตั้งค่าแต้ม” (ถ้าไม่ได้ตั้งเวลาจบงาน = เปิดตลอด)">
+                <Input
+                  type="datetime-local"
+                  value={scanOutCloseAt}
+                  onChange={(e) => bind(setScanOutCloseAt, "scanOutCloseAt")(e.target.value)}
+                />
+              </Field>
+              <div className="space-y-1.5" data-field="assessmentOpenAt">
+                <Label>แบบประเมิน เปิด (เวลาไทย)</Label>
+                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={assessmentAutoOpen}
+                    onChange={(e) => bind(setAssessmentAutoOpen)(e.target.checked)}
+                    className="size-4 rounded border-input accent-primary"
+                  />
+                  เปิดอัตโนมัติเมื่อเริ่มกิจกรรม
+                </label>
+                {assessmentAutoOpen ? (
+                  <p className="text-xs text-muted-foreground">ใช้เวลาเริ่มกิจกรรมเป็นเวลาเปิด</p>
+                ) : (
+                  <Input
+                    type="datetime-local"
+                    value={assessmentOpenAt}
+                    onChange={(e) => bind(setAssessmentOpenAt)(e.target.value)}
+                  />
+                )}
+              </div>
+              <Field label="แบบประเมิน ปิด (เวลาไทย)" name="assessmentCloseAt" error={errors.assessmentCloseAt} hint="เว้นว่าง = ไม่มีกำหนดปิด">
+                <Input
+                  type="datetime-local"
+                  value={assessmentCloseAt}
+                  onChange={(e) => bind(setAssessmentCloseAt, "assessmentCloseAt")(e.target.value)}
+                />
+              </Field>
+              </>
+            ) : null}
           </div>
         </CardContent>
       </Card>

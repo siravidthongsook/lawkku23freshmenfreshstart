@@ -2,7 +2,7 @@ import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { db, type Tx } from "../../db/client";
 import { events, type Event } from "../../db/schema/events";
 import { registrations } from "../../db/schema/registrations";
-import { isWithinWindow } from "../../lib/time";
+import { isWithinWindow, effectiveCheckinClose } from "../../lib/time";
 
 // slugify: lowercase, strip non-alphanumerics → hyphen, trim. Keeps thai/unicode letters as-is.
 export function slugify(input: string): string {
@@ -89,9 +89,10 @@ export async function computeEventStatus(
     isWithinWindow(now, event.registrationOpenAt, event.registrationCloseAt) &&
     !full;
 
+  // Effective close = explicit close, else event end (scan-in must not outlast the event).
   const checkinOpen =
     event.status === "published" &&
-    isWithinWindow(now, event.checkinOpenAt, event.checkinCloseAt);
+    isWithinWindow(now, event.checkinOpenAt, effectiveCheckinClose(event.checkinCloseAt, event.eventEndAt));
 
   return {
     registrationOpen,

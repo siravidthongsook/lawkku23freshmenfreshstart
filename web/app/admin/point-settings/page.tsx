@@ -255,10 +255,10 @@ export default function PointSettingsPage() {
               onChange={(v) => setField("defaultAssessmentPoints", v)}
             />
             <NumberField
-              label="ช่วงสแกนออก fallback (ชั่วโมง)"
+              label="ระยะเวลาเปิดสแกนออกหลังจบงาน (ชั่วโมง)"
               value={form.scanOutFallbackHours}
               onChange={(v) => setField("scanOutFallbackHours", v)}
-              help="เปิดสแกนออกหลังจบงานกี่ชั่วโมง (เมื่อไม่ได้ตั้งช่วงเอง)"
+              help="หลังจบงาน เปิดให้สแกนออกได้นานกี่ชั่วโมง (ใช้เมื่อไม่ได้ตั้งช่วงเวลาเองในกิจกรรม)"
             />
           </div>
 

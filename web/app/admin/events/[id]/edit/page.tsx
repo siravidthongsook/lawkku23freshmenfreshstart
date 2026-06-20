@@ -5,6 +5,8 @@ import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ChevronRight, FileText } from "lucide-react";
 import { apiGet, ApiError } from "@/lib/api";
+import { getEventPointConfig, getPointSettings } from "@/lib/points-api";
+import type { EventPointConfig } from "@/lib/points-types";
 import type { EventAdmin } from "@/lib/types";
 import { EventForm } from "@/components/admin-events/event-form";
 import { Button } from "@/components/ui/button";
@@ -13,15 +15,28 @@ import { Skeleton } from "@/components/ui/skeleton";
 export default function EditEventPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [event, setEvent] = useState<EventAdmin | null>(null);
+  // Point/scan windows live in eventPointConfig — load alongside so the form can edit timing too.
+  const [pointConfig, setPointConfig] = useState<EventPointConfig | null>(null);
+  // Global points cutoff — so the form can warn when a window close lands past it (open-but-useless).
+  const [cutoffAt, setCutoffAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Distinguish "not found" (404) from generic load errors so we can show a friendly state.
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
     let active = true;
-    // Detail returns { event, computed }; we only need the event row for the form.
-    apiGet<{ event: EventAdmin }>(`/admin/events/${id}`)
-      .then((res) => active && setEvent(res.event))
+    // Detail returns { event, computed }; we only need the event row. Fetch point-config in parallel.
+    Promise.all([
+      apiGet<{ event: EventAdmin }>(`/admin/events/${id}`),
+      getEventPointConfig(id),
+      getPointSettings(),
+    ])
+      .then(([eventRes, cfgRes, settingsRes]) => {
+        if (!active) return;
+        setEvent(eventRes.event);
+        setPointConfig(cfgRes.config);
+        setCutoffAt(settingsRes.settings.cutoffAt);
+      })
       .catch((err) => {
         if (!active) return;
         if (err instanceof ApiError && err.status === 404) {
@@ -92,7 +107,7 @@ export default function EditEventPage({ params }: { params: Promise<{ id: string
           <Skeleton className="h-40 w-full" />
         </div>
       ) : event ? (
-        <EventForm mode="edit" eventId={id} initial={event} />
+        <EventForm mode="edit" eventId={id} initial={event} pointConfig={pointConfig} cutoffAt={cutoffAt} />
       ) : null}
     </div>
   );

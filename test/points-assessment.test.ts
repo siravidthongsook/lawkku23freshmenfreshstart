@@ -35,26 +35,24 @@ async function makeAssessmentForm(event: Event, schema: FormSchema = { fields: [
 // Enable assessment on an event; assessmentRequiresCheckin defaults true unless overridden.
 async function configureAssessment(
   eventId: string,
-  opts: { points?: number | null; requiresCheckin?: boolean; openAt?: Date | null } = {},
+  opts: {
+    points?: number | null;
+    requiresCheckin?: boolean;
+    openAt?: Date | null;
+    closeAt?: Date | null;
+  } = {},
 ) {
+  const set = {
+    assessmentEnabled: true,
+    assessmentRequiresCheckin: opts.requiresCheckin ?? true,
+    assessmentPoints: opts.points ?? null,
+    assessmentOpenAt: opts.openAt ?? null,
+    assessmentCloseAt: opts.closeAt ?? null,
+  };
   await db
     .insert(eventPointConfig)
-    .values({
-      eventId,
-      assessmentEnabled: true,
-      assessmentRequiresCheckin: opts.requiresCheckin ?? true,
-      assessmentPoints: opts.points ?? null,
-      assessmentOpenAt: opts.openAt ?? null,
-    })
-    .onConflictDoUpdate({
-      target: eventPointConfig.eventId,
-      set: {
-        assessmentEnabled: true,
-        assessmentRequiresCheckin: opts.requiresCheckin ?? true,
-        assessmentPoints: opts.points ?? null,
-        assessmentOpenAt: opts.openAt ?? null,
-      },
-    });
+    .values({ eventId, ...set })
+    .onConflictDoUpdate({ target: eventPointConfig.eventId, set });
 }
 
 // A checked-in student for an event (so requiresCheckin passes by default).
@@ -167,6 +165,35 @@ describe("points: assessment guards", () => {
     const res = await submit(event.id, cookie);
     expect(((await res.json()) as { result: string }).result).toBe("assessment_not_open");
     expect(await balanceOf(user.id)).toBe(0);
+  });
+
+  // Auto-open default: no openAt override → assessment opens at eventStartAt. Future start = not open yet,
+  // EVEN with a closeAt set (independent fallbacks — close override must not drop the eventStartAt open).
+  it("auto-open (no openAt) respects a FUTURE eventStartAt even when closeAt is set → assessment_not_open", async () => {
+    const event = await makeEvent({
+      status: "published",
+      eventStartAt: new Date(Date.now() + 60 * 60_000), // starts in 1h
+    });
+    await makeAssessmentForm(event);
+    await configureAssessment(event.id, { closeAt: new Date(Date.now() + 120 * 60_000) }); // openAt null
+    const { user, cookie } = await checkedInStudent(event);
+    const res = await submit(event.id, cookie);
+    expect(((await res.json()) as { result: string }).result).toBe("assessment_not_open");
+    expect(await balanceOf(user.id)).toBe(0);
+  });
+
+  // Auto-open default, past eventStartAt + future closeAt → open now → awards.
+  it("auto-open (no openAt) with a PAST eventStartAt and future closeAt → submits + awards", async () => {
+    const event = await makeEvent({
+      status: "published",
+      eventStartAt: new Date(Date.now() - 60 * 60_000), // started 1h ago
+    });
+    await makeAssessmentForm(event);
+    await configureAssessment(event.id, { closeAt: new Date(Date.now() + 60 * 60_000) }); // openAt null
+    const { user, cookie } = await checkedInStudent(event);
+    const res = await submit(event.id, cookie);
+    expect(((await res.json()) as { result: string }).result).toBe("submitted_success");
+    expect(await balanceOf(user.id)).toBe(100);
   });
 
   it("requiresCheckin=true blocks a non-checked-in student (checkin_required), no award", async () => {

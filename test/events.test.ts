@@ -343,18 +343,17 @@ describe("events: create/edit validation", () => {
     expect(new Date(body.event.registrationCloseAt).toISOString()).toBe(close);
   });
 
-  // FINDING: window end-after-start is NOT validated. createEventSchema has no
-  // .refine for window ordering, so a close-before-open window is ACCEPTED. The
-  // brief's "end-after-start" invariant is NOT enforced in src. Documenting via
-  // a real-behavior assertion (not weakening anything; reporting the gap).
-  it("registration close BEFORE open is ACCEPTED (no end-after-start guard in src)", async () => {
+  // Window ordering is now enforced at the API boundary (full-hardening: validateEventTiming).
+  // A close-before-open window is rejected with invalid_timing (was previously accepted — gap closed).
+  it("registration close BEFORE open is REJECTED (end-after-start guard)", async () => {
     const admin = await loginAs("admin");
     const res = await createEventViaApi(admin.cookie, {
       title: "Inverted Window",
       registrationOpenAt: "2026-07-10T00:00:00.000Z",
       registrationCloseAt: "2026-07-01T00:00:00.000Z", // before open
     });
-    expect(res.status).toBe(201); // permissive — documented finding
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toMatchObject({ error: "invalid_timing" });
   });
 
   it("unknown field on PATCH → 400 (updateEventSchema is .strict())", async () => {
@@ -585,5 +584,130 @@ describe("events: light auth gating", () => {
       body: { schema: { fields: [] } },
     });
     expect(res.status).toBe(403);
+  });
+});
+
+// ===========================================================================
+// Time-window ordering gates (backend enforcement — full hardening)
+// ===========================================================================
+describe("events: time-window ordering gates", () => {
+  const T = (h: string) => `2026-07-01T${h}:00:00Z`;
+
+  it("create rejects eventStart >= eventEnd", async () => {
+    const admin = await loginAs("admin");
+    const res = await createEventViaApi(admin.cookie, {
+      title: "Bad start/end",
+      eventStartAt: T("12"),
+      eventEndAt: T("10"),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toMatchObject({ error: "invalid_timing" });
+  });
+
+  it("create rejects checkinClose > eventEnd", async () => {
+    const admin = await loginAs("admin");
+    const res = await createEventViaApi(admin.cookie, {
+      title: "Checkin past end",
+      eventEndAt: T("10"),
+      checkinCloseAt: T("12"),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toMatchObject({ error: "invalid_timing" });
+  });
+
+  it("create accepts a well-ordered timeline", async () => {
+    const admin = await loginAs("admin");
+    const res = await createEventViaApi(admin.cookie, {
+      title: "Good timeline",
+      registrationCloseAt: T("08"),
+      checkinOpenAt: T("08"),
+      eventStartAt: T("09"),
+      checkinCloseAt: T("10"),
+      eventEndAt: T("10"),
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it("PATCH rejects registrationClose > eventEnd (merged with existing row)", async () => {
+    const admin = await loginAs("admin");
+    const event = await makeEvent({ eventEndAt: new Date(T("10")) });
+    const res = await request(`/admin/events/${event.id}`, {
+      method: "PATCH",
+      cookie: admin.cookie,
+      body: { registrationCloseAt: T("12") },
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toMatchObject({ error: "invalid_timing" });
+  });
+
+  it("point-config rejects scanOutOpen before eventEnd when check-in has no early close (anti-overlap)", async () => {
+    const admin = await loginAs("admin");
+    const event = await makeEvent({ eventEndAt: new Date(T("10")) }); // no checkinClose → effective = eventEnd
+    const res = await request(`/admin/events/${event.id}/point-config`, {
+      method: "PATCH",
+      cookie: admin.cookie,
+      body: { scan_out_open_at: T("09") }, // before effective check-in close (10:00) → overlaps scan-in
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toMatchObject({ error: "invalid_timing" });
+  });
+
+  it("point-config accepts scanOutOpen at/after eventEnd", async () => {
+    const admin = await loginAs("admin");
+    const event = await makeEvent({ eventEndAt: new Date(T("10")) });
+    const res = await request(`/admin/events/${event.id}/point-config`, {
+      method: "PATCH",
+      cookie: admin.cookie,
+      body: { scan_out_open_at: T("10"), scan_out_close_at: T("12") },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("point-config ALLOWS scanOutOpen before eventEnd when check-in closes earlier (no overlap)", async () => {
+    const admin = await loginAs("admin");
+    // Check-in closes 09:00, event ends 11:00 → scan-out may open at 09:00 (no window overlap).
+    const event = await makeEvent({ checkinCloseAt: new Date(T("09")), eventEndAt: new Date(T("11")) });
+    const res = await request(`/admin/events/${event.id}/point-config`, {
+      method: "PATCH",
+      cookie: admin.cookie,
+      body: { scan_out_open_at: T("09"), scan_out_close_at: T("12") },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("point-config rejects scanOutOpen before an early check-in close", async () => {
+    const admin = await loginAs("admin");
+    const event = await makeEvent({ checkinCloseAt: new Date(T("09")), eventEndAt: new Date(T("11")) });
+    const res = await request(`/admin/events/${event.id}/point-config`, {
+      method: "PATCH",
+      cookie: admin.cookie,
+      body: { scan_out_open_at: T("08") }, // before check-in close (09:00) → overlap
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toMatchObject({ error: "invalid_timing" });
+  });
+
+  it("point-config rejects assessmentClose <= effective open (auto-open = event start)", async () => {
+    const admin = await loginAs("admin");
+    const event = await makeEvent({ eventStartAt: new Date(T("09")) });
+    const res = await request(`/admin/events/${event.id}/point-config`, {
+      method: "PATCH",
+      cookie: admin.cookie,
+      // openAt omitted → auto-open at event start (09:00); close 08:00 is before → never submittable.
+      body: { assessment_close_at: T("08") },
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toMatchObject({ error: "invalid_timing" });
+  });
+
+  it("point-config allows assessment open forever (no close)", async () => {
+    const admin = await loginAs("admin");
+    const event = await makeEvent({ eventStartAt: new Date(T("09")) });
+    const res = await request(`/admin/events/${event.id}/point-config`, {
+      method: "PATCH",
+      cookie: admin.cookie,
+      body: { assessment_enabled: true }, // no close → open forever, must be allowed
+    });
+    expect(res.status).toBe(200);
   });
 });

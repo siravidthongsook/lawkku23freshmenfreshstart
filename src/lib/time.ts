@@ -14,3 +14,10 @@ export function isWithinWindow(now: Date, open: Date | null, close: Date | null)
   if (close && now > close) return false;
   return true;
 }
+
+// Effective scan-IN (check-in) close: explicit checkinCloseAt, else the event end. Scan-in must not
+// outlast the event — a blank close means "close when the event ends" (hands off to the scan-OUT
+// window), NOT "open forever". Used at every check-in gate + display so the rule is consistent.
+export function effectiveCheckinClose(checkinCloseAt: Date | null, eventEndAt: Date | null): Date | null {
+  return checkinCloseAt ?? eventEndAt;
+}

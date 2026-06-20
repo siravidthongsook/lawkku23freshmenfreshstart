@@ -30,8 +30,14 @@ import {
   updateEventSchema,
   visibilityChangeSchema,
 } from "./schema";
+import { validateEventTiming, type TimingViolation } from "./timing";
 
 const router = new Hono<{ Variables: AppVariables }>();
+
+// Reject the first time-ordering violation (defense at the API boundary; the form also checks).
+function assertTiming(violations: TimingViolation[]): void {
+  if (violations.length > 0) throw badRequest("invalid_timing", violations[0]!.message);
+}
 
 // ---------- Public ----------
 
@@ -232,6 +238,17 @@ router.post("/admin/events", async (c) => {
     throw badRequest("capacity_limit_required", "capacity_limit required when capacity_enabled");
   }
 
+  assertTiming(
+    validateEventTiming({
+      registrationOpenAt: body.registrationOpenAt ?? null,
+      registrationCloseAt: body.registrationCloseAt ?? null,
+      checkinOpenAt: body.checkinOpenAt ?? null,
+      checkinCloseAt: body.checkinCloseAt ?? null,
+      eventStartAt: body.eventStartAt ?? null,
+      eventEndAt: body.eventEndAt ?? null,
+    }),
+  );
+
   const slug = await ensureUniqueSlug(db, body.publicSlug ?? body.title);
 
   const [created] = await db
@@ -301,6 +318,20 @@ router.patch("/admin/events/:eventId", async (c) => {
   if (capacityEnabled && capacityLimit == null) {
     throw badRequest("capacity_limit_required", "capacity_limit required when capacity_enabled");
   }
+
+  // Merge patch over the existing row, then validate ordering (a partial patch may carry only one side).
+  const pick = <K extends keyof typeof existing & keyof typeof body>(k: K) =>
+    (body[k] !== undefined ? body[k] : existing[k]) as Date | null;
+  assertTiming(
+    validateEventTiming({
+      registrationOpenAt: pick("registrationOpenAt"),
+      registrationCloseAt: pick("registrationCloseAt"),
+      checkinOpenAt: pick("checkinOpenAt"),
+      checkinCloseAt: pick("checkinCloseAt"),
+      eventStartAt: pick("eventStartAt"),
+      eventEndAt: pick("eventEndAt"),
+    }),
+  );
 
   // Slug handling: if caller sent a slug, normalize + ensure uniqueness; detect change for audit.
   let newSlug = existing.publicSlug;

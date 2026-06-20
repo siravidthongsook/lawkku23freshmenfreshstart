@@ -80,17 +80,18 @@ export function assessmentRequiresCheckin(config: EventPointConfigRow | null): b
   return config?.assessmentRequiresCheckin ?? true;
 }
 
-// Assessment window (§4.3): override [assessmentOpenAt..assessmentCloseAt], else open from event.eventStartAt,
-// never closing (until the global cutoff). null open = not yet open if eventStartAt is also null? — see handler.
+// Assessment window (§4.3): open = override, else event.eventStartAt ("auto-open at event start"
+// toggle = clear the override). close = override, else never auto-closes. Fallbacks are INDEPENDENT
+// — a close override must NOT drop the eventStartAt open default. open=null (no override + no start)
+// = unbounded open; see handler.
 export function assessmentWindow(
   config: EventPointConfigRow | null,
   event: Pick<Event, "eventStartAt">,
 ): { open: Date | null; close: Date | null } {
-  if (config?.assessmentOpenAt != null || config?.assessmentCloseAt != null) {
-    return { open: config.assessmentOpenAt ?? null, close: config.assessmentCloseAt ?? null };
-  }
-  // Default: opens at eventStartAt (null = unbounded open), never auto-closes.
-  return { open: event.eventStartAt, close: null };
+  return {
+    open: config?.assessmentOpenAt ?? event.eventStartAt,
+    close: config?.assessmentCloseAt ?? null,
+  };
 }
 
 // Cutoff freeze (§5/§10): once cutoffAt has passed, all STUDENT earning is rejected.
@@ -98,16 +99,10 @@ export function isPastCutoff(settings: PointSettingsRow, now: Date): boolean {
   return settings.cutoffAt != null && now > settings.cutoffAt;
 }
 
-// Scan-IN window (§4.1): config override [scanInOpenAt..scanInCloseAt], else event check-in window.
-export function scanInWindow(
-  config: EventPointConfigRow | null,
-  event: Pick<Event, "checkinOpenAt" | "checkinCloseAt">,
-): { open: Date | null; close: Date | null } {
-  if (config?.scanInOpenAt != null || config?.scanInCloseAt != null) {
-    return { open: config.scanInOpenAt ?? null, close: config.scanInCloseAt ?? null };
-  }
-  return { open: event.checkinOpenAt, close: event.checkinCloseAt };
-}
+// Scan-IN has NO separate window: the scan-IN / check-in action is gated directly by the event
+// check-in window (checkinOpenAt/CloseAt in checkins/routes.ts). The old scanInWindow override fn
+// was dead code + a footgun (un-clearable legacy scan_in_* would silently win) — removed. The
+// scan_in_* columns/patch keys remain only so the edit form can force-clear legacy values to null.
 
 // Scan-OUT window (§4.1): config override, else fallback [eventEndAt .. eventEndAt + scanOutFallbackHours].
 // When eventEndAt is null and no override → open/close both null = unbounded (window always open).

@@ -1,8 +1,9 @@
 "use client";
 
 // Admin > per-event point config (plan §4.x/§7/§14). Toggles (check-in in/out, assessment +
-// requires-checkin), nullable point overrides (blank = use global default), and scan/assessment
-// windows. Mid-event changes are forward-only — we warn about that. Lazy-creates the config row.
+// requires-checkin) and nullable point overrides (blank = use global default). Mid-event changes
+// are forward-only — we warn about that. Lazy-creates the config row.
+// NOTE: scan/assessment time windows moved to the event-edit page (timing lives with the event).
 // Renders inside the admin layout (RequireRole + AppShell provided there).
 import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -11,7 +12,6 @@ import { ArrowLeft, AlertTriangle } from "lucide-react";
 import { ApiError } from "@/lib/api";
 import { getEventPointConfig, updateEventPointConfig } from "@/lib/points-api";
 import type { EventPointConfig, EventPointConfigPatch } from "@/lib/points-types";
-import { isoToBangkokInput, bangkokInputToIso } from "@/components/admin-events/datetime";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,12 +63,6 @@ export default function EventPointConfigPage({ params }: { params: Promise<{ id:
     checkinInPoints: "",
     checkinOutPoints: "",
     assessmentPoints: "",
-    scanInOpenAt: "",
-    scanInCloseAt: "",
-    scanOutOpenAt: "",
-    scanOutCloseAt: "",
-    assessmentOpenAt: "",
-    assessmentCloseAt: "",
   });
 
   const hydrate = useCallback((c: EventPointConfig | null) => {
@@ -82,12 +76,6 @@ export default function EventPointConfigPage({ params }: { params: Promise<{ id:
       checkinInPoints: c?.checkinInPoints != null ? String(c.checkinInPoints) : "",
       checkinOutPoints: c?.checkinOutPoints != null ? String(c.checkinOutPoints) : "",
       assessmentPoints: c?.assessmentPoints != null ? String(c.assessmentPoints) : "",
-      scanInOpenAt: isoToBangkokInput(c?.scanInOpenAt),
-      scanInCloseAt: isoToBangkokInput(c?.scanInCloseAt),
-      scanOutOpenAt: isoToBangkokInput(c?.scanOutOpenAt),
-      scanOutCloseAt: isoToBangkokInput(c?.scanOutCloseAt),
-      assessmentOpenAt: isoToBangkokInput(c?.assessmentOpenAt),
-      assessmentCloseAt: isoToBangkokInput(c?.assessmentCloseAt),
     });
   }, []);
 
@@ -110,7 +98,7 @@ export default function EventPointConfigPage({ params }: { params: Promise<{ id:
     setForm((f) => ({ ...f, [key]: value }));
   }
 
-  // Empty point override → null (use global default); window empty → null (use fallback).
+  // Empty point override → null (use global default).
   function numOrNull(v: string): number | null {
     return v.trim() === "" ? null : Number(v);
   }
@@ -126,12 +114,7 @@ export default function EventPointConfigPage({ params }: { params: Promise<{ id:
         checkin_in_points: numOrNull(form.checkinInPoints),
         checkin_out_points: numOrNull(form.checkinOutPoints),
         assessment_points: numOrNull(form.assessmentPoints),
-        scan_in_open_at: bangkokInputToIso(form.scanInOpenAt),
-        scan_in_close_at: bangkokInputToIso(form.scanInCloseAt),
-        scan_out_open_at: bangkokInputToIso(form.scanOutOpenAt),
-        scan_out_close_at: bangkokInputToIso(form.scanOutCloseAt),
-        assessment_open_at: bangkokInputToIso(form.assessmentOpenAt),
-        assessment_close_at: bangkokInputToIso(form.assessmentCloseAt),
+        // Scan/assessment windows now edited on the event-edit page (eventPointConfig timing).
       };
       const res = await updateEventPointConfig(id, patch);
       hydrate(res.config);
@@ -177,12 +160,12 @@ export default function EventPointConfigPage({ params }: { params: Promise<{ id:
         </CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-2">
           <Toggle
-            label="เช็คอินเข้า"
+            label="สแกนเข้า"
             checked={form.checkinInEnabled}
             onChange={(v) => setField("checkinInEnabled", v)}
           />
           <Toggle
-            label="เช็คอินออก"
+            label="สแกนออก"
             checked={form.checkinOutEnabled}
             onChange={(v) => setField("checkinOutEnabled", v)}
           />
@@ -192,7 +175,7 @@ export default function EventPointConfigPage({ params }: { params: Promise<{ id:
             onChange={(v) => setField("assessmentEnabled", v)}
           />
           <Toggle
-            label="ต้องเช็คอินก่อนทำแบบประเมิน"
+            label="ต้องสแกนเข้าก่อนทำแบบประเมิน"
             help="กันการฟาร์มแต้มข้ามงาน"
             checked={form.assessmentRequiresCheckin}
             onChange={(v) => setField("assessmentRequiresCheckin", v)}
@@ -227,33 +210,13 @@ export default function EventPointConfigPage({ params }: { params: Promise<{ id:
         </CardContent>
       </Card>
 
-      {/* Windows */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">ช่วงเวลา (เวลาไทย)</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <p className="text-xs text-muted-foreground">
-            เว้นว่าง = ใช้ช่วงเวลาเริ่มต้น (สแกนเข้า=ช่วงเช็คอินของงาน, สแกนออก=หลังจบงานตาม fallback)
-          </p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <WindowField label="สแกนเข้า เปิด" value={form.scanInOpenAt} onChange={(v) => setField("scanInOpenAt", v)} />
-            <WindowField label="สแกนเข้า ปิด" value={form.scanInCloseAt} onChange={(v) => setField("scanInCloseAt", v)} />
-            <WindowField label="สแกนออก เปิด" value={form.scanOutOpenAt} onChange={(v) => setField("scanOutOpenAt", v)} />
-            <WindowField label="สแกนออก ปิด" value={form.scanOutCloseAt} onChange={(v) => setField("scanOutCloseAt", v)} />
-            <WindowField
-              label="แบบประเมิน เปิด"
-              value={form.assessmentOpenAt}
-              onChange={(v) => setField("assessmentOpenAt", v)}
-            />
-            <WindowField
-              label="แบบประเมิน ปิด"
-              value={form.assessmentCloseAt}
-              onChange={(v) => setField("assessmentCloseAt", v)}
-            />
-          </div>
-        </CardContent>
-      </Card>
+      {/* Windows moved to the event-edit page (timing lives with the event). Point this out. */}
+      <p className="text-sm text-muted-foreground">
+        ช่วงเวลาสแกน/แบบประเมินย้ายไปตั้งที่{" "}
+        <Link href={`/admin/events/${id}/edit`} className="font-medium text-primary underline">
+          หน้าแก้ไขกิจกรรม
+        </Link>
+      </p>
 
       <div className="flex items-center justify-between">
         <Button asChild variant="outline">
@@ -293,19 +256,3 @@ function OverrideField({
   );
 }
 
-function WindowField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <Label>{label}</Label>
-      <Input type="datetime-local" value={value} onChange={(e) => onChange(e.target.value)} />
-    </div>
-  );
-}

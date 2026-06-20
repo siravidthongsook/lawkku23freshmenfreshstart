@@ -11,7 +11,7 @@ import { canManageEvents } from "../../lib/permissions";
 import { badRequest, conflict, forbidden, notFound } from "../../lib/errors";
 import { writeAudit } from "../../lib/audit";
 import { capacityRejectionsTotal, registrationsTotal } from "../../lib/metrics";
-import { isWithinWindow } from "../../lib/time";
+import { isWithinWindow, effectiveCheckinClose } from "../../lib/time";
 import {
   getEventPointConfig,
   getPointSettings,
@@ -99,7 +99,8 @@ function computeQrPhase(
   if (reg.checkedOutAt) return { phase: "done", showQr: false }; // nothing left to scan
   // Not yet checked in → show QR while the check-in window is open (event.checkinOpen/Close gate).
   if (reg.status !== "checked_in") {
-    return { phase: "checkin", showQr: isWithinWindow(now, event.checkinOpenAt, event.checkinCloseAt) };
+    // Effective close = explicit close, else event end (scan-in must not outlast the event).
+    return { phase: "checkin", showQr: isWithinWindow(now, event.checkinOpenAt, effectiveCheckinClose(event.checkinCloseAt, event.eventEndAt)) };
   }
   // Checked in, not out. No check-out for this event → done.
   if (!isCheckinOutEnabled(config)) return { phase: "done", showQr: false };

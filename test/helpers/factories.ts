@@ -18,6 +18,8 @@ export type MakeEventOptions = {
   registrationCloseAt?: Date | null;
   checkinOpenAt?: Date | null;
   checkinCloseAt?: Date | null;
+  eventStartAt?: Date | null;
+  eventEndAt?: Date | null;
 };
 
 // Insert an event with registration-ready defaults. Pass `capacity` to enable a hard limit;
@@ -41,6 +43,8 @@ export async function makeEvent(opts: MakeEventOptions = {}): Promise<Event> {
       registrationCloseAt: opts.registrationCloseAt ?? null,
       checkinOpenAt: opts.checkinOpenAt ?? null,
       checkinCloseAt: opts.checkinCloseAt ?? null,
+      eventStartAt: opts.eventStartAt ?? null,
+      eventEndAt: opts.eventEndAt ?? null,
       createdByAdminId: adminId,
     })
     .returning();
