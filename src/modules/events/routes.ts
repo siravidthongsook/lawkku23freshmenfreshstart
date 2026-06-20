@@ -417,6 +417,35 @@ router.post("/admin/events/:eventId/poster", async (c) => {
   return c.json({ event: updated }, 201);
 });
 
+// DELETE /admin/events/:eventId/poster — clear the poster (admin only). No-op-safe if already none.
+// Mirrors upload's orphan policy: leaves the stored object in place (storage GC is separate).
+router.delete("/admin/events/:eventId/poster", async (c) => {
+  const { eventId } = eventIdParam.parse(c.req.param());
+  const user = c.get("user");
+  const meta = requestMeta(c);
+
+  const [event] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);
+  if (!event) throw notFound("Event not found");
+
+  const [updated] = await db
+    .update(events)
+    .set({ posterObjectKey: null, posterImageUrl: null, updatedAt: new Date() })
+    .where(eq(events.id, eventId))
+    .returning();
+
+  await writeAudit({
+    actorUserId: user.id,
+    actorRole: user.role,
+    action: "event_poster_removed",
+    entityType: "event",
+    entityId: eventId,
+    eventId,
+    ...meta,
+  });
+
+  return c.json({ event: updated });
+});
+
 // POST /admin/events/:eventId/status — non-destructive status move; audit event_status_changed.
 router.post("/admin/events/:eventId/status", async (c) => {
   const { eventId } = eventIdParam.parse(c.req.param());

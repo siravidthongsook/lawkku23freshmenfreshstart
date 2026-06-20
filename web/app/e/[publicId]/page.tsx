@@ -4,7 +4,6 @@
 // Fallback: if the resolve endpoint returns the event directly, render it here instead of redirecting.
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import Image from "next/image";
 import Link from "next/link";
 import { apiGet, ApiError } from "@/lib/api";
 import type { EventPublic } from "@/lib/types";
@@ -13,7 +12,8 @@ import { EventStatusBadge } from "@/components/badges";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { eventThumbnail, eventTimeRange, capacityLabel } from "@/components/public/event-helpers";
+import { eventTimeRange, capacityLabel } from "@/components/public/event-helpers";
+import { EventPoster } from "@/components/public/event-poster";
 
 // Resolve response may be a redirect hint ({ slug }/{ publicSlug }) or a full event object.
 type ResolveResponse = Partial<EventPublic> & { slug?: string };
@@ -94,10 +94,8 @@ function FallbackEvent({ event }: { event: EventPublic }) {
   return (
     <div className="mx-auto max-w-2xl">
       <div className="relative mb-6 aspect-[16/7] w-full overflow-hidden rounded-xl bg-muted">
-        <Image
-          src={eventThumbnail(event)}
-          alt=""
-          fill
+        <EventPoster
+          event={event}
           sizes="(max-width: 1024px) 100vw, 66vw"
           className="object-cover"
           priority

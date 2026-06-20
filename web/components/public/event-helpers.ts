@@ -3,17 +3,11 @@ import type { EventPublic, RegistrationStatus } from "@/lib/types";
 import { formSchema, type FormSchema } from "@/lib/schemas";
 import { formatBangkok } from "@/lib/time";
 
-// Deterministically pick one of the 16 gallery photos for an event (stable per id/slug).
-export function galleryImage(key: string): string {
-  let hash = 0;
-  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
-  return `/gallery/event-${(hash % 16) + 1}.jpg`;
-}
-
-// Event hero/thumbnail src: uploaded poster (served via /api proxy) when set, else a stable gallery photo.
-export function eventThumbnail(e: Pick<EventPublic, "posterImageUrl" | "publicId" | "publicSlug" | "id">): string {
+// Event hero/thumbnail src: uploaded poster (served via /api proxy), or null when none set.
+// Callers render an explicit empty state for null (no decorative gallery fallback).
+export function eventThumbnail(e: Pick<EventPublic, "posterImageUrl" | "publicId" | "publicSlug" | "id">): string | null {
   if (e.posterImageUrl) return `/api${e.posterImageUrl}`;
-  return galleryImage(e.publicId || e.publicSlug || e.id);
+  return null;
 }
 
 // Human event-time range in Bangkok. Falls back gracefully when start/end missing.

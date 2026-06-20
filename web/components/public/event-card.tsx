@@ -1,10 +1,10 @@
 // Public event list card. Gallery hero + title, time (Bangkok), capacity, status badge.
 import Link from "next/link";
-import Image from "next/image";
 import { Card, CardContent } from "@/components/ui/card";
 import { EventStatusBadge } from "@/components/badges";
 import type { EventPublic } from "@/lib/types";
-import { eventThumbnail, eventTimeRange, capacityLabel, isFull } from "@/components/public/event-helpers";
+import { eventTimeRange, capacityLabel, isFull } from "@/components/public/event-helpers";
+import { EventPoster } from "@/components/public/event-poster";
 
 export function EventCard({ event }: { event: EventPublic }) {
   const cap = capacityLabel(event);
@@ -14,10 +14,8 @@ export function EventCard({ event }: { event: EventPublic }) {
     <Link href={`/events/${event.publicSlug}`} className="group block focus-visible:outline-none">
       <Card className="overflow-hidden transition-shadow group-hover:shadow-md group-focus-visible:ring-2 group-focus-visible:ring-ring">
         <div className="relative aspect-[16/9] w-full overflow-hidden bg-muted">
-          <Image
-            src={eventThumbnail(event)}
-            alt=""
-            fill
+          <EventPoster
+            event={event}
             sizes="(max-width: 768px) 100vw, 33vw"
             className="object-cover transition-transform duration-300 group-hover:scale-105"
           />

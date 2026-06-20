@@ -4,7 +4,6 @@
 // draft→404, published→register/waitlist per mode+window+capacity, cancelled→no actions, archived→read-only.
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { apiGet, apiPost, ApiError } from "@/lib/api";
@@ -21,7 +20,6 @@ import { toast } from "sonner";
 import type { AnswerMap, FormSchema } from "@/lib/schemas";
 import { RegisterFormDialog } from "@/components/public/register-form-dialog";
 import {
-  eventThumbnail,
   eventTimeRange,
   capacityLabel,
   seatsRemaining,
@@ -29,6 +27,7 @@ import {
   registrationAction,
   type RegistrationAction,
 } from "@/components/public/event-helpers";
+import { EventPoster } from "@/components/public/event-poster";
 
 export default function EventDetailPage() {
   const params = useParams<{ slug: string }>();
@@ -236,10 +235,8 @@ function EventDetail({
       </div>
       <div className="lg:col-span-2">
         <div className="relative mb-6 aspect-[16/7] w-full overflow-hidden rounded-xl bg-muted">
-          <Image
-            src={eventThumbnail(event)}
-            alt=""
-            fill
+          <EventPoster
+            event={event}
             sizes="(max-width: 1024px) 100vw, 66vw"
             className="object-cover"
             priority

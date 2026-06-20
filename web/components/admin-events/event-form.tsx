@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { toast } from "sonner";
-import { apiPost, apiPatch, apiPostForm, ApiError } from "@/lib/api";
+import { apiPost, apiPatch, apiPostForm, apiDelete, ApiError } from "@/lib/api";
 import {
   createEventSchema,
   updateEventSchema,
@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { eventThumbnail } from "@/components/public/event-helpers";
+import { ImageOff } from "lucide-react";
 import { PosterCropDialog } from "./poster-crop-dialog";
 import { isoToBangkokInput, bangkokInputToIso } from "./datetime";
 
@@ -110,6 +110,8 @@ export function EventForm({ mode, eventId, initial }: Props) {
   // Staged (not-yet-uploaded) cropped poster + its preview objectURL.
   const [pendingBlob, setPendingBlob] = useState<Blob | null>(null);
   const [pendingPreviewUrl, setPendingPreviewUrl] = useState<string | null>(null);
+  // In-flight flag for the immediate poster-delete call.
+  const [removingPoster, setRemovingPoster] = useState(false);
 
   // Warn before leaving with unsaved edits (tab close / in-app link). See use-unsaved-changes.
   useUnsavedChanges(dirty);
@@ -163,6 +165,34 @@ export function EventForm({ mode, eventId, initial }: Props) {
     setPendingPreviewUrl(URL.createObjectURL(blob));
     setDirty(true);
     if (posterInputRef.current) posterInputRef.current.value = "";
+  }
+
+  // Discard a staged (not-yet-saved) crop → revert to whatever poster was saved.
+  function discardStagedPoster() {
+    if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl);
+    setPendingPreviewUrl(null);
+    setPendingBlob(null);
+    if (posterInputRef.current) posterInputRef.current.value = "";
+  }
+
+  // Remove the poster. Staged-only → just drop the staging. Saved poster → DELETE immediately
+  // (independent of the draft event fields) and clear the preview.
+  async function handleRemovePoster() {
+    if (pendingPreviewUrl) {
+      discardStagedPoster();
+      return;
+    }
+    if (!posterUrl || !eventId) return;
+    setRemovingPoster(true);
+    try {
+      await apiDelete(`/admin/events/${eventId}/poster`);
+      setPosterUrl(null);
+      toast.success("ลบรูปภาพปกแล้ว");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "ไม่สามารถลบรูปภาพได้");
+    } finally {
+      setRemovingPoster(false);
+    }
   }
 
   // Wrap a setter so any edit marks the form dirty + clears that field's inline error.
@@ -342,23 +372,20 @@ export function EventForm({ mode, eventId, initial }: Props) {
                   alt="ตัวอย่างภาพปกที่ยังไม่บันทึก"
                   className="absolute inset-0 h-full w-full object-cover"
                 />
-              ) : (
+              ) : posterUrl ? (
                 <Image
-                  src={
-                    posterUrl
-                      ? `/api${posterUrl}`
-                      : eventThumbnail({
-                          posterImageUrl: null,
-                          publicId: initial?.publicId ?? "",
-                          publicSlug: initial?.publicSlug ?? "",
-                          id: initial?.id ?? eventId,
-                        })
-                  }
+                  src={`/api${posterUrl}`}
                   alt="ภาพปกกิจกรรม"
                   fill
                   sizes="(max-width: 768px) 100vw, 28rem"
                   className="object-cover"
                 />
+              ) : (
+                // No poster set — explicit empty state (no decorative gallery fallback).
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
+                  <ImageOff className="h-8 w-8" />
+                  <span className="text-sm">ยังไม่มีรูปภาพปก</span>
+                </div>
               )}
               {pendingPreviewUrl ? (
                 <span className="absolute left-2 top-2 rounded bg-amber-500 px-2 py-0.5 text-xs font-medium text-white shadow">
@@ -381,6 +408,18 @@ export function EventForm({ mode, eventId, initial }: Props) {
               >
                 อัปโหลดรูปภาพ
               </Button>
+              {/* Show remove only when there's something to remove (staged crop or saved poster). */}
+              {(pendingPreviewUrl || posterUrl) ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="text-destructive hover:text-destructive"
+                  onClick={handleRemovePoster}
+                  disabled={removingPoster}
+                >
+                  {removingPoster ? "กำลังลบ…" : pendingPreviewUrl ? "ยกเลิกรูปที่เลือก" : "ลบรูปภาพ"}
+                </Button>
+              ) : null}
               <span className="text-xs text-muted-foreground">
                 PNG หรือ JPG • สูงสุด 5MB • บันทึกเมื่อกด “บันทึกการเปลี่ยนแปลง”
               </span>

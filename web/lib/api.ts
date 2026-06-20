@@ -92,6 +92,11 @@ export async function apiPut<T>(path: string, body?: unknown, init?: RequestInit
   return handle<T>(res, path);
 }
 
+export async function apiDelete<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, { ...init, method: "DELETE", credentials: "include" });
+  return handle<T>(res, path);
+}
+
 // Multipart upload (files). Do NOT set Content-Type — browser sets the boundary.
 export async function apiPostForm<T>(path: string, form: FormData, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
