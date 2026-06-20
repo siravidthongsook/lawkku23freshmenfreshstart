@@ -1,8 +1,9 @@
 import Papa from "papaparse";
 
-// Neutralize CSV/Excel formula injection: prefix cells starting with = + - @ tab CR with a quote.
+// Neutralize CSV/Excel formula injection: prefix cells starting with = + - @ tab CR LF with a quote.
+// LF (\n) included: some importers strip a leading newline then treat the following =/+/-/@ as a formula.
 function escapeCell(v: unknown): unknown {
-  if (typeof v === "string" && /^[=+\-@\t\r]/.test(v)) return `'${v}`;
+  if (typeof v === "string" && /^[=+\-@\t\r\n]/.test(v)) return `'${v}`;
   return v;
 }
 function sanitize(rows: Record<string, unknown>[]): Record<string, unknown>[] {
