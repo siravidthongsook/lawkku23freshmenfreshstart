@@ -36,7 +36,7 @@ export type StaffCheckinContext = {
     scanOutCloseAt?: string | null;
     location?: string | null;
   };
-  counts: { registered: number; checkedIn: number };
+  counts: { registered: number; checkedIn: number; checkedOut?: number };
 };
 
 // POST /api/events/:eventId/checkins/scan — server returns the outcome code + identity for every

@@ -152,6 +152,8 @@ router.get(
       .select({
         registered: sql<number>`count(*) filter (where ${registrations.status} = 'registered')::int`,
         checkedIn: sql<number>`count(*) filter (where ${registrations.status} = 'checked_in')::int`,
+        // Checked-out = checked-in regs that also have a scan-out stamp (the check-out screen's metric).
+        checkedOut: sql<number>`count(*) filter (where ${registrations.checkedOutAt} is not null)::int`,
       })
       .from(registrations)
       .where(eq(registrations.eventId, eventId));
@@ -177,7 +179,11 @@ router.get(
         scanOutOpenAt: outWin.open?.toISOString() ?? null,
         scanOutCloseAt: outWin.close?.toISOString() ?? null,
       },
-      counts: { registered: counts?.registered ?? 0, checkedIn: counts?.checkedIn ?? 0 },
+      counts: {
+        registered: counts?.registered ?? 0,
+        checkedIn: counts?.checkedIn ?? 0,
+        checkedOut: counts?.checkedOut ?? 0,
+      },
     });
   },
 );

@@ -232,16 +232,33 @@ export function ScannerScreen({ eventId, mode }: { eventId: string; mode: Mode }
         </CardHeader>
         {ctx && (
           <CardContent className="pt-0">
+            {/* Counts are mode-aware: IN tracks checked-in vs registered; OUT tracks checked-out vs checked-in. */}
             <div className="flex gap-6 text-sm">
-              <span>
-                <span className="text-2xl font-semibold">{ctx.counts.checkedIn}</span>
-                <span className="text-muted-foreground"> เช็คอินแล้ว</span>
-              </span>
-              <Separator orientation="vertical" className="h-9" />
-              <span>
-                <span className="text-2xl font-semibold">{ctx.counts.registered}</span>
-                <span className="text-muted-foreground"> ลงทะเบียนแล้ว</span>
-              </span>
+              {mode === "in" ? (
+                <>
+                  <span>
+                    <span className="text-2xl font-semibold">{ctx.counts.checkedIn}</span>
+                    <span className="text-muted-foreground"> เช็คอินแล้ว</span>
+                  </span>
+                  <Separator orientation="vertical" className="h-9" />
+                  <span>
+                    <span className="text-2xl font-semibold">{ctx.counts.registered}</span>
+                    <span className="text-muted-foreground"> ลงทะเบียนแล้ว</span>
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span>
+                    <span className="text-2xl font-semibold">{ctx.counts.checkedOut ?? 0}</span>
+                    <span className="text-muted-foreground"> เช็คเอาท์แล้ว</span>
+                  </span>
+                  <Separator orientation="vertical" className="h-9" />
+                  <span>
+                    <span className="text-2xl font-semibold">{ctx.counts.checkedIn}</span>
+                    <span className="text-muted-foreground"> เช็คอินแล้ว</span>
+                  </span>
+                </>
+              )}
             </div>
           </CardContent>
         )}
