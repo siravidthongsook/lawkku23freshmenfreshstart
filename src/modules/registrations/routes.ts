@@ -802,7 +802,7 @@ router.post(
       if (target === "checked_in") {
         patch.checkedInAt = now;
         patch.checkedInByUserId = admin.id;
-        patch.checkinMethod = "manual_search";
+        patch.checkinMethod = "admin_override"; // admin force-set status, not a scan/search — distinct in reports
         patch.manualCheckinReason = reason;
       }
       await tx.update(registrations).set(patch).where(eq(registrations.id, reg.id));
@@ -824,7 +824,7 @@ router.post(
           studentRole: u?.role ?? "student",
           scannedByUserId: admin.id,
           eventTitle: event.title,
-          scanMethod: "manual_search",
+          scanMethod: "admin_override",
         });
         pointsAwarded = award.pointsAwarded;
       }

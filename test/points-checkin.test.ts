@@ -284,6 +284,9 @@ describe("points: admin status-change into checked_in awards checkin_in by defau
     const ins = await db.select().from(pointLedger).where(eq(pointLedger.reasonCode, "checkin_in"));
     expect(ins.length).toBe(1);
     expect(ins[0]!.dedupeKey).toBe(`checkin_in:${registrationId}:v0`);
+    // admin override is distinct from QR/manual in both the reg column and ledger metadata.
+    expect((await getReg(registrationId))!.checkinMethod).toBe("admin_override");
+    expect((ins[0]!.metadata as { scanMethod?: string }).scanMethod).toBe("admin_override");
   });
 
   it("status → checked_in with awardPoints:false → checks in but awards 0", async () => {

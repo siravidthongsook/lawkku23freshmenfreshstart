@@ -502,7 +502,7 @@ describe("registrations: admin status override", () => {
     const after = await regRow(reg.id);
     expect(after!.status).toBe("checked_in");
     expect(after!.checkedInAt).not.toBeNull();
-    expect(after!.checkinMethod).toBe("manual_search");
+    expect(after!.checkinMethod).toBe("admin_override"); // admin status-change is distinct from staff manual_search
   });
 
   it("checked_in → cancelled stamps cancelledAt and clears check-in", async () => {

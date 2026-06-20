@@ -1,0 +1,1 @@
+ALTER TYPE "public"."checkin_method" ADD VALUE 'admin_override';

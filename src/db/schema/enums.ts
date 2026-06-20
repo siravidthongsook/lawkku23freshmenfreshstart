@@ -18,7 +18,8 @@ export const registrationStatus = pgEnum("registration_status", [
   "checked_in",
   "cancelled",
 ]);
-export const checkinMethod = pgEnum("checkin_method", ["qr_scan", "manual_search"]);
+// admin_override = admin force-set status via the status-change route (not a real scan/search).
+export const checkinMethod = pgEnum("checkin_method", ["qr_scan", "manual_search", "admin_override"]);
 
 export const qrTokenStatus = pgEnum("qr_token_status", ["active", "revoked"]);
 
