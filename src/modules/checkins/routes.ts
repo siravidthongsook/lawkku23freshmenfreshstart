@@ -172,11 +172,15 @@ router.post(
     };
 
     const result = await db.transaction(async (tx): Promise<ScanOut> => {
-      // Look up token by hash.
+      // Look up token by hash. Lock the token row (.for("update")) so a concurrent revoke/regenerate
+      // (which UPDATEs qr_tokens) serializes against this scan — closes the TOCTOU where a revoke
+      // committed mid-scan was ignored and the scan still checked in + awarded points.
+      // Lock order is always token → registration (revoke only touches qr_tokens), so no deadlock.
       const [token] = await tx
         .select()
         .from(registrationQrTokens)
         .where(eq(registrationQrTokens.tokenHash, tokenHash))
+        .for("update")
         .limit(1);
       if (!token) return { result: "qr_invalid" };
       if (token.status !== "active") return { result: "qr_revoked", registrationId: token.registrationId };
@@ -295,6 +299,8 @@ router.post(
           checkedInAt: now,
           checkedInByUserId: staff.id,
           checkinMethod: "qr_scan",
+          // Clear any stale undo reason so a fresh check-in starts clean (don't leak old reason to CSV export).
+          manualCheckinReason: null,
           updatedAt: now,
         })
         .where(eq(registrations.id, reg.id));
@@ -449,6 +455,8 @@ router.post(
           checkedInAt: now,
           checkedInByUserId: staff.id,
           checkinMethod: "manual_search",
+          // Clear any stale undo reason so a fresh check-in starts clean (don't leak old reason to CSV export).
+          manualCheckinReason: null,
           updatedAt: now,
         })
         .where(eq(registrations.id, reg.id));
