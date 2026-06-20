@@ -231,6 +231,12 @@ router.get("/points/my-budget", requireAuth, requirePermission(canAdjustPoints),
       .orderBy(desc(staffBudgetLedger.createdAt))
       .limit(100),
   ]);
+  // A manual_grant is already reversed iff a grant_refund row backs the same ledger entry. Refund is
+  // always newer than its grant (desc order, same 100-row page) → safe to derive from the fetched rows.
+  // Lets the UI hide the "ถอน" button after reverse (else it lingers and re-press → already_reversed).
+  const refundedLedgerIds = new Set(
+    rows.filter((r) => r.reasonCode === "grant_refund" && r.relatedLedgerId).map((r) => r.relatedLedgerId),
+  );
   return c.json({
     budget,
     history: rows.map((r) => ({
@@ -241,6 +247,8 @@ router.get("/points/my-budget", requireAuth, requirePermission(canAdjustPoints),
       target_user_id: r.targetUserId,
       // staff self-reverse UI needs the backing ledger id to know which grant it can undo (Gap A)
       related_ledger_id: r.relatedLedgerId,
+      // true once this manual_grant has been reversed (a grant_refund backs the same ledger id).
+      reversed: r.reasonCode === "manual_grant" && r.relatedLedgerId != null && refundedLedgerIds.has(r.relatedLedgerId),
       reason: r.reason,
       created_at: r.createdAt.toISOString(),
     })),

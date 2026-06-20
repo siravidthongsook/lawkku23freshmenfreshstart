@@ -296,8 +296,11 @@ function StaffPointsInner() {
                   <p className="font-medium">หักงบ {Math.abs(g.delta)} แต้ม</p>
                   <p className="text-xs text-muted-foreground">{formatBangkok(g.created_at)}</p>
                 </div>
-                {/* The related point-ledger id is needed to reverse; budget rows carry it when present. */}
-                {g.related_ledger_id ? (
+                {/* The related point-ledger id is needed to reverse; budget rows carry it when present.
+                    Hide the button once reversed (else it lingers and a re-press → already_reversed). */}
+                {g.reversed ? (
+                  <span className="shrink-0 text-xs text-muted-foreground">ถอนแล้ว</span>
+                ) : g.related_ledger_id ? (
                   <Button
                     variant="ghost"
                     size="sm"

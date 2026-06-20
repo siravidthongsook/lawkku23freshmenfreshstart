@@ -158,6 +158,8 @@ export type StaffBudgetResponse = {
     target_user_id: string | null;
     // present on the admin detail ledger; the /my-budget endpoint may omit it (self-reverse needs it).
     related_ledger_id?: string | null;
+    // true once a manual_grant has been reversed → UI hides the "ถอน" button (absent on older backend).
+    reversed?: boolean;
     reason: string | null;
     created_at: string;
   }[];
