@@ -28,7 +28,10 @@ describe("points rate-limit: lenient — bursts are never hard-blocked (no 429, 
     const admin = await loginAs("admin");
     const staff = await loginAs("checkin_staff");
     const N = 60; // well past the burst threshold (20) in one window
-    await topup(admin.cookie, staff.user.id, N); // 1pt × 1 claim each → enough budget for all N
+    // Distinct points_value per issue (i+1) so each MINTS a fresh token (avoids the unscanned-QR
+    // reuse path, which would re-show the same token without debiting). Cost = 1+2+…+N.
+    const total = (N * (N + 1)) / 2;
+    await topup(admin.cookie, staff.user.id, total);
 
     // Fire sequentially so they land in one burst window but keep budget arithmetic simple.
     const statuses: number[] = [];
@@ -36,7 +39,7 @@ describe("points rate-limit: lenient — bursts are never hard-blocked (no 429, 
       const res = await request("/points/grant-tokens", {
         method: "POST",
         cookie: staff.cookie,
-        body: { points_value: 1, max_claims: 1 },
+        body: { points_value: i + 1, max_claims: 1 },
       });
       statuses.push(res.status);
     }

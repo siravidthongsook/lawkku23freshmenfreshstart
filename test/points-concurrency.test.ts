@@ -201,22 +201,22 @@ describe("points concurrency: same student double-claims one token → exactly o
 // =====================================================================
 describe("points concurrency: concurrent issue can't overspend budget (staff row lock)", () => {
   it("budget for exactly ONE token; two simultaneous issues → one 201, one insufficient_budget, budget never negative", async () => {
-    const POINTS = 5;
-    const MAX = 5; // cost per token = 25
     const admin = await loginAs("admin");
     const staff = await loginAs("checkin_staff");
-    await topup(admin.cookie, staff.user.id, POINTS * MAX); // exactly one token's worth
+    await topup(admin.cookie, staff.user.id, 25); // exactly one token's worth
 
+    // Two DISTINCT shapes of equal cost (25) so the reuse path can't apply (it matches on
+    // points_value+max_claims) — this genuinely tests the budget-overspend lock, not reuse.
     const [r1, r2] = await Promise.all([
       request("/points/grant-tokens", {
         method: "POST",
         cookie: staff.cookie,
-        body: { points_value: POINTS, max_claims: MAX },
+        body: { points_value: 5, max_claims: 5 }, // cost 25
       }),
       request("/points/grant-tokens", {
         method: "POST",
         cookie: staff.cookie,
-        body: { points_value: POINTS, max_claims: MAX },
+        body: { points_value: 25, max_claims: 1 }, // cost 25
       }),
     ]);
 
