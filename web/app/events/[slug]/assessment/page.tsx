@@ -5,8 +5,7 @@
 // renders the fields (reusing FormFieldInput), and submits to POST /events/:id/assessment for +100 once.
 // One submission per event: after success (or already_submitted) the form locks to a "ทำแล้ว ✓" state.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
-import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, CheckCircle2 } from "lucide-react";
 import { apiGet, ApiError } from "@/lib/api";
 import type { EventPublic } from "@/lib/types";
@@ -26,6 +25,7 @@ import { toast } from "sonner";
 type Loaded = { event: EventPublic; assessment: AssessmentGetResponse };
 
 function AssessmentInner({ slug }: { slug: string }) {
+  const router = useRouter();
   const [data, setData] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -90,10 +90,9 @@ function AssessmentInner({ slug }: { slug: string }) {
 
   return (
     <div className="space-y-4">
-      <Button asChild variant="ghost" size="sm" className="-ml-2">
-        <Link href={`/events/${slug}`}>
-          <ArrowLeft className="size-4" /> กลับไปหน้ากิจกรรม
-        </Link>
+      {/* Back to wherever the student came from (registration detail or event page), not a fixed route. */}
+      <Button variant="ghost" size="sm" className="-ml-2" onClick={() => router.back()}>
+        <ArrowLeft className="size-4" /> ย้อนกลับ
       </Button>
 
       {error ? (
