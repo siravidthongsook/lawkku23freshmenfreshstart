@@ -222,7 +222,7 @@ router.get(
 // GET /points/my-budget — staff/admin own budget + recent budget ledger.
 router.get("/points/my-budget", requireAuth, requirePermission(canAdjustPoints), async (c) => {
   const user = c.get("user");
-  const [budget, rows] = await Promise.all([
+  const [budget, rows, activeTokenRows] = await Promise.all([
     getStaffBudget(user.id),
     db
       .select()
@@ -230,7 +230,13 @@ router.get("/points/my-budget", requireAuth, requirePermission(canAdjustPoints),
       .where(eq(staffBudgetLedger.staffUserId, user.id))
       .orderBy(desc(staffBudgetLedger.createdAt))
       .limit(100),
+    // Still-active grant tokens this user issued → drives the "QR ที่สร้างไว้" list (drop revoked/exhausted).
+    db
+      .select({ id: pointGrantTokens.id })
+      .from(pointGrantTokens)
+      .where(and(eq(pointGrantTokens.createdByUserId, user.id), eq(pointGrantTokens.status, "active"))),
   ]);
+  const activeTokenIds = new Set(activeTokenRows.map((t) => t.id));
   // A manual_grant is already reversed iff a grant_refund row backs the same ledger entry. Refund is
   // always newer than its grant (desc order, same 100-row page) → safe to derive from the fetched rows.
   // Lets the UI hide the "ถอน" button after reverse (else it lingers and re-press → already_reversed).
@@ -245,6 +251,9 @@ router.get("/points/my-budget", requireAuth, requirePermission(canAdjustPoints),
       reason_code: r.reasonCode,
       grant_token_id: r.grantTokenId,
       target_user_id: r.targetUserId,
+      // true when this grant_issue's token is still active → UI shows it under "QR ที่สร้างไว้"
+      // (revoked/exhausted tokens drop off the revocable list instead of lingering).
+      grant_token_active: r.grantTokenId != null && activeTokenIds.has(r.grantTokenId),
       // staff self-reverse UI needs the backing ledger id to know which grant it can undo (Gap A)
       related_ledger_id: r.relatedLedgerId,
       // true once this manual_grant has been reversed (a grant_refund backs the same ledger id).

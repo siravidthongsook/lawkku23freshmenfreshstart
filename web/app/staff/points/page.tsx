@@ -207,9 +207,10 @@ function StaffPointsInner() {
   }
 
   // Active grant tokens surfaced from the budget ledger (grant_issue rows carry the token id).
-  // We can revoke any of these; the backend no-ops/refunds correctly if already done.
+  // Show only still-active tokens — revoked/exhausted ones drop off (older backend lacks the flag →
+  // default to showing, so behaviour degrades gracefully rather than hiding everything).
   const issuedTokens = data.history.filter(
-    (r) => r.reason_code === "grant_issue" && r.grant_token_id,
+    (r) => r.reason_code === "grant_issue" && r.grant_token_id && r.grant_token_active !== false,
   );
   // Recent manual grants the staff member can self-reverse (within the window the server enforces).
   const manualGrants = data.history.filter((r) => r.reason_code === "manual_grant");
