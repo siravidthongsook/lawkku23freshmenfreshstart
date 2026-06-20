@@ -10,7 +10,7 @@ export const eventPointConfig = pgTable("event_point_config", {
     .references(() => events.id),
   // toggles — enable/disable each earn path per event
   checkinInEnabled: boolean("checkin_in_enabled").notNull().default(true),
-  checkinOutEnabled: boolean("checkin_out_enabled").notNull().default(false),
+  checkinOutEnabled: boolean("checkin_out_enabled").notNull().default(true), // default ON — admin just sets the window time
   assessmentEnabled: boolean("assessment_enabled").notNull().default(false),
   assessmentRequiresCheckin: boolean("assessment_requires_checkin").notNull().default(true), // anti-farm (H3)
   // point-value overrides (null = COALESCE to pointSettings default)

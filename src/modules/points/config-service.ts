@@ -60,13 +60,14 @@ export function effectiveAssessmentPoints(
   return config?.assessmentPoints ?? settings.defaultAssessmentPoints;
 }
 
-// Toggles default when no config row exists: in=enabled, out=disabled (matches schema defaults).
+// Toggles default when no config row exists: in + out = enabled (matches schema defaults).
+// Check-out defaults ON so an admin only needs to set the check-out window time — no toggle hunt.
 export function isCheckinInEnabled(config: EventPointConfigRow | null): boolean {
   return config?.checkinInEnabled ?? true;
 }
 
 export function isCheckinOutEnabled(config: EventPointConfigRow | null): boolean {
-  return config?.checkinOutEnabled ?? false;
+  return config?.checkinOutEnabled ?? true;
 }
 
 // Assessment toggle default when no config row exists: disabled (matches schema default).

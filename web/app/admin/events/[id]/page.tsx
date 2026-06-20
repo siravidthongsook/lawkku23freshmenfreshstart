@@ -16,6 +16,7 @@ import {
   ChevronRight,
   Loader2,
   Sparkles,
+  ClipboardList,
   Send,
   Ban,
   Archive,
@@ -209,6 +210,13 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
             <Link href={`/admin/events/${id}/points`}>
               <Sparkles className="size-4" />
               แต้ม
+            </Link>
+          </Button>
+          {/* Assessment form builder — the 2nd form per event; no other entry point in the toolbar. */}
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/admin/events/${id}/assessment`}>
+              <ClipboardList className="size-4" />
+              แบบประเมิน
             </Link>
           </Button>
           <Button asChild variant="outline" size="sm">

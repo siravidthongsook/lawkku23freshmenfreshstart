@@ -1,0 +1,1 @@
+ALTER TABLE "event_point_config" ALTER COLUMN "checkin_out_enabled" SET DEFAULT true;

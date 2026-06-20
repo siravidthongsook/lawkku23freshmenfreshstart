@@ -4,7 +4,7 @@
 // reuses the same FormBuilder UI but saves via the assessment PUT endpoint (formType="assessment").
 // Renders inside the admin layout (RequireRole + AppShell provided there).
 import { use, useCallback, useEffect, useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { ApiError } from "@/lib/api";
 import { getAssessmentForm, putAssessmentForm } from "@/lib/points-api";
@@ -19,6 +19,7 @@ type AssessmentRow = { id: string; versionNumber: number; schemaJson: FormSchema
 
 export default function AssessmentBuilderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
   // undefined = loading; null = none built yet (start empty).
   const [form, setForm] = useState<AssessmentRow | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
@@ -43,10 +44,16 @@ export default function AssessmentBuilderPage({ params }: { params: Promise<{ id
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
-        <Button asChild variant="ghost" size="sm">
-          <Link href={`/admin/events/${id}/points`}>
-            <ArrowLeft className="size-4" /> ย้อนกลับ
-          </Link>
+        {/* Reachable from both the points page and the event toolbar — go back to wherever we came from,
+            falling back to the event overview when there's no in-app history (direct URL / fresh tab). */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() =>
+            window.history.length > 1 ? router.back() : router.push(`/admin/events/${id}`)
+          }
+        >
+          <ArrowLeft className="size-4" /> ย้อนกลับ
         </Button>
         <h1 className="text-xl font-semibold">แบบประเมิน (form ที่ 2)</h1>
       </div>

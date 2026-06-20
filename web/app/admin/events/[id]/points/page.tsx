@@ -57,7 +57,7 @@ export default function EventPointConfigPage({ params }: { params: Promise<{ id:
   // Form mirror. Point overrides are strings ("" = use default). Windows are Bangkok wall-clock.
   const [form, setForm] = useState({
     checkinInEnabled: true,
-    checkinOutEnabled: false,
+    checkinOutEnabled: true,
     assessmentEnabled: false,
     assessmentRequiresCheckin: true,
     checkinInPoints: "",
@@ -73,10 +73,10 @@ export default function EventPointConfigPage({ params }: { params: Promise<{ id:
 
   const hydrate = useCallback((c: EventPointConfig | null) => {
     setConfig(c);
-    // null config = no override row yet → fall back to documented defaults (in=on, out/assess=off).
+    // null config = no override row yet → fall back to documented defaults (in+out=on, assess=off).
     setForm({
       checkinInEnabled: c?.checkinInEnabled ?? true,
-      checkinOutEnabled: c?.checkinOutEnabled ?? false,
+      checkinOutEnabled: c?.checkinOutEnabled ?? true,
       assessmentEnabled: c?.assessmentEnabled ?? false,
       assessmentRequiresCheckin: c?.assessmentRequiresCheckin ?? true,
       checkinInPoints: c?.checkinInPoints != null ? String(c.checkinInPoints) : "",
