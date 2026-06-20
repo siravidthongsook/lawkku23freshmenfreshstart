@@ -1,6 +1,5 @@
-import { eq, exists, gte, ilike, isNotNull, isNull, lte, not, or, sql, type SQL } from "drizzle-orm";
-import { db } from "../../db/client";
-import { temporaryPasswords, users } from "../../db/schema/users";
+import { and, eq, gte, ilike, isNotNull, isNull, lte, or, type SQL } from "drizzle-orm";
+import { users } from "../../db/schema/users";
 
 // BKK is UTC+7, no DST. A Bangkok-local calendar date maps to a fixed UTC instant.
 const BKK_OFFSET_MS = 7 * 60 * 60 * 1000;
@@ -20,7 +19,6 @@ export type UserFilters = {
   role?: "student" | "checkin_staff" | "admin";
   status?: "active" | "disabled";
   claimed?: "yes" | "no";
-  pending_temp_pw?: "yes" | "no";
   group_number?: number;
   created_from?: string; // BKK-local YYYY-MM-DD
   created_to?: string; // BKK-local YYYY-MM-DD (inclusive end of day)
@@ -32,19 +30,15 @@ export function buildUserFilters(f: UserFilters): SQL[] {
   const conds: SQL[] = [];
   if (f.role) conds.push(eq(users.role, f.role));
   if (f.status) conds.push(eq(users.status, f.status));
-  // claimed=no -> never-claimed accounts (no password); claimed=yes -> password set.
-  if (f.claimed === "no") conds.push(isNull(users.passwordHash));
-  if (f.claimed === "yes") conds.push(isNotNull(users.passwordHash));
-  // pending_temp_pw: correlated EXISTS on the dedicated temp-pw table (a join-derived flag today).
-  if (f.pending_temp_pw) {
-    const sub = exists(
-      db
-        .select({ x: sql`1` })
-        .from(temporaryPasswords)
-        .where(eq(temporaryPasswords.userId, users.id)),
-    );
-    conds.push(f.pending_temp_pw === "yes" ? sub : not(sub));
-  }
+  // "Activated" = user has a self-set permanent password. Two provisioning flows both feed it:
+  //   students claim    -> password_hash NULL until claimed
+  //   staff temp-pw     -> password_hash is SET to the temp hash, password_must_change=true until they change it
+  // So one column can't capture both. Activated = hash set AND must_change=false; not-activated = the negation.
+  // This merges the old "claimed" + "pending temp-pw" filters into one correct signal.
+  if (f.claimed === "yes")
+    conds.push(and(isNotNull(users.passwordHash), eq(users.passwordMustChange, false))!);
+  if (f.claimed === "no")
+    conds.push(or(isNull(users.passwordHash), eq(users.passwordMustChange, true))!);
   if (f.group_number !== undefined) conds.push(eq(users.groupNumber, f.group_number));
   if (f.created_from) conds.push(gte(users.createdAt, bkkDateStartUtc(f.created_from)));
   if (f.created_to) conds.push(lte(users.createdAt, bkkDateEndUtc(f.created_to)));

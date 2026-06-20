@@ -158,66 +158,32 @@ router.post("/admin/users", zValidator("json", createUserSchema), async (c) => {
   return c.json({ user: publicUser(created) }, 201);
 });
 
-// GET /admin/users/temp-passwords/count — pending temp-pw count, so the export page can show
-// how many will be exported BEFORE downloading the plaintext file. No PII, no passwords.
-// NOTE: registered before the `/:userId` route so the literal path isn't captured as a param.
-router.get("/admin/users/temp-passwords/count", async (c) => {
-  const [row] = await db
-    .select({ c: sql<number>`count(*)::int` })
-    .from(temporaryPasswords);
-  return c.json({ count: row?.c ?? 0 });
-});
-
-// GET /admin/users/temp-passwords/export — decrypt + return ONLY pending users; audit count only.
-// NOTE: registered before the `/:userId` route so the literal path isn't captured as a param.
-router.get("/admin/users/temp-passwords/export", async (c) => {
-  const admin = c.get("user");
-  const meta = requestMeta(c);
-
-  const rows = await db
-    .select({
-      userId: users.id,
-      email: users.email,
-      studentId: users.studentId,
-      fullName: users.fullName,
-      role: users.role,
-      encrypted: temporaryPasswords.encryptedTempPassword,
-    })
-    .from(temporaryPasswords)
-    .innerJoin(users, eq(users.id, temporaryPasswords.userId))
-    .orderBy(desc(temporaryPasswords.createdAt));
-
-  const exported = rows.map((r) => ({
-    user_id: r.userId,
-    email: r.email,
-    student_id: r.studentId,
-    full_name: r.fullName,
-    role: r.role,
-    temp_password: decryptSecret(r.encrypted),
-  }));
-
-  // Audit logs the COUNT ONLY — never the passwords (also redacted defensively at write layer).
-  await writeAudit({
-    actorUserId: admin.id,
-    actorRole: admin.role,
-    action: "temp_password_exported",
-    entityType: "user",
-    metadata: { exported_user_count: exported.length },
-    ...meta,
-  });
-  return c.json({ users: exported });
-});
-
 // GET /admin/users/export — full filtered user list as CSV (NO pagination). Mirrors the list's
 // filters via buildUserFilters so export == what the admin sees. Secrets are never exportable.
 // NOTE: registered before the `/:userId` route so the literal path isn't captured as a param.
 const USER_EXPORT_HARD_CAP = 50_000; // bound memory/response; warn + truncate beyond this.
+// PDPA accountability: record WHICH user_ids were disclosed per export (subject-access + breach-scope).
+// Cap the id list (append-only table — avoid unbounded audit-row bloat); distinct from the 50k ROW cap above.
+const AUDIT_USER_IDS_CAP = 10_000;
 router.get("/admin/users/export", zValidator("query", exportUsersQuery), async (c) => {
   const admin = c.get("user");
   const meta = requestMeta(c);
   const log = c.get("log");
   const f = c.req.valid("query");
-  const { columns: requested, ...filters } = f;
+  const { columns: requested, reason, ...filters } = f;
+
+  // Resolve columns up-front so the plaintext-secret guard can fire before any DB/CSV/audit work.
+  // temp_password is opt-in ONLY (must be explicitly requested) — the no-columns default never leaks plaintext.
+  const columns = requested ?? USER_EXPORT_COLUMNS.filter((c) => c !== "temp_password");
+  const includedTempPassword = columns.includes("temp_password");
+
+  // Reason is required ONLY for the plaintext-secret column — guard fires first (no audit/CSV written).
+  if (includedTempPassword && !reason) {
+    return c.json(
+      { error: "reason_required", message: "ต้องระบุเหตุผลเมื่อส่งออกรหัสผ่านชั่วคราว" },
+      400,
+    );
+  }
 
   const conds = buildUserFilters(filters);
   const where = conds.length ? and(...conds) : undefined;
@@ -237,15 +203,23 @@ router.get("/admin/users/export", zValidator("query", exportUsersQuery), async (
     log?.event("users_export_truncated", { cap: USER_EXPORT_HARD_CAP });
   }
 
-  // Resolve pending temp-pw flags for the exported rows in one query (mirror the list pattern).
+  // Resolve pending temp-pw flag AND the decrypted plaintext in ONE query (mirror the list pattern).
+  // temp_password is decrypted on-export only; the plaintext is NEVER logged/audited (see audit call below).
   const ids = rows.map((r) => r.id);
   const pendingIds = new Set<string>();
+  const tempPwById = new Map<string, string>();
   if (ids.length) {
     const pendingRows = await db
-      .select({ userId: temporaryPasswords.userId })
+      .select({
+        userId: temporaryPasswords.userId,
+        encrypted: temporaryPasswords.encryptedTempPassword,
+      })
       .from(temporaryPasswords)
       .where(inArray(temporaryPasswords.userId, ids));
-    for (const p of pendingRows) pendingIds.add(p.userId);
+    for (const p of pendingRows) {
+      pendingIds.add(p.userId);
+      tempPwById.set(p.userId, decryptSecret(p.encrypted));
+    }
   }
 
   // Build the full allow-listed record per row. NO secret fields exist here by construction.
@@ -261,24 +235,43 @@ router.get("/admin/users/export", zValidator("query", exportUsersQuery), async (
     department: u.department ?? "",
     phone: u.phone ?? "",
     instagram: u.instagram ?? "",
-    claimed: u.passwordHash !== null ? "yes" : "no",
+    // Activation = self-set permanent password (hash set AND not must_change). Matches buildUserFilters' claimed signal.
+    claimed: u.passwordHash !== null && u.passwordMustChange === false ? "yes" : "no",
     pending_temp_pw: pendingIds.has(u.id) ? "yes" : "no",
+    // Decrypted plaintext temp pw (opt-in column, default unchecked in UI); "" when none pending.
+    temp_password: tempPwById.get(u.id) ?? "",
     created_at_bangkok: toBangkokString(u.createdAt),
     last_active_at_bangkok: toBangkokString(u.lastActiveAt),
   }));
 
-  // Columns = requested subset (already allow-list-validated) else the full stable order.
-  const columns = requested ?? [...USER_EXPORT_COLUMNS];
+  // Columns resolved above (before the secret guard); just emit the CSV here.
   const csv = toCsv(records, columns);
 
   // Audit COUNT + filter summary only — never row content / PII / secrets.
+  // included_temp_password flags every export where plaintext left the system (greppable for security review).
   log?.event("export", { kind: "users", rowCount: records.length });
+  // PDPA: capture the disclosed users' UUIDs ONLY (no email/student_id/name). Cap the id list to bound
+  // audit-row size; user_ids_truncated is the 10k id-list cap — separate from the 50k row `truncated` flag.
+  const allExportedIds = rows.map((r) => r.id);
+  const userIdsTruncated = allExportedIds.length > AUDIT_USER_IDS_CAP;
+  const exportedUserIds = userIdsTruncated
+    ? allExportedIds.slice(0, AUDIT_USER_IDS_CAP)
+    : allExportedIds;
   await writeAudit({
     actorUserId: admin.id,
     actorRole: admin.role,
     action: "users_exported",
     entityType: "user",
-    metadata: { row_count: records.length, truncated, filters, columns },
+    reason: includedTempPassword ? reason : null, // reason stored only for the plaintext-secret export
+    metadata: {
+      row_count: records.length,
+      truncated,
+      filters,
+      columns,
+      included_temp_password: includedTempPassword,
+      exported_user_ids: exportedUserIds, // PDPA subject-access/breach-scope: UUIDs of disclosed users
+      user_ids_truncated: userIdsTruncated,
+    },
     ...meta,
   });
 

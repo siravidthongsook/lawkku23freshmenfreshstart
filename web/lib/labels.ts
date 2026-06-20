@@ -21,7 +21,7 @@ export function roleLabel(r: string | null | undefined): string {
 
 // ---- user status (user_status enum) ----
 const USER_STATUS: Record<string, string> = {
-  active: "ใช้งานอยู่",
+  active: "บัญชีใช้ได้อยู่",
   disabled: "ถูกระงับ",
 };
 export function userStatusLabel(s: string | null | undefined): string {

@@ -67,7 +67,7 @@ const ROLE_OPTIONS: { value: Role | "all"; label: string }[] = [
 ];
 const STATUS_OPTIONS: { value: "all" | "active" | "disabled"; label: string }[] = [
   { value: "all", label: "ทุกสถานะ" },
-  { value: "active", label: "ใช้งานอยู่" },
+  { value: "active", label: "บัญชีใช้ได้อยู่" },
   { value: "disabled", label: "ปิดใช้งาน" },
 ];
 // Claim filter — "no" surfaces accounts that never set a password (not yet self-claimed).
@@ -197,9 +197,6 @@ export default function UsersPage() {
         <div className="flex gap-2">
           <Button variant="outline" asChild>
             <Link href="/admin/imports/users">นำเข้าผู้ใช้</Link>
-          </Button>
-          <Button variant="outline" asChild>
-            <Link href="/admin/users/temp-passwords">รหัสผ่านชั่วคราว</Link>
           </Button>
           <Button variant="outline" asChild>
             <Link href="/admin/users/export">ส่งออกผู้ใช้</Link>
@@ -381,7 +378,7 @@ export default function UsersPage() {
                         <TableCell>
                           {u.status === "active" ? (
                             <Badge className="border-transparent bg-green-100 text-green-800">
-                              ใช้งานอยู่
+                              บัญชีใช้ได้อยู่
                             </Badge>
                           ) : (
                             <Badge className="border-transparent bg-zinc-200 text-zinc-700">

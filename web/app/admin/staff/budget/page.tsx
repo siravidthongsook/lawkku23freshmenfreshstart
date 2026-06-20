@@ -246,7 +246,7 @@ export default function StaffBudgetOverviewPage() {
                     </TableCell>
                     <TableCell>
                       {r.status === "active" ? (
-                        <Badge className="border-transparent bg-green-100 text-green-800">ใช้งานอยู่</Badge>
+                        <Badge className="border-transparent bg-green-100 text-green-800">บัญชีใช้ได้อยู่</Badge>
                       ) : (
                         <Badge className="border-transparent bg-zinc-200 text-zinc-700">ปิดใช้งาน</Badge>
                       )}

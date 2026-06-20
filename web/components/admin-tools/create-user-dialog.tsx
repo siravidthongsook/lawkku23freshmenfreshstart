@@ -2,7 +2,7 @@
 
 // Create-user form. Validates with createUserSchema (student_id required for students).
 // Backend generates the temp password server-side; if the create response includes it we show it
-// ONCE via TempPasswordDialog, otherwise we point the admin to the temp-password export page.
+// ONCE via TempPasswordDialog, otherwise the admin can retrieve it via the users export (temp_password column).
 import { useState } from "react";
 import { toast } from "sonner";
 import { apiPost, ApiError } from "@/lib/api";

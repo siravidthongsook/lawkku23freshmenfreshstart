@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../src/db/client";
 import { temporaryPasswords, users } from "../src/db/schema/users";
 import { auditLogs } from "../src/db/schema/audit";
@@ -160,37 +160,191 @@ describe("users export: GET /admin/users/export", () => {
     expect(ids).not.toContain("exp-active");
   });
 
-  it("claimed filter narrows (yes = password set, no = unclaimed)", async () => {
+  // Activation = self-set permanent password: password_hash set AND password_must_change=false.
+  // Two provisioning flows feed "not activated": unclaimed students (hash NULL) AND staff still on a
+  // temp pw (hash SET but must_change=true). The latter is the case the old hash-only rule got wrong.
+  it("claimed filter uses the activation predicate (hash set AND not must_change)", async () => {
     const admin = await loginAs("admin");
-    await makeUser({ studentId: "exp-claimed", passwordHash: "x" });
-    await makeUser({ studentId: "exp-unclaimed", passwordHash: null });
+    // student claimed: self-set permanent password.
+    await makeUser({ studentId: "exp-stu-claimed", passwordHash: "x", passwordMustChange: false });
+    // student unclaimed: no password yet.
+    await makeUser({ studentId: "exp-stu-unclaimed", passwordHash: null, passwordMustChange: false });
+    // staff on temp pw: hash SET but still forced to change -> NOT activated (old rule got this wrong).
+    const staffTemp = await makeUser({
+      studentId: "exp-staff-temp",
+      role: "checkin_staff",
+      passwordHash: "x",
+      passwordMustChange: true,
+    });
+    await addPendingTempPw(staffTemp.id, admin.user.id);
+    // staff activated: changed their temp pw to a permanent one.
+    await makeUser({
+      studentId: "exp-staff-active",
+      role: "checkin_staff",
+      passwordHash: "x",
+      passwordMustChange: false,
+    });
 
+    // claimed=yes -> only the two fully-activated users.
     const yes = studentIds(await (await request("/admin/users/export?claimed=yes", { cookie: admin.cookie })).text());
-    expect(yes).toContain("exp-claimed");
-    expect(yes).not.toContain("exp-unclaimed");
+    expect(yes).toContain("exp-stu-claimed");
+    expect(yes).toContain("exp-staff-active");
+    expect(yes).not.toContain("exp-stu-unclaimed");
+    expect(yes).not.toContain("exp-staff-temp");
 
+    // claimed=no -> unclaimed student AND the temp-pw staff (both not-yet-activated).
     const no = studentIds(await (await request("/admin/users/export?claimed=no", { cookie: admin.cookie })).text());
-    expect(no).toContain("exp-unclaimed");
-    expect(no).not.toContain("exp-claimed");
+    expect(no).toContain("exp-stu-unclaimed");
+    expect(no).toContain("exp-staff-temp");
+    expect(no).not.toContain("exp-stu-claimed");
+    expect(no).not.toContain("exp-staff-active");
   });
 
-  it("pending_temp_pw filter narrows (EXISTS / NOT EXISTS on temporary_passwords)", async () => {
+  // The CSV `claimed` column value must match the activation predicate for every shape.
+  it("claimed column value reflects activation (yes only when hash set AND not must_change)", async () => {
+    const admin = await loginAs("admin");
+    await makeUser({ studentId: "exp-col-stu-claimed", passwordHash: "x", passwordMustChange: false });
+    await makeUser({ studentId: "exp-col-stu-unclaimed", passwordHash: null, passwordMustChange: false });
+    const staffTemp = await makeUser({
+      studentId: "exp-col-staff-temp",
+      role: "checkin_staff",
+      passwordHash: "x",
+      passwordMustChange: true,
+    });
+    await addPendingTempPw(staffTemp.id, admin.user.id);
+    await makeUser({
+      studentId: "exp-col-staff-active",
+      role: "checkin_staff",
+      passwordHash: "x",
+      passwordMustChange: false,
+    });
+
+    const { rows } = parseCsv(await (await request("/admin/users/export", { cookie: admin.cookie })).text());
+    const byId = (sid: string) => rows.find((r) => r.student_id === sid)!;
+    expect(byId("exp-col-stu-claimed").claimed).toBe("yes");
+    expect(byId("exp-col-stu-unclaimed").claimed).toBe("no");
+    expect(byId("exp-col-staff-temp").claimed).toBe("no"); // hash set but still on temp pw
+    expect(byId("exp-col-staff-active").claimed).toBe("yes");
+  });
+
+  // pending_temp_pw is a COLUMN only — the filter was merged into claimed=no (strict subset).
+  it("pending_temp_pw column reflects whether a pending temp pw exists (yes/no per row)", async () => {
     const admin = await loginAs("admin");
     const withPw = await makeUser({ studentId: "exp-pending" });
     await makeUser({ studentId: "exp-nopending" });
     await addPendingTempPw(withPw.id, admin.user.id);
 
-    const yes = studentIds(await (await request("/admin/users/export?pending_temp_pw=yes", { cookie: admin.cookie })).text());
-    expect(yes).toContain("exp-pending");
-    expect(yes).not.toContain("exp-nopending");
-
-    const no = studentIds(await (await request("/admin/users/export?pending_temp_pw=no", { cookie: admin.cookie })).text());
-    expect(no).toContain("exp-nopending");
-    expect(no).not.toContain("exp-pending");
-
-    // pending_temp_pw column reflects the flag.
-    const { rows } = parseCsv(await (await request("/admin/users/export?pending_temp_pw=yes", { cookie: admin.cookie })).text());
+    const { rows } = parseCsv(await (await request("/admin/users/export", { cookie: admin.cookie })).text());
     expect(rows.find((r) => r.student_id === "exp-pending")!.pending_temp_pw).toBe("yes");
+    expect(rows.find((r) => r.student_id === "exp-nopending")!.pending_temp_pw).toBe("no");
+  });
+
+  // temp_password column = DECRYPTED plaintext (opt-in column folded in from the retired bulk export).
+  it("temp_password column contains decrypted plaintext for pending users, empty otherwise", async () => {
+    const admin = await loginAs("admin");
+    const withPw = await makeUser({ studentId: "exp-tp-yes" });
+    await makeUser({ studentId: "exp-tp-no" });
+    await addPendingTempPw(withPw.id, admin.user.id); // encrypts "temp-secret-123"
+
+    const { rows } = parseCsv(
+      await (
+        // reason required now that temp_password (plaintext) is requested
+        await request("/admin/users/export?columns=student_id,temp_password&reason=test", { cookie: admin.cookie })
+      ).text(),
+    );
+    expect(rows.find((r) => r.student_id === "exp-tp-yes")!.temp_password).toBe("temp-secret-123");
+    expect(rows.find((r) => r.student_id === "exp-tp-no")!.temp_password).toBe("");
+  });
+
+  // Even when temp_password IS exported, the audit row must carry NO plaintext password value.
+  it("audit row for a temp_password export contains no plaintext password", async () => {
+    const admin = await loginAs("admin");
+    const withPw = await makeUser({ studentId: "exp-tp-audit" });
+    await addPendingTempPw(withPw.id, admin.user.id); // encrypts "temp-secret-123"
+
+    // reason required now that temp_password (plaintext) is requested
+    await request("/admin/users/export?columns=student_id,temp_password&reason=test", { cookie: admin.cookie });
+
+    const audits = await db
+      .select()
+      .from(auditLogs)
+      .where(and(eq(auditLogs.action, "users_exported"), eq(auditLogs.actorUserId, admin.user.id)));
+    expect(audits.length).toBeGreaterThan(0);
+    for (const a of audits) {
+      // The known plaintext must never appear anywhere in the audit metadata.
+      expect(JSON.stringify(a.metadata)).not.toContain("temp-secret-123");
+    }
+  });
+
+  // Plaintext temp_password export requires a reason — guard fires before any audit row is written.
+  it("temp_password requested WITHOUT reason -> 400 reason_required and writes NO audit row", async () => {
+    const admin = await loginAs("admin");
+    const withPw = await makeUser({ studentId: "exp-noreason" });
+    await addPendingTempPw(withPw.id, admin.user.id);
+
+    const before = await db
+      .select()
+      .from(auditLogs)
+      .where(and(eq(auditLogs.action, "users_exported"), eq(auditLogs.actorUserId, admin.user.id)));
+
+    const res = await request("/admin/users/export?columns=student_id,temp_password", {
+      cookie: admin.cookie,
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("reason_required");
+
+    // No audit row should have been written for this rejected attempt.
+    const after = await db
+      .select()
+      .from(auditLogs)
+      .where(and(eq(auditLogs.action, "users_exported"), eq(auditLogs.actorUserId, admin.user.id)));
+    expect(after.length).toBe(before.length);
+  });
+
+  // With a reason: 200, audit flags included_temp_password + stores reason, still no plaintext anywhere.
+  it("temp_password + reason -> 200; audit has included_temp_password + reason, no plaintext", async () => {
+    const admin = await loginAs("admin");
+    const withPw = await makeUser({ studentId: "exp-reason-ok" });
+    await addPendingTempPw(withPw.id, admin.user.id); // encrypts "temp-secret-123"
+
+    const reason = "ส่งให้ฝ่ายทะเบียนแจกนักศึกษา";
+    const res = await request(
+      `/admin/users/export?columns=student_id,temp_password&reason=${encodeURIComponent(reason)}`,
+      { cookie: admin.cookie },
+    );
+    expect(res.status).toBe(200);
+
+    const [audit] = await db
+      .select()
+      .from(auditLogs)
+      .where(and(eq(auditLogs.action, "users_exported"), eq(auditLogs.actorUserId, admin.user.id)));
+    expect(audit).toBeDefined();
+    const md = audit!.metadata as { included_temp_password: boolean };
+    expect(md.included_temp_password).toBe(true);
+    expect(audit!.reason).toBe(reason);
+    // The plaintext secret must never appear in the audit row (metadata, reason, or anywhere).
+    expect(JSON.stringify(audit)).not.toContain("temp-secret-123");
+  });
+
+  // Export without the secret column needs no reason and flags included_temp_password=false.
+  it("export WITHOUT temp_password (no reason) -> 200; audit included_temp_password=false", async () => {
+    const admin = await loginAs("admin");
+    await makeUser({ studentId: "exp-no-tp-flag" });
+
+    const res = await request("/admin/users/export?columns=student_id,full_name", {
+      cookie: admin.cookie,
+    });
+    expect(res.status).toBe(200);
+
+    const [audit] = await db
+      .select()
+      .from(auditLogs)
+      .where(and(eq(auditLogs.action, "users_exported"), eq(auditLogs.actorUserId, admin.user.id)));
+    expect(audit).toBeDefined();
+    const md = audit!.metadata as { included_temp_password: boolean };
+    expect(md.included_temp_password).toBe(false);
+    expect(audit!.reason).toBeNull();
   });
 
   it("group_number filter narrows", async () => {
@@ -263,5 +417,43 @@ describe("users export: GET /admin/users/export", () => {
     // No row content / identity leaked into the audit metadata.
     expect(JSON.stringify(audit!.metadata)).not.toContain("exp-audit");
     expect(JSON.stringify(audit!.metadata)).not.toContain("$argon2");
+  });
+
+  // PDPA accountability: the audit must record WHICH user_ids were disclosed — UUIDs only, no PII.
+  // Cap test (10k) is intentionally skipped: seeding 10k users is wasteful; the slice/flag logic is trivial.
+  it("audit records exported_user_ids = the disclosed UUIDs (UUID only, no email/student_id), not truncated", async () => {
+    const admin = await loginAs("admin");
+    const u1 = await makeUser({ studentId: "exp-uid-1", email: "uid1@example.test", role: "student" });
+    const u2 = await makeUser({ studentId: "exp-uid-2", email: "uid2@example.test", role: "student" });
+
+    await request("/admin/users/export?role=student&status=active", { cookie: admin.cookie });
+
+    const [audit] = await db
+      .select()
+      .from(auditLogs)
+      .where(and(eq(auditLogs.action, "users_exported"), eq(auditLogs.actorUserId, admin.user.id)));
+    expect(audit).toBeDefined();
+    const md = audit!.metadata as { exported_user_ids: string[]; user_ids_truncated: boolean };
+
+    // The two seeded users' UUIDs must be present (order-insensitive set membership).
+    const idSet = new Set(md.exported_user_ids);
+    expect(idSet.has(u1.id)).toBe(true);
+    expect(idSet.has(u2.id)).toBe(true);
+    expect(md.user_ids_truncated).toBe(false);
+
+    // Every recorded id must be a real users.id UUID.
+    expect(md.exported_user_ids.length).toBeGreaterThan(0);
+    const real = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(inArray(users.id, md.exported_user_ids));
+    expect(real.length).toBe(md.exported_user_ids.length);
+
+    // UUID list ONLY — no email/student_id (or any other identity) leaked into the audit metadata.
+    const mdJson = JSON.stringify(audit!.metadata);
+    expect(mdJson).not.toContain("uid1@example.test");
+    expect(mdJson).not.toContain("uid2@example.test");
+    expect(mdJson).not.toContain("exp-uid-1");
+    expect(mdJson).not.toContain("exp-uid-2");
   });
 });

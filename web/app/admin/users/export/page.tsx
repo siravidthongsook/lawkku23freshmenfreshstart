@@ -2,7 +2,9 @@
 
 // Admin > Users Export. Filter-rich page → downloads a CSV of users matching the chosen filters.
 // Mirrors the users list filters (q/role/status/claimed) and adds export-only filters
-// (pending temp-pw, group, created date range, never-active) plus a column picker.
+// (group, created date range, never-active) plus a column picker.
+// No separate temp-pw filter: pending temp-pw is a strict subset of claimed=no, so it's merged
+// into the claimed filter (and kept only as an export COLUMN in the picker below).
 // Backend GET /admin/users/export streams CSV (Content-Disposition + X-Row-Count); we trigger a blob download.
 // Count preview reuses GET /admin/users?...&limit=1 (best-effort: list may not support every filter — we send the supported subset).
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -34,22 +36,18 @@ const ROLE_OPTIONS: { value: Role | "all"; label: string }[] = [
 ];
 const STATUS_OPTIONS: { value: "all" | "active" | "disabled"; label: string }[] = [
   { value: "all", label: "ทุกสถานะ" },
-  { value: "active", label: "ใช้งานอยู่" },
+  { value: "active", label: "บัญชีใช้ได้อยู่" },
   { value: "disabled", label: "ปิดใช้งาน" },
 ];
+// No separate temp-pw filter: "รอใช้รหัสผ่านชั่วคราว" is merged into claimed=no (a strict subset).
 const CLAIM_OPTIONS: { value: "all" | "yes" | "no"; label: string }[] = [
-  { value: "all", label: "ทุกการยืนยัน" },
-  { value: "yes", label: "ยืนยันบัญชีแล้ว" },
-  { value: "no", label: "ยังไม่ยืนยันบัญชี" },
-];
-// Export-only: surfaces users who still hold an unused admin-issued temp password.
-const TEMP_PW_OPTIONS: { value: "all" | "yes" | "no"; label: string }[] = [
   { value: "all", label: "ทั้งหมด" },
-  { value: "yes", label: "รอใช้รหัสผ่านชั่วคราว" },
-  { value: "no", label: "ใช้รหัสผ่านแล้ว" },
+  { value: "yes", label: "ยืนยันบัญชีแล้ว" },
+  { value: "no", label: "ยังไม่ยืนยันบัญชี (ยังไม่เปลี่ยนรหัสชั่วคราวหรือยังไม่เคลมบัญชี)" },
 ];
 
-// Column allow-list mirrors the backend; order here is the display + default checked order.
+// Column allow-list mirrors the backend; order here is the display order.
+// `temp_password` is a plaintext secret → opt-in (default UNCHECKED); every other column defaults checked.
 const COLUMNS: { key: string; label: string }[] = [
   { key: "student_id", label: "รหัสนักศึกษา" },
   { key: "full_name", label: "ชื่อ-สกุล" },
@@ -64,25 +62,28 @@ const COLUMNS: { key: string; label: string }[] = [
   { key: "instagram", label: "instagram" },
   { key: "claimed", label: "ยืนยันบัญชีแล้ว" },
   { key: "pending_temp_pw", label: "รอใช้รหัสผ่านชั่วคราว" },
+  { key: "temp_password", label: "รหัสผ่านชั่วคราว (ค่าจริง)" },
   { key: "created_at_bangkok", label: "สร้างเมื่อ" },
   { key: "last_active_at_bangkok", label: "ใช้งานล่าสุด" },
 ];
+
+// Plaintext-secret columns default UNCHECKED (opt-in). Everything else is checked by default.
+const SECRET_COLS = new Set<string>(["temp_password"]);
+const DEFAULT_COLS = COLUMNS.map((c) => c.key).filter((k) => !SECRET_COLS.has(k));
 
 export default function UsersExportPage() {
   const [q, setQ] = useState("");
   const [role, setRole] = useState<Role | "all">("all");
   const [status, setStatus] = useState<"all" | "active" | "disabled">("all");
   const [claimed, setClaimed] = useState<"all" | "yes" | "no">("all");
-  const [pendingTempPw, setPendingTempPw] = useState<"all" | "yes" | "no">("all");
   const [group, setGroup] = useState<string>("all"); // "all" or "1".."16"
   const [createdFrom, setCreatedFrom] = useState(""); // YYYY-MM-DD (Bangkok-local date)
   const [createdTo, setCreatedTo] = useState("");
   const [neverActive, setNeverActive] = useState(false);
+  const [reason, setReason] = useState(""); // required ONLY when exporting the plaintext temp_password column
 
-  // Column picker — all checked by default. Set of selected column keys.
-  const [selectedCols, setSelectedCols] = useState<Set<string>>(
-    () => new Set(COLUMNS.map((c) => c.key)),
-  );
+  // Column picker — all checked by default EXCEPT plaintext-secret columns (temp_password, opt-in).
+  const [selectedCols, setSelectedCols] = useState<Set<string>>(() => new Set(DEFAULT_COLS));
 
   const [count, setCount] = useState<number | null>(null); // matching rows (best-effort preview); null = unknown/loading
   const [countLoading, setCountLoading] = useState(false);
@@ -109,18 +110,17 @@ export default function UsersExportPage() {
         role: role !== "all" ? role : undefined,
         status: status !== "all" ? status : undefined,
         claimed: claimed !== "all" ? claimed : undefined,
-        pending_temp_pw: pendingTempPw !== "all" ? pendingTempPw : undefined,
         group_number: group !== "all" ? group : undefined,
         created_from: createdFrom || undefined,
         created_to: createdTo || undefined,
         never_active: neverActive ? "true" : undefined,
-        // Omit columns when everything is selected → backend default = full set.
-        columns:
-          selectedCols.size === COLUMNS.length
-            ? undefined
-            : COLUMNS.filter((c) => selectedCols.has(c.key)).map((c) => c.key).join(","),
+        // Always send the explicit selection — NOT omitting, because the backend's no-columns default
+        // includes temp_password (plaintext). Sending the picked set keeps temp_password opt-in.
+        columns: COLUMNS.filter((c) => selectedCols.has(c.key)).map((c) => c.key).join(","),
+        // Reason sent ONLY when the plaintext temp_password column is selected (backend requires it then).
+        reason: selectedCols.has("temp_password") ? reason.trim() || undefined : undefined,
       }),
-    [q, role, status, claimed, pendingTempPw, group, createdFrom, createdTo, neverActive, selectedCols],
+    [q, role, status, claimed, group, createdFrom, createdTo, neverActive, selectedCols, reason],
   );
 
   // Debounced count preview (300ms) on the supported subset of filters. Best-effort: failure hides the count.
@@ -153,6 +153,11 @@ export default function UsersExportPage() {
   async function runExport() {
     if (selectedCols.size === 0) {
       toast.error("เลือกอย่างน้อยหนึ่งคอลัมน์");
+      return;
+    }
+    // Plaintext temp-pw export must carry a reason (mirrors the backend reason_required gate).
+    if (selectedCols.has("temp_password") && !reason.trim()) {
+      toast.error("ต้องระบุเหตุผลเมื่อส่งออกรหัสผ่านชั่วคราว");
       return;
     }
     setPending(true);
@@ -242,21 +247,7 @@ export default function UsersExportPage() {
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>รหัสผ่านชั่วคราว</Label>
-              <Select value={pendingTempPw} onValueChange={(v) => setPendingTempPw(v as "all" | "yes" | "no")}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {TEMP_PW_OPTIONS.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {/* claimed=no covers temp-pw-waiting users too (pending temp pw ⊂ not-claimed); baked into the option label. */}
             </div>
             <div className="space-y-1.5">
               <Label>กลุ่ม</Label>
@@ -338,6 +329,23 @@ export default function UsersExportPage() {
               </label>
             ))}
           </div>
+          {/* Warning + required reason shown only while the plaintext temp-password column is opted in. */}
+          {selectedCols.has("temp_password") ? (
+            <div className="mt-3 space-y-2">
+              <p className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+                ⚠️ มีรหัสผ่านจริง โปรดเก็บไฟล์อย่างปลอดภัย ส่งให้เฉพาะผู้ที่เกี่ยวข้อง และลบเมื่อเสร็จสิ้น
+              </p>
+              <div className="space-y-1.5">
+                <Label htmlFor="reason">เหตุผลในการส่งออกรหัสผ่าน</Label>
+                <Input
+                  id="reason"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="ระบุเหตุผล..."
+                />
+              </div>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 

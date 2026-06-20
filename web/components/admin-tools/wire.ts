@@ -38,7 +38,6 @@ export type UserDetailResponse = {
   locked_until?: string | null;
 };
 export type UserMutationResponse = { user: UserWire };
-export type TempPasswordCountResponse = { count: number };
 
 // POST /admin/users — create may (optionally) surface a generated temp pw. Backend currently returns
 // only { user }, but we read temp_password defensively in case it is added — shown once if present.

@@ -195,9 +195,11 @@ describe("audit-logs: secret redaction", () => {
     expect(resetRow.newValue).toEqual({ mode: "temp_password" });
   });
 
-  it("temp-password export audit row stores only a count, never any password", async () => {
+  // The bulk temp-pw export was folded into /admin/users/export as an opt-in temp_password column.
+  // Even when that column is exported, the audit row must carry only count/filter/columns — no plaintext.
+  it("users export with temp_password column audits count/columns, never any password", async () => {
     const { cookie } = await loginAs("admin");
-    // Create a temp-pw account so the export has something to decrypt.
+    // Create a temp-pw account so the export has a plaintext temp password to decrypt.
     const createRes = await request("/admin/users", {
       method: "POST",
       cookie,
@@ -211,17 +213,25 @@ describe("audit-logs: secret redaction", () => {
     });
     expect(createRes.status).toBe(201);
 
-    const exportRes = await request("/admin/users/temp-passwords/export", { cookie });
+    // reason required now that temp_password (plaintext) is requested
+    const exportRes = await request("/admin/users/export?columns=student_id,temp_password&reason=audit-check", { cookie });
     expect(exportRes.status).toBe(200);
-    const { users: exported } = (await exportRes.json()) as {
-      users: { temp_password: string }[];
-    };
-    expect(exported.length).toBeGreaterThan(0);
-    const plaintexts = exported.map((e) => e.temp_password).filter((p) => p && p.length > 0);
+    const csv = await exportRes.text();
+    // Pull the decrypted plaintext temp passwords out of the CSV body to assert they never leaked to audit.
+    const lines = csv.trim().split("\r\n");
+    const header = lines[0]!.split(",");
+    const tpIdx = header.indexOf("temp_password");
+    const plaintexts = lines
+      .slice(1)
+      .map((l) => l.split(",")[tpIdx] ?? "")
+      .filter((p) => p.length > 0);
+    expect(plaintexts.length).toBeGreaterThan(0);
 
-    const row = await auditRowFor("temp_password_exported");
+    const row = await auditRowFor("users_exported");
     assertNoSecret(row, plaintexts);
-    expect(row.metadata).toEqual({ exported_user_count: exported.length });
+    // Audit metadata records the column list (key only) — the key name, never any value.
+    const md = row.metadata as { columns?: string[] };
+    expect(md.columns).toContain("temp_password");
   });
 
   it("redact helper masks a known secret key passed through user_created newValue", async () => {

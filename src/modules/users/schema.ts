@@ -27,8 +27,9 @@ export const listUsersQuery = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
-// Allow-listed CSV export columns (stable order). Secrets (password_hash / temp-pw / tokens) are
-// NEVER in this list — there is no way to request them. `columns` param intersects with this set.
+// Allow-listed CSV export columns (stable order). password_hash / tokens are NEVER here.
+// `temp_password` is the ONE plaintext-secret column — decrypted on export, opt-in ONLY (must be explicitly
+// requested; never in the no-columns default), reason-gated, never logged/audited. `columns` param intersects this set.
 export const USER_EXPORT_COLUMNS = [
   "student_id",
   "full_name",
@@ -43,6 +44,7 @@ export const USER_EXPORT_COLUMNS = [
   "instagram",
   "claimed",
   "pending_temp_pw",
+  "temp_password",
   "created_at_bangkok",
   "last_active_at_bangkok",
 ] as const;
@@ -58,8 +60,6 @@ export const exportUsersQuery = z.object({
   role: roleEnum.optional(),
   status: statusEnum.optional(),
   claimed: z.enum(["yes", "no"]).optional(),
-  // pending_temp_pw: yes = admin issued a temp pw not yet consumed; no = none pending.
-  pending_temp_pw: z.enum(["yes", "no"]).optional(),
   // group_number (บรรพ) 1..16.
   group_number: z.coerce.number().int().min(1).max(16).optional(),
   created_from: bkkDate.optional(),
@@ -77,6 +77,8 @@ export const exportUsersQuery = z.object({
         : undefined,
     z.array(z.enum(USER_EXPORT_COLUMNS)).min(1).optional(),
   ),
+  // Reason — required ONLY when the plaintext temp_password column is requested (enforced in handler).
+  reason: z.string().trim().optional(),
 });
 
 export type ExportUsersQuery = z.infer<typeof exportUsersQuery>;

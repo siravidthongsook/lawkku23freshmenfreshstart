@@ -39,7 +39,8 @@ Forgot-password: no endpoint in V1 → UI shows "contact admin".
 | POST | `/admin/users/:userId/reset-password` | new temp pw, update hash, upsert encrypted temp, `must_change=true`, revoke all sessions |
 | POST | `/admin/users/:userId/unlock` | clear lockout |
 | POST | `/admin/users/:userId/change-role` | audit; new sessions use new role TTL |
-| GET | `/admin/users/temp-passwords/export` | export temp pw ONLY for pending users; logs `{exported_user_count}` |
+| GET | `/admin/users/export` | filtered CSV export of users; opt-in `temp_password` column (decrypted, requires `reason`); audit logs filters/columns/`included_temp_password`/`exported_user_ids` (UUIDs, capped 10k), never plaintext |
+| GET | `/admin/users/:userId/temp-password` | single-user reveal of pending temp pw (404 if none) |
 
 ---
 
