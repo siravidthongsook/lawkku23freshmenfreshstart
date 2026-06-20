@@ -149,15 +149,15 @@ export async function getFileIds(exec: Exec, registrationId: string): Promise<st
 }
 
 // Load registration or 404.
+// forUpdate=true takes a row lock (FOR UPDATE) so concurrent status transitions serialize on a FRESH
+// status — the loser blocks until the winner commits, then re-reads committed state. Must be in a tx.
 export async function getRegistrationOrThrow(
   exec: Exec,
   registrationId: string,
+  opts?: { forUpdate?: boolean },
 ): Promise<Registration> {
-  const [reg] = await exec
-    .select()
-    .from(registrations)
-    .where(eq(registrations.id, registrationId))
-    .limit(1);
+  const base = exec.select().from(registrations).where(eq(registrations.id, registrationId));
+  const [reg] = await (opts?.forUpdate ? base.for("update") : base).limit(1);
   if (!reg) throw notFound("Registration not found");
   return reg;
 }
