@@ -10,7 +10,7 @@ const nextConfig: NextConfig = {
   // the shared Zod schemas. Pinning to web/ would put src/ outside root and break the build.
   turbopack: { root: join(__dirname, "..") },
   // Allow LAN IP dev access (mobile testing on same wifi) — avoids cross-origin dev asset/HMR blocks.
-  allowedDevOrigins: ["192.168.1.6"],
+  allowedDevOrigins: ["192.168.1.*"],
   // Poster images proxy through /api/* and carry a ?t= cache-bust query after re-upload.
   // `search` omitted -> any query string allowed.
   images: { localPatterns: [{ pathname: "/**" }] },

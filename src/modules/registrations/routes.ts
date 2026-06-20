@@ -13,6 +13,13 @@ import { writeAudit } from "../../lib/audit";
 import { capacityRejectionsTotal, registrationsTotal } from "../../lib/metrics";
 import { isWithinWindow } from "../../lib/time";
 import {
+  getEventPointConfig,
+  getPointSettings,
+  isCheckinOutEnabled,
+  isPastCutoff,
+  scanOutWindow,
+} from "../points/config-service";
+import {
   issueQrToken,
   revokeActiveQrToken,
   hasActiveQrToken,
@@ -68,6 +75,39 @@ const userSearchQuery = z.object({
 // QR shown to students only when status is active+eligible and event is published.
 function qrEligible(status: string, eventStatus: string): boolean {
   return (status === "registered" || status === "checked_in") && eventStatus === "published";
+}
+
+// One QR drives both check-in and check-out. This decides the current stage + whether to render the QR
+// now, mirroring the scan-IN/OUT gates in checkins/routes so the student only sees it when scannable.
+type QrPhase =
+  | "checkin" // before check-in (QR shown while the check-in window is open)
+  | "awaiting_checkout" // checked in; check-out enabled but its window hasn't opened yet
+  | "checkout" // check-out window open (QR shown again)
+  | "checkout_closed" // check-out window passed (or cutoff) without a scan
+  | "done" // checked out, or event has no check-out
+  | "unavailable"; // not eligible (cancelled/waitlisted/unpublished)
+
+function computeQrPhase(
+  reg: import("../../db/schema/registrations").Registration,
+  event: import("../../db/schema/events").Event,
+  config: Awaited<ReturnType<typeof getEventPointConfig>>,
+  settings: Awaited<ReturnType<typeof getPointSettings>>,
+  now: Date,
+  eligible: boolean,
+): { phase: QrPhase; showQr: boolean } {
+  if (!eligible) return { phase: "unavailable", showQr: false };
+  if (reg.checkedOutAt) return { phase: "done", showQr: false }; // nothing left to scan
+  // Not yet checked in → show QR while the check-in window is open (event.checkinOpen/Close gate).
+  if (reg.status !== "checked_in") {
+    return { phase: "checkin", showQr: isWithinWindow(now, event.checkinOpenAt, event.checkinCloseAt) };
+  }
+  // Checked in, not out. No check-out for this event → done.
+  if (!isCheckinOutEnabled(config)) return { phase: "done", showQr: false };
+  if (isPastCutoff(settings, now)) return { phase: "checkout_closed", showQr: false }; // earning frozen
+  const win = scanOutWindow(config, event, settings);
+  if (isWithinWindow(now, win.open, win.close)) return { phase: "checkout", showQr: true };
+  if (win.close && now > win.close) return { phase: "checkout_closed", showQr: false };
+  return { phase: "awaiting_checkout", showQr: false }; // window hasn't opened yet
 }
 
 // =====================================================================
@@ -368,6 +408,11 @@ router.get("/me/registrations/:registrationId", requireAuth, async (c) => {
   // Owner-only: decrypt the active token so the QR encodes the real scan secret (not the event URL).
   const qrToken = eligible ? await getActiveQrTokenForOwner(db, reg.id) : null;
   const qrAvailable = eligible && qrToken != null;
+  // The single QR serves both check-in and check-out. Decide which phase we're in (mirrors the scan
+  // gates in checkins/routes) so the student page shows the QR only while the relevant window is open.
+  const settings = await getPointSettings(db);
+  const config = await getEventPointConfig(reg.eventId, db);
+  const qrPhase = computeQrPhase(reg, event, config, settings, new Date(), eligible);
 
   return c.json({
     registration: serializeRegistration(reg),
@@ -390,7 +435,15 @@ router.get("/me/registrations/:registrationId", requireAuth, async (c) => {
     // Rich file metadata (filename + mime) so the detail page can label downloads; fileIds kept for back-compat.
     files,
     form,
-    qr: { eligible, available: qrAvailable, publicEventId: event.publicId, token: qrToken },
+    qr: {
+      eligible,
+      available: qrAvailable,
+      publicEventId: event.publicId,
+      token: qrToken,
+      // phase = which scan stage we're in; showQr = render the QR right now (token also gated on it).
+      phase: qrPhase.phase,
+      showQr: qrPhase.showQr && qrAvailable,
+    },
   });
 });
 

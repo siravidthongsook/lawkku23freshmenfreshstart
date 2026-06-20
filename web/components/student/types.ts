@@ -15,6 +15,7 @@ export type StudentRegistration = {
   registeredAt: string | null;
   waitlistedAt: string | null;
   checkedInAt: string | null;
+  checkedOutAt: string | null;
   cancelledAt: string | null;
   checkinMethod: string | null;
   createdAt: string;
@@ -32,11 +33,23 @@ export type MyRegistrationsResponse = {
 // QR sub-object on the detail response. Backend returns eligible/available/publicEventId.
 // `token` is OPTIONAL — backend does not currently expose a per-registration token to students;
 // when absent we fall back to the event's permanent QR URL (/e/:publicEventId).
+// QR scan stage (backend-decided). One token serves both check-in and check-out; `showQr` says whether
+// to render it right now (true only while the relevant scan window is open).
+export type QrPhase =
+  | "checkin"
+  | "awaiting_checkout"
+  | "checkout"
+  | "checkout_closed"
+  | "done"
+  | "unavailable";
 export type RegistrationQr = {
   eligible: boolean;
   available: boolean;
   publicEventId?: string | null;
   token?: string | null;
+  // OPTIONAL (back-compat): phase/showQr added so the detail page shows the QR only when scannable.
+  phase?: QrPhase;
+  showQr?: boolean;
 };
 
 // GET /me/registrations/:id — registration + answers (field_key→value) + file ids + qr.

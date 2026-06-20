@@ -4,9 +4,11 @@
 // edit/cancel actions. Tolerant of missing backend enrichment (event/form may be absent).
 import { useEffect, useState, use } from "react";
 import Link from "next/link";
-import { ArrowLeft, Download, Pencil, XCircle } from "lucide-react";
+import { ArrowLeft, Download, Pencil, Sparkles, CheckCircle2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { apiGet, apiPost, ApiError } from "@/lib/api";
+import { getAssessment } from "@/lib/points-api";
+import type { AssessmentGetResponse } from "@/lib/points-types";
 import { formatBangkok } from "@/lib/time";
 import { RequireRole } from "@/components/guards";
 import { AppShell } from "@/components/app-shell";
@@ -69,6 +71,8 @@ function DetailInner({ registrationId }: { registrationId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  // Assessment state: the +100 form has no other entry point in the UI, so surface it here.
+  const [assessment, setAssessment] = useState<AssessmentGetResponse | null>(null);
 
   function load() {
     setError(null);
@@ -81,6 +85,19 @@ function DetailInner({ registrationId }: { registrationId: string }) {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [registrationId]);
+
+  // Fetch assessment status once we know the eventId; tolerate failure (CTA just stays hidden).
+  useEffect(() => {
+    const eventId = detail?.registration.eventId;
+    if (!eventId) return;
+    let active = true;
+    getAssessment(eventId)
+      .then((a) => active && setAssessment(a))
+      .catch(() => active && setAssessment(null));
+    return () => {
+      active = false;
+    };
+  }, [detail?.registration.eventId]);
 
   async function handleCancel() {
     setCancelling(true);
@@ -160,16 +177,42 @@ function DetailInner({ registrationId }: { registrationId: string }) {
         </div>
       </div>
 
-      {/* Show the ticket when eligible/available; otherwise explain why it's absent (no silent gap). */}
-      {qr.eligible && qr.available ? (
+      {/* One QR serves both check-in and check-out. Backend's qr.showQr is true only while the relevant
+          scan window is open; between/after, show a status card (qr.phase) instead of a stale ticket. */}
+      {qr.showQr ? (
         <QrTicket qr={qr} />
       ) : (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">บัตรของคุณ</CardTitle>
           </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">{ticketAbsentReason(detail)}</p>
+          <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
+            <TicketStatus detail={detail} />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Assessment CTA — the only student-facing entry to the +แต้ม form. Checked-in students only;
+          shown when the event has an active assessment + a public slug; collapses to "done" once submitted. */}
+      {registration.checkedInAt && assessment?.enabled && assessment.form && detail.event?.publicSlug && (
+        <Card>
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+            {assessment.submitted ? (
+              <div className="flex items-center gap-2 text-sm">
+                <CheckCircle2 className="size-5 text-green-600" />
+                <span className="font-medium">ทำแบบประเมินแล้ว — รับแต้มเรียบร้อย</span>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center gap-2 text-sm">
+                  <Sparkles className="size-5 text-primary" />
+                  <span className="font-medium">ทำแบบประเมินเพื่อรับแต้ม (ครั้งเดียวต่อกิจกรรม)</span>
+                </div>
+                <Button asChild size="sm">
+                  <Link href={`/events/${detail.event.publicSlug}/assessment`}>ทำแบบประเมิน</Link>
+                </Button>
+              </>
+            )}
           </CardContent>
         </Card>
       )}
@@ -289,6 +332,41 @@ function DetailInner({ registrationId }: { registrationId: string }) {
       </Dialog>
     </div>
   );
+}
+
+// Status card shown in place of the QR when it isn't scannable right now (qr.phase from the backend).
+// checked-out → done; checked-in → confirm + (awaiting/closed checkout hint); else explain the absence.
+function TicketStatus({ detail }: { detail: RegistrationDetailResponse }) {
+  const { registration, qr } = detail;
+  if (registration.checkedOutAt) {
+    return (
+      <>
+        <CheckCircle2 className="size-10 text-green-600" />
+        <p className="font-medium">เช็คเอาท์แล้ว</p>
+        <p className="text-sm text-muted-foreground">
+          เช็คเอาท์เมื่อ {formatBangkok(registration.checkedOutAt)}
+        </p>
+      </>
+    );
+  }
+  if (registration.checkedInAt) {
+    return (
+      <>
+        <CheckCircle2 className="size-10 text-green-600" />
+        <p className="font-medium">เช็คอินแล้ว</p>
+        <p className="text-sm text-muted-foreground">
+          เช็คอินเมื่อ {formatBangkok(registration.checkedInAt)}
+        </p>
+        {qr.phase === "awaiting_checkout" && (
+          <p className="text-sm text-muted-foreground">QR จะแสดงอีกครั้งเมื่อถึงเวลาเช็คเอาท์</p>
+        )}
+        {qr.phase === "checkout_closed" && (
+          <p className="text-sm text-muted-foreground">หมดเวลาเช็คเอาท์แล้ว</p>
+        )}
+      </>
+    );
+  }
+  return <p className="text-sm text-muted-foreground">{ticketAbsentReason(detail)}</p>;
 }
 
 function Info({ label, value }: { label: string; value: string }) {

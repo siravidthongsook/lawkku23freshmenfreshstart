@@ -195,6 +195,7 @@ export function serializeRegistration(reg: Registration) {
     registeredAt: reg.registeredAt?.toISOString() ?? null,
     waitlistedAt: reg.waitlistedAt?.toISOString() ?? null,
     checkedInAt: reg.checkedInAt?.toISOString() ?? null,
+    checkedOutAt: reg.checkedOutAt?.toISOString() ?? null,
     cancelledAt: reg.cancelledAt?.toISOString() ?? null,
     checkinMethod: reg.checkinMethod,
     createdAt: reg.createdAt.toISOString(),
