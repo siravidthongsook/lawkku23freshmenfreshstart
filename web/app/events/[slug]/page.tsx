@@ -23,6 +23,7 @@ import {
   eventTimeRange,
   capacityLabel,
   seatsRemaining,
+  isOngoing,
   extractEventForm,
   registrationAction,
   type RegistrationAction,
@@ -246,6 +247,13 @@ function EventDetail({
             <div className="absolute left-3 top-3">
               <EventStatusBadge status={event.status} />
             </div>
+          ) : null}
+          {/* Live now: event started, not yet ended. Mirrors the list-card "กำลังดำเนินอยู่" pill. */}
+          {isOngoing(event) ? (
+            <span className="absolute right-3 top-3 flex items-center gap-1 rounded-full bg-rose-600 px-2.5 py-1 text-xs font-medium text-white shadow">
+              <span className="size-1.5 animate-pulse rounded-full bg-white" />
+              กำลังดำเนินอยู่
+            </span>
           ) : null}
         </div>
 

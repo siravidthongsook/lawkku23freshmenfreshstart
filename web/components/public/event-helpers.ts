@@ -34,6 +34,15 @@ export function seatsRemaining(e: EventPublic): number | null {
   return Math.max(0, e.capacityLimit - (e.registeredCount ?? 0));
 }
 
+// Event is happening right now: started (now ≥ start) and not yet ended (no end, or now ≤ end).
+// No start time → can't be "ongoing". Drives the "กำลังดำเนินอยู่" card badge.
+export function isOngoing(e: Pick<EventPublic, "eventStartAt" | "eventEndAt">, now = new Date()): boolean {
+  if (!e.eventStartAt) return false;
+  if (now < new Date(e.eventStartAt)) return false;
+  if (e.eventEndAt && now > new Date(e.eventEndAt)) return false;
+  return true;
+}
+
 // True when capacity is enabled AND the limit has been reached (count >= limit).
 export function isFull(e: EventPublic): boolean {
   return e.capacityEnabled && typeof e.capacityLimit === "number" && e.registeredCount >= e.capacityLimit;
