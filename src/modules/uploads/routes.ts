@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { stream } from "hono/streaming";
+import { bodyLimit } from "hono/body-limit";
 import { and, eq, isNull } from "drizzle-orm";
 import type { AppVariables } from "../../lib/context";
 import { db } from "../../db/client";
@@ -25,6 +26,9 @@ const ALLOWED: Record<string, string[]> = {
   "image/png": [".png"],
 };
 const MAX_BYTES = 5 * 1024 * 1024; // 5MB default
+// bodyLimit cap sits slightly above MAX_BYTES so a max-size file + multipart framing still passes.
+// It bounds RAM by rejecting oversized bodies DURING read, before parseBody/arrayBuffer fully buffer them.
+const UPLOAD_BODY_LIMIT = MAX_BYTES + 64 * 1024; // +64KB multipart overhead margin
 
 function extOf(filename: string): string {
   const i = filename.lastIndexOf(".");
@@ -32,7 +36,17 @@ function extOf(filename: string): string {
 }
 
 // POST /registrations/:registrationId/files — multipart upload (owner student or admin).
-router.post("/registrations/:registrationId/files", requireAuth, async (c) => {
+// bodyLimit first: caps RAM by killing oversized bodies during read, before parseBody/arrayBuffer buffer them.
+router.post(
+  "/registrations/:registrationId/files",
+  bodyLimit({
+    maxSize: UPLOAD_BODY_LIMIT,
+    // Match the post-buffer check's error code (file_too_large); 413 for the early read-time reject.
+    onError: (c) =>
+      c.json({ error: "file_too_large", message: "File exceeds 5MB limit" }, 413),
+  }),
+  requireAuth,
+  async (c) => {
   const user = c.get("user");
   const registrationId = c.req.param("registrationId");
   const meta = requestMeta(c);
@@ -174,7 +188,8 @@ router.post("/registrations/:registrationId/files", requireAuth, async (c) => {
     },
     201,
   );
-});
+  },
+);
 
 // GET /files/:fileId/download — authorize (student=own, admin=all, staff=none), stream from private storage.
 router.get("/files/:fileId/download", requireAuth, async (c) => {

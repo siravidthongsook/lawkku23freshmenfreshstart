@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { stream } from "hono/streaming";
+import { bodyLimit } from "hono/body-limit";
 import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { db } from "../../db/client";
 import { events } from "../../db/schema/events";
@@ -396,8 +397,19 @@ const POSTER_ALLOWED: Record<string, string[]> = {
   "image/png": [".png"],
 };
 const POSTER_MAX_BYTES = 5 * 1024 * 1024; // 5MB
+// bodyLimit cap sits slightly above POSTER_MAX_BYTES so a max-size poster + multipart framing still passes.
+// Bounds RAM by rejecting oversized bodies DURING read, before parseBody/arrayBuffer fully buffer them.
+const POSTER_BODY_LIMIT = POSTER_MAX_BYTES + 64 * 1024; // +64KB multipart overhead margin
 
-router.post("/admin/events/:eventId/poster", async (c) => {
+router.post(
+  "/admin/events/:eventId/poster",
+  bodyLimit({
+    maxSize: POSTER_BODY_LIMIT,
+    // Match the post-buffer check's error code (file_too_large); 413 for the early read-time reject.
+    onError: (c) =>
+      c.json({ error: "file_too_large", message: "File exceeds 5MB limit" }, 413),
+  }),
+  async (c) => {
   const { eventId } = eventIdParam.parse(c.req.param());
   const user = c.get("user");
   const meta = requestMeta(c);
@@ -446,7 +458,8 @@ router.post("/admin/events/:eventId/poster", async (c) => {
   });
 
   return c.json({ event: updated }, 201);
-});
+  },
+);
 
 // DELETE /admin/events/:eventId/poster — clear the poster (admin only). No-op-safe if already none.
 // Mirrors upload's orphan policy: leaves the stored object in place (storage GC is separate).
