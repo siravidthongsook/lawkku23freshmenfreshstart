@@ -203,7 +203,7 @@ router.get("/admin/users/export", zValidator("query", exportUsersQuery), async (
     log?.event("users_export_truncated", { cap: USER_EXPORT_HARD_CAP });
   }
 
-  // Resolve pending temp-pw flag AND the decrypted plaintext in ONE query (mirror the list pattern).
+  // Resolve pending temp-pw flag AND (only when exporting the plaintext column) decrypt it, in ONE query.
   // temp_password is decrypted on-export only; the plaintext is NEVER logged/audited (see audit call below).
   const ids = rows.map((r) => r.id);
   const pendingIds = new Set<string>();
@@ -217,8 +217,17 @@ router.get("/admin/users/export", zValidator("query", exportUsersQuery), async (
       .from(temporaryPasswords)
       .where(inArray(temporaryPasswords.userId, ids));
     for (const p of pendingRows) {
-      pendingIds.add(p.userId);
-      tempPwById.set(p.userId, decryptSecret(p.encrypted));
+      pendingIds.add(p.userId); // flag needs only existence — never decrypts
+      // Decrypt only when the plaintext column was requested. Guard per-row: a single undecryptable
+      // ciphertext (e.g. encrypted under a rotated TEMP_PW_ENC_KEY) must not 500 the whole export.
+      if (includedTempPassword) {
+        try {
+          tempPwById.set(p.userId, decryptSecret(p.encrypted));
+        } catch {
+          tempPwById.set(p.userId, "<decrypt-error>");
+          log?.event("temp_pw_decrypt_failed", { userId: p.userId });
+        }
+      }
     }
   }
 

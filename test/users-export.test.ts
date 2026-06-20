@@ -256,6 +256,25 @@ describe("users export: GET /admin/users/export", () => {
     expect(rows.find((r) => r.student_id === "exp-tp-no")!.temp_password).toBe("");
   });
 
+  // A single undecryptable ciphertext (e.g. rotated TEMP_PW_ENC_KEY) must not 500 the whole export.
+  it("temp_password export survives an undecryptable row (marks it, no 500)", async () => {
+    const admin = await loginAs("admin");
+    const bad = await makeUser({ studentId: "exp-tp-bad" });
+    // Bad ciphertext not produced by encryptSecret → decryptSecret throws → guarded per-row.
+    await db.insert(temporaryPasswords).values({
+      userId: bad.id,
+      encryptedTempPassword: "AAAA:BBBB:CCCC",
+      createdByAdminId: admin.user.id,
+    });
+
+    const res = await request("/admin/users/export?columns=student_id,temp_password&reason=test", {
+      cookie: admin.cookie,
+    });
+    expect(res.status).toBe(200);
+    const { rows } = parseCsv(await res.text());
+    expect(rows.find((r) => r.student_id === "exp-tp-bad")!.temp_password).toBe("<decrypt-error>");
+  });
+
   // Even when temp_password IS exported, the audit row must carry NO plaintext password value.
   it("audit row for a temp_password export contains no plaintext password", async () => {
     const admin = await loginAs("admin");
