@@ -140,7 +140,7 @@ export function CreateUserDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="student">นักศึกษา</SelectItem>
-                  <SelectItem value="checkin_staff">เจ้าหน้าที่เช็คอิน</SelectItem>
+                  <SelectItem value="checkin_staff">เจ้าหน้าที่</SelectItem>
                   <SelectItem value="admin">ผู้ดูแลระบบ</SelectItem>
                 </SelectContent>
               </Select>

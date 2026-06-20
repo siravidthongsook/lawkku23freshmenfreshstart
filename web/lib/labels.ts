@@ -12,7 +12,7 @@ function lookup<K extends string>(map: Record<K, string>, key: string | null | u
 // ---- user role (user_role enum) ----
 const ROLE: Record<string, string> = {
   admin: "ผู้ดูแลระบบ",
-  checkin_staff: "เจ้าหน้าที่เช็คอิน",
+  checkin_staff: "เจ้าหน้าที่", // role now broader than check-in; DB value kept for compat
   student: "นักศึกษา",
 };
 export function roleLabel(r: string | null | undefined): string {

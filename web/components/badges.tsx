@@ -44,7 +44,7 @@ const ROLE_STYLE: Record<Role, string> = {
 };
 const ROLE_LABEL: Record<Role, string> = {
   student: "นักศึกษา",
-  checkin_staff: "เจ้าหน้าที่เช็คอิน",
+  checkin_staff: "เจ้าหน้าที่",
   admin: "ผู้ดูแลระบบ",
 };
 

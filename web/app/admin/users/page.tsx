@@ -52,7 +52,7 @@ const DEFAULT_ORDER: Record<SortKey, SortOrder> = {
 const ROLE_OPTIONS: { value: Role | "all"; label: string }[] = [
   { value: "all", label: "ทุกบทบาท" },
   { value: "student", label: "นักศึกษา" },
-  { value: "checkin_staff", label: "เจ้าหน้าที่เช็คอิน" },
+  { value: "checkin_staff", label: "เจ้าหน้าที่" },
   { value: "admin", label: "ผู้ดูแลระบบ" },
 ];
 const STATUS_OPTIONS: { value: "all" | "active" | "disabled"; label: string }[] = [

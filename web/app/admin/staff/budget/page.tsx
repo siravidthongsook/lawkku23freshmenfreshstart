@@ -193,7 +193,7 @@ export default function StaffBudgetOverviewPage() {
             </div>
           ) : sorted.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted-foreground">
-              {rows.length === 0 ? "ไม่มีเจ้าหน้าที่เช็คอิน" : "ไม่พบผลลัพธ์ที่ตรงกับตัวกรอง"}
+              {rows.length === 0 ? "ไม่มีเจ้าหน้าที่" : "ไม่พบผลลัพธ์ที่ตรงกับตัวกรอง"}
             </p>
           ) : (
             <Table>
