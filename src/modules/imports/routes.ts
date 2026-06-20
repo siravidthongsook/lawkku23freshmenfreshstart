@@ -21,8 +21,10 @@ const router = new Hono<{ Variables: AppVariables }>();
 const adminOnly = [requireAuth, requirePermission(canManageUsers)] as const;
 
 // KILL-SWITCH: imports disabled — result endpoint leaks plaintext temp passwords from result_summary.
-// Temporary 503 guard on ALL import routes (preview/confirm/result) pending the real fix; revert once fixed.
-router.use("*", async (c) =>
+// Temporary 503 guard on import paths ONLY (preview/confirm/result) pending the real fix; revert once fixed.
+// MUST be path-scoped, not "*": this router mounts at "/", so a bare "*" wildcard shadows every sibling
+// router registered after imports in app.ts (exports/audit/points/assessments) → app-wide 503.
+router.use("/admin/imports/*", async (c) =>
   c.json({ error: "feature_disabled", message: "Import feature temporarily disabled" }, 503),
 );
 
