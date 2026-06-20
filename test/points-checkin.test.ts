@@ -49,6 +49,11 @@ function scan(eventId: string, qrToken: string, cookie: string, scanType?: "in" 
   });
 }
 
+// Manual check-in by registration id (no QR) — the staff-search path. checkin_method = manual_search.
+function manualCheckin(registrationId: string, cookie: string) {
+  return request(`/registrations/${registrationId}/manual-checkin`, { method: "POST", cookie });
+}
+
 async function balanceOf(userId: string): Promise<number> {
   const [u] = await db.select({ b: users.pointsBalance }).from(users).where(eq(users.id, userId));
   return u!.b;
@@ -139,6 +144,115 @@ describe("points: check-in IN awards default 20 (idempotent, balance == SUM(delt
     expect((await res.json()) as { result: string }).toMatchObject({ result: "checked_in_success" });
     expect((await getReg(registrationId))!.status).toBe("checked_in"); // still checked in
     expect(await balanceOf(userId)).toBe(0); // but no points
+  });
+});
+
+// =====================================================================
+// Manual check-in IN award — regression for the bug where manual_search
+// flipped status but never awarded checkin_in points (only QR scan did).
+// =====================================================================
+describe("points: manual check-in awards checkin_in like the QR scan path", () => {
+  it("manual check-in awards 20, surfaces pointsAwarded, balance == SUM(delta)", async () => {
+    const event = await makeCheckinEvent();
+    const { registrationId, userId } = await registerStudent(event);
+    const staff = await loginAs("checkin_staff");
+
+    const res = await manualCheckin(registrationId, staff.cookie);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { result: string; pointsAwarded: number };
+    expect(body.result).toBe("checked_in_success");
+    expect(body.pointsAwarded).toBe(20);
+    expect((await getReg(registrationId))!.checkinMethod).toBe("manual_search");
+    expect(await balanceOf(userId)).toBe(20);
+    expect(await ledgerSum(userId)).toBe(20); // cache == truth
+  });
+
+  it("ledger row records scanMethod=manual_search in metadata", async () => {
+    const event = await makeCheckinEvent();
+    const { registrationId, userId } = await registerStudent(event);
+    const staff = await loginAs("checkin_staff");
+    await manualCheckin(registrationId, staff.cookie);
+
+    const [entry] = await db
+      .select()
+      .from(pointLedger)
+      .where(eq(pointLedger.userId, userId));
+    expect(entry!.reasonCode).toBe("checkin_in");
+    expect((entry!.metadata as { scanMethod?: string }).scanMethod).toBe("manual_search");
+  });
+
+  it("re-manual-checkin → already_checked_in (400), no double award", async () => {
+    const event = await makeCheckinEvent();
+    const { registrationId, userId } = await registerStudent(event);
+    const staff = await loginAs("checkin_staff");
+
+    await manualCheckin(registrationId, staff.cookie);
+    const second = await manualCheckin(registrationId, staff.cookie);
+    expect(second.status).toBe(400);
+    expect((await second.json()) as { error: string }).toMatchObject({ error: "already_checked_in" });
+    expect(await balanceOf(userId)).toBe(20); // still 20
+    expect(await ledgerSum(userId)).toBe(20);
+  });
+
+  it("dedupeKey is shared with QR: QR scan after manual does not re-award", async () => {
+    const event = await makeCheckinEvent();
+    const { qrToken, registrationId, userId } = await registerStudent(event);
+    const staff = await loginAs("checkin_staff");
+
+    await manualCheckin(registrationId, staff.cookie); // +20 via manual
+    const scanRes = await scan(event.id, qrToken, staff.cookie); // already checked in
+    expect((await scanRes.json()) as { result: string }).toMatchObject({ result: "already_checked_in" });
+    expect(await balanceOf(userId)).toBe(20); // checkin_in:<reg> already burned
+  });
+
+  it("checkinInEnabled=false → manual checks in but awards 0", async () => {
+    const event = await makeCheckinEvent();
+    await db.insert(eventPointConfig).values({ eventId: event.id, checkinInEnabled: false });
+    const { registrationId, userId } = await registerStudent(event);
+    const staff = await loginAs("checkin_staff");
+
+    const res = await manualCheckin(registrationId, staff.cookie);
+    const body = (await res.json()) as { result: string; pointsAwarded: number };
+    expect(body.result).toBe("checked_in_success");
+    expect(body.pointsAwarded).toBe(0);
+    expect((await getReg(registrationId))!.status).toBe("checked_in"); // still checked in
+    expect(await balanceOf(userId)).toBe(0);
+  });
+
+  it("past cutoff → manual checks in but awards 0", async () => {
+    const event = await makeCheckinEvent();
+    await db
+      .insert(pointSettings)
+      .values({ id: 1, cutoffAt: new Date(Date.now() - 60_000) })
+      .onConflictDoUpdate({ target: pointSettings.id, set: { cutoffAt: new Date(Date.now() - 60_000) } });
+    const { registrationId, userId } = await registerStudent(event);
+    const staff = await loginAs("checkin_staff");
+
+    const res = await manualCheckin(registrationId, staff.cookie);
+    expect((await res.json()) as { result: string }).toMatchObject({ result: "checked_in_success" });
+    expect((await getReg(registrationId))!.status).toBe("checked_in");
+    expect(await balanceOf(userId)).toBe(0);
+  });
+
+  it("manual IN (+20) then QR scan OUT (+20); undo reverses BOTH legs → 0", async () => {
+    const event = await makeCheckinEvent();
+    await enableCheckout(event.id);
+    const { qrToken, registrationId, userId } = await registerStudent(event);
+    const staff = await loginAs("checkin_staff");
+
+    await manualCheckin(registrationId, staff.cookie); // IN +20 (manual)
+    const out = await scan(event.id, qrToken, staff.cookie, "out"); // OUT +20 (QR)
+    expect((await out.json()) as { result: string }).toMatchObject({ result: "checked_out_success" });
+    expect(await balanceOf(userId)).toBe(40);
+
+    const undo = await request(`/registrations/${registrationId}/undo-checkin`, {
+      method: "POST",
+      cookie: staff.cookie,
+      body: { reason: "wrong person" },
+    });
+    expect(undo.status).toBe(200);
+    expect(await balanceOf(userId)).toBe(0); // both legs reversed
+    expect(await ledgerSum(userId)).toBe(0);
   });
 });
 
