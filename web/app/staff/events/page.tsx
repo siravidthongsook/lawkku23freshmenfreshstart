@@ -1,7 +1,7 @@
 "use client";
 
 // Check-in Staff landing: all check-in-capable events (global). Links each to its scanner.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { CalendarClock, MapPin, ScanLine, RefreshCw } from "lucide-react";
 import { apiGet, ApiError } from "@/lib/api";
@@ -54,37 +54,26 @@ function EventsList() {
     void load();
   }, [load]);
 
+  // Body varies by state; header (title + refresh) stays on one row above it at every width.
+  let body: ReactNode;
   if (events === null && !error) {
-    return (
+    body = (
       <div className="space-y-3">
         <Skeleton className="h-28 w-full" />
         <Skeleton className="h-28 w-full" />
       </div>
     );
-  }
-
-  // Retry on error — flaky venue wifi shouldn't strand staff on a dead screen (:60).
-  if (error) {
-    return <ErrorState message={error} onRetry={load} />;
-  }
-
-  if (!events || events.length === 0) {
-    return (
+  } else if (error) {
+    // Retry on error — flaky venue wifi shouldn't strand staff on a dead screen (:60).
+    body = <ErrorState message={error} onRetry={load} />;
+  } else if (!events || events.length === 0) {
+    body = (
       <Card className="p-8 text-center text-sm text-muted-foreground">
         ขณะนี้ไม่มีกิจกรรมที่เปิดให้เช็คอิน
       </Card>
     );
-  }
-
-  return (
-    <div className="space-y-3">
-      {/* Manual refresh — counts/open-state can go stale on a phone left open all day. */}
-      <div className="flex justify-end">
-        <Button variant="outline" size="sm" onClick={() => void load()} disabled={refreshing}>
-          <RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />
-          รีเฟรช
-        </Button>
-      </div>
+  } else {
+    body = (
       <div className="grid gap-3 sm:grid-cols-2">
       {events.map((e) => (
         <Card key={e.id} className="flex flex-col">
@@ -138,6 +127,23 @@ function EventsList() {
         </Card>
       ))}
       </div>
+    );
+  }
+
+  // Header: title + refresh stay on ONE row at every width (mobile incl.) — refresh only once a list loads.
+  const showRefresh = !!events && events.length > 0 && !error;
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold">เช็คอิน</h1>
+        {showRefresh && (
+          <Button variant="outline" size="sm" onClick={() => void load()} disabled={refreshing}>
+            <RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />
+            รีเฟรช
+          </Button>
+        )}
+      </div>
+      {body}
     </div>
   );
 }
@@ -146,10 +152,7 @@ export default function StaffEventsPage() {
   return (
     <RequireRole roles={[...STAFF_ROLES]}>
       <AppShell>
-        <div className="space-y-4">
-          <h1 className="text-xl font-semibold">เช็คอิน</h1>
-          <EventsList />
-        </div>
+        <EventsList />
       </AppShell>
     </RequireRole>
   );
