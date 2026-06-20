@@ -265,6 +265,7 @@ export type PointSettings = {
   peerPoints: number;
   peerCooldownSec: number;
   staffReverseWindowMin: number;
+  studentPointsVisible: boolean;
   updatedAt: string;
 };
 export type PointSettingsResponse = { settings: PointSettings };
@@ -279,6 +280,7 @@ export type PointSettingsPatch = Partial<{
   peer_points: number;
   peer_cooldown_sec: number;
   staff_reverse_window_min: number;
+  student_points_visible: boolean;
   reason: string;
 }>;
 

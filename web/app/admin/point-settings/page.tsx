@@ -42,6 +42,7 @@ export default function PointSettingsPage() {
     peerPoints: "",
     peerCooldownSec: "",
     staffReverseWindowMin: "",
+    studentPointsVisible: true,
   });
 
   const hydrate = useCallback((s: PointSettings) => {
@@ -56,6 +57,7 @@ export default function PointSettingsPage() {
       peerPoints: numField(s.peerPoints),
       peerCooldownSec: numField(s.peerCooldownSec),
       staffReverseWindowMin: numField(s.staffReverseWindowMin),
+      studentPointsVisible: s.studentPointsVisible,
     });
   }, []);
 
@@ -88,7 +90,24 @@ export default function PointSettingsPage() {
       peer_points: Number(form.peerPoints),
       peer_cooldown_sec: Number(form.peerCooldownSec),
       staff_reverse_window_min: Number(form.staffReverseWindowMin),
+      student_points_visible: form.studentPointsVisible,
     };
+  }
+
+  // Student-points visibility toggle saves immediately (quick on/off before/after the activity).
+  async function saveVisibility(next: boolean) {
+    setField("studentPointsVisible", next);
+    setSaving(true);
+    try {
+      const res = await updatePointSettings({ student_points_visible: next });
+      hydrate(res.settings);
+      toast.success(next ? "เปิดให้นักศึกษาเห็นระบบแต้มแล้ว" : "ซ่อนระบบแต้มจากนักศึกษาแล้ว");
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "บันทึกไม่สำเร็จ");
+      void load(); // revert optimistic toggle on failure
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function saveValues() {
@@ -142,6 +161,35 @@ export default function PointSettingsPage() {
           ค่าเริ่มต้นทั้งระบบ ใช้กับทุกกิจกรรมที่ไม่ได้ตั้งค่าเฉพาะ (override)
         </p>
       </div>
+
+      {/* Student-facing visibility — hide the points/peer/leaderboard tabs from students
+          before the activity launches (earning still accrues in the background). */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">การมองเห็นของนักศึกษา</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">แสดงระบบแต้มให้นักศึกษา</p>
+              <p className="text-xs text-muted-foreground">
+                ปิดไว้เพื่อซ่อนแท็บ แต้ม / เพิ่มเพื่อน / อันดับ จากนักศึกษา (กันสปอยล์ก่อนเริ่มกิจกรรม) —
+                แต้มยังสะสมเบื้องหลังตามปกติ, สตาฟ/แอดมินไม่ได้รับผลกระทบ
+              </p>
+            </div>
+            <label className="flex shrink-0 cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={form.studentPointsVisible}
+                disabled={saving}
+                onChange={(e) => void saveVisibility(e.target.checked)}
+                className="size-4 rounded border-input accent-primary"
+              />
+              {form.studentPointsVisible ? "แสดงอยู่" : "ซ่อนอยู่"}
+            </label>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Cutoff freeze — the reward-deciding switch. Kept separate + reason-gated. */}
       <Card>

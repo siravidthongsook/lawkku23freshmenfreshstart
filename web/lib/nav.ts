@@ -30,6 +30,19 @@ export const NAV_BY_ROLE: Record<Role, NavLink[]> = {
   ],
 };
 
+// Student-facing points tabs hidden when admin turns off `studentPointsVisible`
+// (so the activity isn't spoiled before launch). Staff/admin nav is never filtered.
+const STUDENT_POINTS_HREFS = new Set(["/me/points", "/me/connect", "/leaderboard"]);
+
+// Nav links for a signed-in user, honouring the student-points visibility switch.
+export function navForUser(role: Role, studentPointsVisible: boolean): NavLink[] {
+  const links = NAV_BY_ROLE[role];
+  if (role === "student" && !studentPointsVisible) {
+    return links.filter((l) => !STUDENT_POINTS_HREFS.has(l.href));
+  }
+  return links;
+}
+
 // Active link = the longest href that prefixes the current path. Prevents "/me" from also
 // lighting up while on "/me/registrations" (a naive startsWith would match both).
 export function activeNavHref(pathname: string, links: NavLink[]): string | undefined {

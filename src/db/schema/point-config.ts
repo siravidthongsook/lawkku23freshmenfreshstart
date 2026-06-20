@@ -43,6 +43,10 @@ export const pointSettings = pgTable("point_settings", {
   peerPoints: integer("peer_points").notNull().default(5),
   peerCooldownSec: integer("peer_cooldown_sec").notNull().default(60),
   staffReverseWindowMin: integer("staff_reverse_window_min").notNull().default(15),
+  // Student-facing visibility switch: when false, hide the points/peer/leaderboard nav from
+  // students (admin "ซ่อนระบบแต้มจากนักศึกษา"). Earning still accrues in the background — this
+  // only hides the UI so the activity isn't spoiled before launch. Staff/admin unaffected.
+  studentPointsVisible: boolean("student_points_visible").notNull().default(true),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

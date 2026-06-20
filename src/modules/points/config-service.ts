@@ -137,6 +137,7 @@ export type PointSettingsPatch = Partial<{
   peerPoints: number;
   peerCooldownSec: number;
   staffReverseWindowMin: number;
+  studentPointsVisible: boolean;
 }>;
 
 // Update the singleton point-settings (plan §5/§7). Lazy-creates row 1 first so a PATCH on a fresh
@@ -237,6 +238,7 @@ export function serializePointSettings(s: PointSettingsRow) {
     peerPoints: s.peerPoints,
     peerCooldownSec: s.peerCooldownSec,
     staffReverseWindowMin: s.staffReverseWindowMin,
+    studentPointsVisible: s.studentPointsVisible,
     updatedAt: s.updatedAt.toISOString(),
   };
 }

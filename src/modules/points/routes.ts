@@ -720,6 +720,7 @@ const pointSettingsPatchBody = z
     peer_points: z.coerce.number().int().min(0).max(100000).optional(),
     peer_cooldown_sec: z.coerce.number().int().min(0).max(86400).optional(),
     staff_reverse_window_min: z.coerce.number().int().min(0).max(1440).optional(),
+    student_points_visible: z.boolean().optional(), // false = hide points nav from students
     reason: z.string().min(1).optional(), // recorded with the audit entry (cutoff is sensitive)
   })
   .refine((b) => Object.keys(b).some((k) => k !== "reason"), {
@@ -746,6 +747,7 @@ router.patch(
     if (b.peer_points !== undefined) patch.peerPoints = b.peer_points;
     if (b.peer_cooldown_sec !== undefined) patch.peerCooldownSec = b.peer_cooldown_sec;
     if (b.staff_reverse_window_min !== undefined) patch.staffReverseWindowMin = b.staff_reverse_window_min;
+    if (b.student_points_visible !== undefined) patch.studentPointsVisible = b.student_points_visible;
     const settings = await updatePointSettings({
       patch,
       actorUserId: admin.id,

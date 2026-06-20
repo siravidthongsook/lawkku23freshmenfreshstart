@@ -10,7 +10,7 @@ import { LogOut } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { MobileNav } from "@/components/mobile-nav";
-import { NAV_BY_ROLE, activeNavHref } from "@/lib/nav";
+import { navForUser, activeNavHref } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
 export function MainNav() {
@@ -21,7 +21,7 @@ export function MainNav() {
   // Avoid auth flicker: render nothing until session resolves.
   if (loading) return null;
 
-  const links = user ? NAV_BY_ROLE[user.role] : [];
+  const links = user ? navForUser(user.role, user.studentPointsVisible) : [];
   const activeHref = activeNavHref(pathname, links);
 
   async function handleLogout() {

@@ -33,6 +33,7 @@ type MeResponse = {
     status: Me["status"];
   };
   password_must_change: boolean;
+  student_points_visible?: boolean; // absent on older API → default visible
 };
 
 // Adapt wire shape → flat camelCase Me used across the frontend.
@@ -50,6 +51,7 @@ function toMe(res: MeResponse): Me {
     role: u.role,
     status: u.status,
     passwordMustChange: res.password_must_change,
+    studentPointsVisible: res.student_points_visible ?? true,
   };
 }
 

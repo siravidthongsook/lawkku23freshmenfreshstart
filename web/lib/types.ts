@@ -23,6 +23,7 @@ export type Me = {
   role: Role;
   status: "active" | "disabled";
   passwordMustChange: boolean;
+  studentPointsVisible: boolean; // admin switch — false hides the points/peer/leaderboard nav for students
 };
 
 // Public event (GET /events, GET /events/:slug). Capacity numbers omitted when capacity disabled.

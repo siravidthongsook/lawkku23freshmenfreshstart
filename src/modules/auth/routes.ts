@@ -5,6 +5,7 @@ import type { AppVariables } from "../../lib/context";
 import { db } from "../../db/client";
 import { users, temporaryPasswords } from "../../db/schema/users";
 import { requireAuth, requestMeta } from "../../lib/auth-middleware";
+import { getPointSettings } from "../points/config-service";
 import { AppError, badRequest, conflict } from "../../lib/errors";
 import { hashPassword, validatePasswordPolicy, verifyPassword } from "../../lib/password";
 import {
@@ -303,9 +304,12 @@ router.post(
 // GET /auth/me — current user + role + must-change flag.
 router.get("/auth/me", requireAuth, async (c) => {
   const user = c.get("user");
+  // Surface the student-points visibility switch so the nav can hide the points tabs (admin toggle).
+  const settings = await getPointSettings();
   return c.json({
     user: publicUser(user),
     password_must_change: user.passwordMustChange,
+    student_points_visible: settings.studentPointsVisible,
   });
 });
 

@@ -1,0 +1,1 @@
+ALTER TABLE "point_settings" ADD COLUMN "student_points_visible" boolean DEFAULT true NOT NULL;
