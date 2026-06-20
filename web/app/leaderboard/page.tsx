@@ -128,7 +128,7 @@ function LeaderboardInner() {
       </div>
 
       {/* Sticky my-rank strip (plan §14) — only meaningful for ranked students. */}
-      {myRank && (
+      {myRank ? (
         <div className="sticky top-2 z-10">
           <Card className="border-primary bg-primary text-primary-foreground shadow-lg">
             <CardContent className="flex items-center gap-3 py-3">
@@ -141,7 +141,15 @@ function LeaderboardInner() {
             </CardContent>
           </Card>
         </div>
-      )}
+      ) : user?.role === "student" ? (
+        // 0-point students aren't ranked yet (myRank null) — nudge them instead of showing nothing.
+        <Card className="border-dashed">
+          <CardContent className="flex items-center gap-3 py-3 text-muted-foreground">
+            <Trophy className="size-5" />
+            <p className="text-sm">คุณยังไม่มีอันดับ — เริ่มสะสมแต้มเพื่อขึ้นอันดับ</p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* บรรพ filter (rank stays app-wide; this narrows the visible slice). */}
       <Select value={group} onValueChange={setGroup}>

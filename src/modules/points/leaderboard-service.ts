@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
 import { db } from "../../db/client";
 import { users } from "../../db/schema/users";
 
@@ -16,7 +16,9 @@ const ORDER_BY = [
 // Leaderboard is app-wide and student-only (plan §6/§12.3): role='student' AND status='active'
 // (H4 — disabled users keep a cached balance but must NOT place/win). Staff/admin never appear.
 function leaderboardFilter(groupNumber: number | null) {
-  const base = and(eq(users.role, "student"), eq(users.status, "active"));
+  // pointsBalance > 0: a student who never earned isn't ranked yet (Boss decision) — 0-point
+  // students are hidden from the board entirely, not shown at the bottom.
+  const base = and(eq(users.role, "student"), eq(users.status, "active"), gt(users.pointsBalance, 0));
   // Optional view-by-group filter only narrows the visible rows; rank stays app-wide (computed
   // separately, see rankOf). Group filtering uses the same ORDER BY for a consistent slice.
   return groupNumber == null ? base : and(base, eq(users.groupNumber, groupNumber));
@@ -86,7 +88,8 @@ export async function rankOf(userId: string): Promise<{ rank: number; pointsBala
     .from(users)
     .where(eq(users.id, userId))
     .limit(1);
-  if (!me || me.role !== "student" || me.status !== "active") return null;
+  // Unranked until first point earned (matches leaderboardFilter's pointsBalance > 0).
+  if (!me || me.role !== "student" || me.status !== "active" || me.balance <= 0) return null;
 
   // Count active students strictly ahead of me under the canonical ordering.
   // lastPositiveAt NULLS LAST: a null sorts AFTER any non-null, so "ahead on time" means the
