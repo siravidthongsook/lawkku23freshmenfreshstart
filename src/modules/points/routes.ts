@@ -116,12 +116,20 @@ router.get("/leaderboard", requireAuth, zValidator("query", leaderboardQuery), a
 // STAFF + ADMIN — grant tokens, manual adjust, self-reverse, own budget
 // =====================================================================
 
-const issueBody = z.object({
-  points_value: z.coerce.number().int().min(1).max(100000),
-  max_claims: z.coerce.number().int().min(1).max(100000),
-  event_id: z.string().uuid().optional(),
-  expires_at: z.coerce.date().optional(),
-});
+// Cost = points_value × max_claims debits an int4 staff_budget_ledger.delta (max ~2.15e9).
+// Cap the product so a huge×huge combo can't overflow int4 → clean 400 instead of a Postgres 22003 → 500.
+const GRANT_COST_MAX = 10_000_000;
+const issueBody = z
+  .object({
+    points_value: z.coerce.number().int().min(1).max(100000),
+    max_claims: z.coerce.number().int().min(1).max(100000),
+    event_id: z.string().uuid().optional(),
+    expires_at: z.coerce.date().optional(),
+  })
+  .refine((b) => b.points_value * b.max_claims <= GRANT_COST_MAX, {
+    message: `points_value × max_claims must not exceed ${GRANT_COST_MAX}`,
+    path: ["max_claims"],
+  });
 
 // POST /points/grant-tokens — staff/admin spend budget to mint a grant QR. Returns plaintext ONCE.
 router.post(

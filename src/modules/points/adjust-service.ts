@@ -104,7 +104,13 @@ export async function manualAdjust(args: {
 export type ReverseResult =
   | { result: "reversed"; budgetRefunded: number }
   | { result: "already_reversed" }
+  | { result: "not_reversible" }
   | { result: "ledger_not_found" };
+
+// Correction rows are themselves reversals/compensations — reversing one would re-credit points and
+// enable self-cancelling chains (reversal_uq only blocks reversing the SAME original twice). Only an
+// original EARNING entry may be reversed.
+const NON_REVERSIBLE_REASONS = new Set(["correction_reverse", "correction_add"]);
 
 export async function adminReverseLedgerEntry(args: {
   actorUserId: string;
@@ -119,6 +125,9 @@ export async function adminReverseLedgerEntry(args: {
       .where(eq(pointLedger.id, args.ledgerId))
       .limit(1);
     if (!orig || orig.userId !== args.targetUserId) return { result: "ledger_not_found" };
+
+    // Only an earning entry is reversible — never a correction_reverse/correction_add (no chains).
+    if (NON_REVERSIBLE_REASONS.has(orig.reasonCode)) return { result: "not_reversible" };
 
     // Already reversed?
     const [existing] = await tx

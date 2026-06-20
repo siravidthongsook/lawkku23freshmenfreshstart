@@ -41,12 +41,18 @@ export async function adjustBudget(
   const run = async (tx: Tx): Promise<AdjustBudgetResult> => {
     // Lock the staff user row → serializes read-modify-write of the budget cache.
     const [staff] = await tx
-      .select({ id: users.id, budget: users.staffPointBudget })
+      .select({ id: users.id, budget: users.staffPointBudget, role: users.role })
       .from(users)
       .where(eq(users.id, args.staffUserId))
       .for("update")
       .limit(1);
     if (!staff) throw new Error(`adjustBudget: staff user not found ${args.staffUserId}`);
+
+    // Invariant: only checkin_staff hold a grant budget. Reject topup/adjust to students/admins here
+    // (under the lock → race-safe, covers every caller incl. single + bulk topup). Bulk runs in one tx,
+    // so a thrown AppError rolls back the whole batch (no partial apply).
+    if (staff.role !== "checkin_staff")
+      throw badRequest("not_staff", "Point budget can only be held by check-in staff");
 
     // Negative guard (checked under the lock so it's race-safe).
     if (args.rejectIfNegative && staff.budget + args.delta < 0) {
