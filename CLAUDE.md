@@ -1,7 +1,8 @@
 # CLAUDE.md — LawKKUFreshmenFreshStart23 & Event Registration System (V1)
 
 Internal single-site LawKKUFreshmenFreshStart23 system for student events. Not multi-tenant SaaS.
-Full spec: `spec.md`. Derived docs: `docs/01-database-schema.md`, `docs/02-api-contract.md`, `docs/03-page-list.md`, `docs/04-implementation-tasks.md`.
+Full spec: `spec.md`. Derived docs: `docs/01-database-schema.md`, `docs/02-api-contract.md`, `docs/03-page-list.md`, `docs/04-implementation-tasks.md`, `docs/05-points-and-assessments.md` (post-spec subsystems).
+Operational/contract docs: `docs/CONTRACT-backend.md` (module-worker boundaries), `docs/migrations-policy.md`, `docs/deploy-runner.md`, `docs/observability-deploy.md`, `docs/observability-runbook.md`.
 
 ---
 
@@ -17,7 +18,7 @@ Full spec: `spec.md`. Derived docs: `docs/01-database-schema.md`, `docs/02-api-c
 | Validation | Zod (shared req/res schemas) |
 
 Two packages, one repo:
-- **Backend** — root pkg `lawkku-freshstart23-backend`, code in `src/`, Hono on `PORT` (default `3000`). Run `pnpm dev:backend`.
+- **Backend** — root pkg `lawkku-freshstart23-backend`, code in `src/`, Hono on `PORT` (default `33491`). Run `pnpm dev:backend`.
 - **Frontend** — `web/` pkg `lawkku-freshstart23-web`, Next.js 16 on port `33490` (`next dev/start -p 33490`, dev + prod). Run `pnpm dev:frontend`. Has own `node_modules`.
 - `pnpm dev` runs both via concurrently.
 
@@ -27,10 +28,10 @@ Frontend imports backend Zod schemas directly via path alias `@be/*` → `../src
 
 ## Architecture Rules
 
-- **Modules** (`src/modules/`): `auth, users, events, registrations, forms, uploads, qr-tokens, checkins, imports, exports, audit-logs`. Keep boundaries clean.
-- **Shared backend helpers** (`src/lib/`): `permissions, session, storage, audit, auth-middleware, crypto, password, errors, form-schema, time, context`. (Sessions + storage live here as cross-cutting libs, not modules.)
-- **Permissions**: never inline role checks. Use permission fns from `src/lib/permissions.ts` (`canManageUsers`, `canScanCheckin`, `canViewUploadedFile`, …). Roles: `admin`, `checkin_staff`, `student`.
-- **Drizzle**: schema = source of truth. All schema in `src/db/schema/` (`users, events, registrations, forms, files, qr, sessions, imports, audit, enums`). Migrations via `drizzle-kit` (`pnpm db:generate` / `db:migrate`). No raw SQL except race-safe capacity (needs `SELECT ... FOR UPDATE` / row lock in tx).
+- **Modules** (`src/modules/`): `auth, users, events, registrations, forms, uploads, qr-tokens, checkins, imports, exports, audit-logs, assessments, points`. Keep boundaries clean. (`assessments` + `points` are post-spec subsystems — see `docs/05-points-and-assessments.md`.)
+- **Shared backend helpers** (`src/lib/`): `permissions, session, storage, audit, auth-middleware, crypto, password, errors, form-schema, time, context, metrics, otel, point-rate-limit, request-log`. (Sessions + storage live here as cross-cutting libs, not modules.)
+- **Permissions**: never inline role checks. Use permission fns from `src/lib/permissions.ts` (`canManageUsers`, `canScanCheckin`, `canViewUploadedFile`, … plus the points family: `canEarnPoints`, `canManagePointConfig`, `canAdjustPoints`, `canTopupStaffBudget`, `canDeductPoints`, `canReverseOwnRecentGrant`). Roles: `admin`, `checkin_staff`, `student`.
+- **Drizzle**: schema = source of truth. All schema in `src/db/schema/` (`users, events, registrations, forms, files, qr, sessions, imports, audit, enums, points, point-config, assessments`). Migrations via `drizzle-kit` (`pnpm db:generate` / `db:migrate`). No raw SQL except race-safe capacity (needs `SELECT ... FOR UPDATE` / row lock in tx).
 - **Zod at every boundary**: parse all req bodies/params/query. Infer TS types from Zod, don't hand-write duplicates.
 - **Validate at edge, authorize in handler**: Zod first → permission fn → business logic.
 
@@ -49,6 +50,10 @@ Frontend imports backend Zod schemas directly via path alias `@be/*` → `../src
 - **Login error**: always generic `Invalid email or password`. No user enumeration.
 - **Passwords**: hash with argon2. Admin-issued temp passwords encrypted at rest (AES-256-GCM, key `TEMP_PW_ENC_KEY`) — see `src/lib/crypto.ts`. Never log either.
 - **Sessions**: server-side, DB table `sessions`. Cookie name from `SESSION_COOKIE_NAME`; `COOKIE_SECURE=true` behind HTTPS in prod.
+- **Points ledger** = append-only (like audit). Never UPDATE/DELETE a `point_ledger` / `staff_budget_ledger` row — corrections are new compensating rows. `users.points_balance` + `staff_point_budget` are caches, written in the SAME tx as the ledger row (truth = `SUM(delta)`). Only `role=student` earns points. Past `point_settings.cutoff_at` → student earning rejected (`points_closed`); admin reverse/correct bypass cutoff. Full rules: `docs/05-points-and-assessments.md`.
+- **Point/connect/grant QR**: same rule as registration QR — opaque token, store hash (`token_enc` is AES-GCM for issuer re-display only). One active connect token per user; grant token claimable once per (token, user).
+- **point-rate-limit is log-only** (`src/lib/point-rate-limit.ts`) — deliberate, no hard cap in V1. Don't turn it into a blocker without a decision.
+- **`/forgot-password` is an info-only stub** (contact admin) — self-service reset is a V1 non-goal; the page is intended, not a stray build.
 
 ---
 
@@ -85,4 +90,4 @@ multi-tenant, email service, magic link/OTP, self-service forgot-password, offli
 
 ## Key env vars
 
-`PORT`, `DATABASE_URL`, `SESSION_COOKIE_NAME`, `TEMP_PW_ENC_KEY` (base64 32-byte), `STORAGE_DIR`, `COOKIE_SECURE`, `NODE_ENV`. See `.env.example`.
+`PORT` (default `33491`), `DATABASE_URL`, `SESSION_COOKIE_NAME`, `TEMP_PW_ENC_KEY` (base64 32-byte), `STORAGE_DIR`, `COOKIE_SECURE`, `NODE_ENV`. Observability (validated in `src/env.ts`, have defaults): `OTEL_ENABLED`, `METRICS_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`. Seed script reads `SEED_ADMIN_EMAIL`, `SEED_ADMIN_NAME`, `SEED_ADMIN_PASSWORD` (not in env.ts schema). See `.env.example` (note: `.env.example` is missing the OTEL/SEED vars — update if you touch it).

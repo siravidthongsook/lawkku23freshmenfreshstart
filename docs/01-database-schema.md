@@ -17,7 +17,7 @@ Internal identity + profile + auth state.
 | column | type | constraints |
 |---|---|---|
 | id | uuid | PK |
-| email | text | unique, not null |
+| email | text | unique, **null** (nullable — imported students may have none) |
 | student_id | text | unique, null (business id; REQUIRED for role=student, null for staff/admin) |
 | role | enum(`student`,`checkin_staff`,`admin`) | not null |
 | full_name | text | not null |
@@ -32,6 +32,8 @@ Internal identity + profile + auth state.
 | updated_at | timestamptz | not null |
 
 Rules: email + student_id unique globally. Admin may edit both (must be unique + audit log). Disabled user cannot login; sessions invalidated. **Login accepts email OR student_id** as the identifier (+ password) — student_id is mandatory for students so both paths work; staff/admin log in by email only.
+
+> **Post-spec columns** (added for claim + points, not listed above): `username`, `title`, `nickname`, `year`, `mentor_role`, `category`, `group_number`, `instagram`, `points_balance` (ledger cache), `last_positive_at` (leaderboard tie-break), `staff_point_budget` (budget cache), `last_active_at`. Plus `users_leaderboard_idx`. Source of truth: `src/db/schema/users.ts` + `docs/05-points-and-assessments.md`.
 
 ---
 
@@ -63,7 +65,7 @@ Lifecycle: row created on user-create/import/reset. **Deleted** when user change
 | location | text | null |
 | status | enum(`draft`,`published`,`cancelled`,`archived`) | not null |
 | visibility | enum(`listed`,`unlisted`) | not null default `listed` |
-| registration_mode | enum(`public_self_register`,`admin_import_only`,`closed`) | not null |
+| registration_mode | enum(`public_self_register`,`closed`) | not null (`admin_import_only` was removed) |
 | registration_open_at | timestamptz | null |
 | registration_close_at | timestamptz | null |
 | checkin_open_at | timestamptz | null |
@@ -212,6 +214,18 @@ Central, append-only. No update/delete via UI.
 | created_at | timestamptz | not null |
 
 **Redact**: plain_password, temporary_password, password_hash, qr_token_plain, encrypted_temp_password, file_content, session_token, reset_token. Temp-password export logs only `{exported_user_count}`.
+
+---
+
+## 10. Points & Assessments tables (post-spec)
+
+Ten tables added after the spec back the points/gamification + assessment subsystems and are **NOT detailed here** to avoid drift — single source of truth is **`docs/05-points-and-assessments.md`** (Part C) + `src/db/schema/{points,point-config,assessments}.ts`:
+
+`point_ledger`, `staff_budget_ledger`, `point_grant_tokens`, `point_grant_claims`, `user_connect_tokens`, `peer_connections`, `event_point_config`, `point_settings`, `assessment_submissions`, `assessment_answers`.
+
+New enums in `enums.ts`: `form_type`, `point_reason`, `grant_token_status`, `staff_budget_reason`.
+
+> Two-phase check-in: `point_reason` has `checkin_in` / `checkin_out`. Events carry scan-in/out + assessment time windows (`event_point_config`) beyond the single `checkin_*_at` pair above.
 
 ---
 

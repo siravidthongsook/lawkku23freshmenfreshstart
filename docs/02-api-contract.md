@@ -1,6 +1,8 @@
 # LawKKUFreshmenFreshStart23 — API Contract (V1)
 
 > Derived from `spec.md` §22. REST, JSON, server-side session cookie (HttpOnly, Secure, SameSite=Lax). All mutating sensitive actions require `reason` + emit audit log.
+>
+> **Points + assessments endpoints (30+) are NOT in this doc** — see `docs/05-points-and-assessments.md` (Part D) for the full table. Also added since this doc and not yet folded in: `POST /auth/claim`; events poster routes (`GET/POST/DELETE .../poster`); `GET /admin/users/export`; registrations `GET /admin/events/:eventId/user-search`, `PATCH /admin/registrations/:registrationId/status`; forms `GET .../form/versions`; checkins scan-out leg. Code in `src/modules/*/routes.ts` is the ground truth.
 
 ## Conventions
 
