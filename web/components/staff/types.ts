@@ -2,7 +2,7 @@
 // Kept here (not lib/types.ts, which is shared/owned elsewhere) so the staff tree owns its contract.
 // ALIGN with backend exported types when they land. All timestamps are ISO-8601 UTC (render via @/lib/time).
 
-import type { RegistrationStatus, ScanResultCode } from "@/lib/types";
+import type { RegistrationStatus, ScanResultCode, CheckoutState } from "@/lib/types";
 
 // GET /api/staff/events — check-in-capable events globally.
 export type StaffEventListItem = {
@@ -12,6 +12,7 @@ export type StaffEventListItem = {
   checkinOpenAt: string | null;
   checkinCloseAt: string | null;
   checkinOpen: boolean;
+  checkoutState?: CheckoutState; // check-out badge state (absent on older backend → treat as disabled)
   // Counts are documented in the page-list but may be absent from the backend payload — tolerate.
   registeredCount?: number;
   checkedInCount?: number;
@@ -30,6 +31,9 @@ export type StaffCheckinContext = {
     checkinOpenAt: string | null;
     checkinCloseAt: string | null;
     checkinOpen: boolean;
+    checkoutState?: CheckoutState; // OUT scanner header badge
+    scanOutOpenAt?: string | null;
+    scanOutCloseAt?: string | null;
     location?: string | null;
   };
   counts: { registered: number; checkedIn: number };

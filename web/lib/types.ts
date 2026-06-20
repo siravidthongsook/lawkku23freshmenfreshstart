@@ -109,6 +109,10 @@ export type UserListItem = {
 };
 
 // Scan result codes — see docs/02 §Check-in. UI maps each to a success/deny/error treatment.
+// Per-event check-OUT availability for staff UI badges. "disabled" = toggle off OR no resolvable
+// scan-out window (event has no check-out). before/open/closed = window timing relative to now.
+export type CheckoutState = "disabled" | "before" | "open" | "closed";
+
 export type ScanResultCode =
   | "checked_in_success"
   | "already_checked_in"

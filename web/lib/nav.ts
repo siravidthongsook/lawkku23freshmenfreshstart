@@ -14,7 +14,7 @@ export const NAV_BY_ROLE: Record<Role, NavLink[]> = {
     { href: "/me", label: "บัญชีของฉัน" },
   ],
   checkin_staff: [
-    { href: "/staff/events", label: "เช็คอิน" },
+    { href: "/staff/events", label: "เช็คชื่อ" },
     { href: "/staff/points", label: "แจกแต้ม" },
     { href: "/leaderboard", label: "อันดับ" },
     { href: "/me", label: "บัญชีของฉัน" },

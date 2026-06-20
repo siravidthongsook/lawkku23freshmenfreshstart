@@ -17,8 +17,8 @@ import { ArrowLeft } from "lucide-react";
 import { apiGet, apiPost, ApiError } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { CheckinBadge, CheckoutBadge } from "@/components/staff/scan-status";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -46,19 +46,13 @@ type Mode = "in" | "out";
 // All mode-varying copy in one place so the JSX below stays direction-agnostic.
 const COPY = {
   in: {
-    pageTitle: "เช็คอิน",
     windowLabel: "เช็คอิน",
-    openBadge: "เปิดเช็คอิน",
-    closedBadge: "ปิดเช็คอิน",
     confirmTitle: "ยืนยันการเช็คอิน",
     confirmVerb: "ยืนยันเช็คอิน",
     confirmLabel: "เช็คอิน",
   },
   out: {
-    pageTitle: "เช็คเอาท์",
     windowLabel: "เช็คเอาท์",
-    openBadge: "เปิดเช็คเอาท์",
-    closedBadge: "ปิดเช็คเอาท์",
     confirmTitle: "ยืนยันการเช็คเอาท์",
     confirmVerb: "ยืนยันเช็คเอาท์",
     confirmLabel: "เช็คเอาท์",
@@ -217,25 +211,17 @@ export function ScannerScreen({ eventId, mode }: { eventId: string; mode: Mode }
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <CardTitle className="text-lg">{ctx.event.title}</CardTitle>
-                {/* Check-in window + badge only apply to IN mode (ctx carries the check-in window, not the
-                    scan-out window). OUT mode shows just the title + counts; the scan itself gates timing. */}
-                {mode === "in" && (
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t.windowLabel}: {formatBangkok(ctx.event.checkinOpenAt) || "—"} →{" "}
-                    {formatBangkok(ctx.event.checkinCloseAt) || "—"}
-                  </p>
-                )}
+                {/* Window line is mode-aware: IN shows the check-in window, OUT the scan-out window. */}
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {t.windowLabel}:{" "}
+                  {formatBangkok(mode === "in" ? ctx.event.checkinOpenAt : ctx.event.scanOutOpenAt ?? null) || "—"} →{" "}
+                  {formatBangkok(mode === "in" ? ctx.event.checkinCloseAt : ctx.event.scanOutCloseAt ?? null) || "—"}
+                </p>
               </div>
-              {mode === "in" && (
-                <Badge
-                  className={
-                    ctx.event.checkinOpen
-                      ? "bg-green-100 text-green-800 border-transparent"
-                      : "bg-slate-200 text-slate-700 border-transparent"
-                  }
-                >
-                  {ctx.event.checkinOpen ? t.openBadge : t.closedBadge}
-                </Badge>
+              {mode === "in" ? (
+                <CheckinBadge open={ctx.event.checkinOpen} />
+              ) : (
+                <CheckoutBadge state={ctx.event.checkoutState ?? "disabled"} />
               )}
             </div>
           ) : ctxError ? (

@@ -3,7 +3,7 @@ import { and, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { AppVariables } from "../../lib/context";
 import { db } from "../../db/client";
-import { events } from "../../db/schema/events";
+import { events, type Event } from "../../db/schema/events";
 import { registrations } from "../../db/schema/registrations";
 import { registrationQrTokens } from "../../db/schema/qr";
 import { users } from "../../db/schema/users";
@@ -59,6 +59,23 @@ function hasCheckinWindow(checkinOpenAt: Date | null, checkinCloseAt: Date | nul
   return checkinOpenAt != null || checkinCloseAt != null;
 }
 
+// Per-event check-OUT availability for the staff UI badges. "disabled" = toggle off OR no resolvable
+// window (no eventEndAt + no override → scan-out never opens) → UI treats it as "no check-out".
+type CheckoutState = "disabled" | "before" | "open" | "closed";
+function checkoutStateOf(
+  config: Awaited<ReturnType<typeof getEventPointConfig>>,
+  event: Pick<Event, "eventEndAt">,
+  settings: Awaited<ReturnType<typeof getPointSettings>>,
+  now: Date,
+): CheckoutState {
+  if (!isCheckinOutEnabled(config)) return "disabled";
+  const win = scanOutWindow(config, event, settings);
+  if (win.open == null) return "disabled"; // unresolved anchor → never opens → effectively no check-out
+  if (now < win.open) return "before";
+  if (win.close && now > win.close) return "closed";
+  return "open";
+}
+
 // =====================================================================
 // SCANNER CONTEXT
 // =====================================================================
@@ -90,6 +107,16 @@ router.get("/staff/events", requireAuth, requirePermission(canScanCheckin), asyn
     : [];
   const countByEvent = new Map(countRows.map((r) => [r.eventId, r]));
 
+  // Per-event check-out state so the list can show a check-out badge alongside check-in (and adapt
+  // when an event has no check-out configured). Small capable list → per-event config read is fine.
+  const settings = await getPointSettings();
+  const now = new Date();
+  const checkoutByEvent = new Map<string, CheckoutState>();
+  for (const e of capable) {
+    const config = await getEventPointConfig(e.id);
+    checkoutByEvent.set(e.id, checkoutStateOf(config, e, settings, now));
+  }
+
   return c.json({
     events: capable.map((e) => {
       const ct = countByEvent.get(e.id);
@@ -100,7 +127,9 @@ router.get("/staff/events", requireAuth, requirePermission(canScanCheckin), asyn
         checkinOpenAt: e.checkinOpenAt?.toISOString() ?? null,
         checkinCloseAt: e.checkinCloseAt?.toISOString() ?? null,
         // Open-now uses effective close (blank close = event end) so it matches the scan gate.
-        checkinOpen: isWithinWindow(new Date(), e.checkinOpenAt, effectiveCheckinClose(e.checkinCloseAt, e.eventEndAt)),
+        checkinOpen: isWithinWindow(now, e.checkinOpenAt, effectiveCheckinClose(e.checkinCloseAt, e.eventEndAt)),
+        // Check-out availability/state for the UI badge ("disabled" = no check-out for this event).
+        checkoutState: checkoutByEvent.get(e.id) ?? "disabled",
         // Always present (0 when no regs) so the UI can distinguish a real zero from a missing field.
         registeredCount: ct?.registered ?? 0,
         checkedInCount: ct?.checkedIn ?? 0,
@@ -127,6 +156,13 @@ router.get(
       .from(registrations)
       .where(eq(registrations.eventId, eventId));
 
+    // Check-out window/state so the check-out scanner header shows a real badge + window (not the
+    // check-in window). scanOutWindow resolves override-else-fallback bounds; checkoutStateOf adds the toggle.
+    const settings = await getPointSettings();
+    const config = await getEventPointConfig(eventId);
+    const now = new Date();
+    const outWin = scanOutWindow(config, event, settings);
+
     return c.json({
       event: {
         id: event.id,
@@ -135,7 +171,11 @@ router.get(
         checkinOpenAt: event.checkinOpenAt?.toISOString() ?? null,
         checkinCloseAt: event.checkinCloseAt?.toISOString() ?? null,
         // Open-now uses effective close (blank close = event end) so it matches the scan gate.
-        checkinOpen: isWithinWindow(new Date(), event.checkinOpenAt, effectiveCheckinClose(event.checkinCloseAt, event.eventEndAt)),
+        checkinOpen: isWithinWindow(now, event.checkinOpenAt, effectiveCheckinClose(event.checkinCloseAt, event.eventEndAt)),
+        // Check-out side — drives the OUT scanner header badge + window line.
+        checkoutState: checkoutStateOf(config, event, settings, now),
+        scanOutOpenAt: outWin.open?.toISOString() ?? null,
+        scanOutCloseAt: outWin.close?.toISOString() ?? null,
       },
       counts: { registered: counts?.registered ?? 0, checkedIn: counts?.checkedIn ?? 0 },
     });
