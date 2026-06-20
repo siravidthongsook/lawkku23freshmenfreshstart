@@ -303,4 +303,42 @@ describe("points grant: revoke refunds unclaimed seats once", () => {
     expect(await budgetOf(staff.user.id)).toBe(15);
     expect(await budgetSum(staff.user.id)).toBe(15);
   });
+
+  // Regression: refund moves the ISSUER's budget — must survive the issuer being demoted after issuing.
+  // Pre-fix the not_staff guard fired on grant_refund → revoke tx rolled back → token unrevocable.
+  it("revoke succeeds after issuer is demoted to student (refund bypasses not_staff guard)", async () => {
+    const admin = await loginAs("admin");
+    const staff = await loginAs("checkin_staff");
+    await topup(admin.cookie, staff.user.id, 25);
+
+    const issue = await request("/points/grant-tokens", {
+      method: "POST",
+      cookie: staff.cookie,
+      body: { points_value: 5, max_claims: 5 },
+    });
+    const { tokenId } = (await issue.json()) as { tokenId: string };
+    expect(await budgetOf(staff.user.id)).toBe(0);
+
+    // Admin demotes the issuer AFTER they spent budget on the token.
+    const demote = await request(`/admin/users/${staff.user.id}/change-role`, {
+      method: "POST",
+      cookie: admin.cookie,
+      body: { role: "student", reason: "reassigned" },
+    });
+    expect(demote.status).toBe(200);
+
+    // Admin revokes the now-student's token → full refund still applies (no not_staff throw).
+    const rev = await request(`/points/grant-tokens/${tokenId}/revoke`, {
+      method: "POST",
+      cookie: admin.cookie,
+      body: { reason: "issuer left role" },
+    });
+    expect(rev.status).toBe(200);
+    expect((await rev.json()) as { result: string; refunded: number }).toMatchObject({
+      result: "revoked",
+      refunded: 25, // all 5×5 unclaimed
+    });
+    expect(await budgetOf(staff.user.id)).toBe(25);
+    expect(await budgetSum(staff.user.id)).toBe(25); // cache == truth
+  });
 });

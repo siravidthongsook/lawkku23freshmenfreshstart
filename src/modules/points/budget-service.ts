@@ -48,10 +48,14 @@ export async function adjustBudget(
       .limit(1);
     if (!staff) throw new Error(`adjustBudget: staff user not found ${args.staffUserId}`);
 
-    // Invariant: only checkin_staff hold a grant budget. Reject topup/adjust to students/admins here
-    // (under the lock → race-safe, covers every caller incl. single + bulk topup). Bulk runs in one tx,
-    // so a thrown AppError rolls back the whole batch (no partial apply).
-    if (staff.role !== "checkin_staff")
+    // Invariant: only checkin_staff hold a grant budget. Gate ONLY the admin-driven establish/change
+    // ops (topup, admin_adjust) on current role — covers single + bulk topup; bulk runs in one tx so a
+    // thrown AppError rolls back the whole batch (no partial apply).
+    // NOT grant_issue/grant_refund/manual_grant: those move the *issuer's* existing budget and must
+    // survive a later role change (e.g. refund/admin-reverse a token whose issuer was since demoted),
+    // else the enclosing tx rolls back and the token becomes permanently unrevocable.
+    const adminBudgetOp = args.reasonCode === "topup" || args.reasonCode === "admin_adjust";
+    if (adminBudgetOp && staff.role !== "checkin_staff")
       throw badRequest("not_staff", "Point budget can only be held by check-in staff");
 
     // Negative guard (checked under the lock so it's race-safe).
