@@ -8,6 +8,7 @@ import {
 } from "../../db/schema/point-config";
 import type { Event } from "../../db/schema/events";
 import { writeAudit } from "../../lib/audit";
+import { isWithinWindow } from "../../lib/time";
 
 type Exec = Tx | typeof db;
 
@@ -114,9 +115,17 @@ export function scanOutWindow(
   if (config?.scanOutOpenAt != null || config?.scanOutCloseAt != null) {
     return { open: config.scanOutOpenAt ?? null, close: config.scanOutCloseAt ?? null };
   }
-  if (event.eventEndAt == null) return { open: null, close: null };
+  if (event.eventEndAt == null) return { open: null, close: null }; // no anchor → window unresolved
   const close = new Date(event.eventEndAt.getTime() + settings.scanOutFallbackHours * 60 * 60 * 1000);
   return { open: event.eventEndAt, close };
+}
+
+// Scan-OUT gate. Unlike check-in, a null `open` means "no anchor" (event has no end + no override),
+// NOT "open forever" — so an unanchored window is treated as NOT open yet. Prevents scan-out from
+// going live the instant a student checks in on an event with no end time set.
+export function isScanOutOpen(win: { open: Date | null; close: Date | null }, now: Date): boolean {
+  if (win.open == null) return false;
+  return isWithinWindow(now, win.open, win.close);
 }
 
 // === Admin mutations (plan §7, gated canManagePointConfig in the routes) ===

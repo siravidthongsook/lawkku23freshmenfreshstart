@@ -18,6 +18,7 @@ import {
   isCheckinOutEnabled,
   isPastCutoff,
   scanOutWindow,
+  isScanOutOpen,
 } from "../points/config-service";
 import {
   issueQrToken,
@@ -106,7 +107,9 @@ function computeQrPhase(
   if (!isCheckinOutEnabled(config)) return { phase: "done", showQr: false };
   if (isPastCutoff(settings, now)) return { phase: "checkout_closed", showQr: false }; // earning frozen
   const win = scanOutWindow(config, event, settings);
-  if (isWithinWindow(now, win.open, win.close)) return { phase: "checkout", showQr: true };
+  // No anchor (no event end + no scan-out override) → scan-out never opens → checked-in is the end state.
+  if (win.open == null && win.close == null) return { phase: "done", showQr: false };
+  if (isScanOutOpen(win, now)) return { phase: "checkout", showQr: true };
   if (win.close && now > win.close) return { phase: "checkout_closed", showQr: false };
   return { phase: "awaiting_checkout", showQr: false }; // window hasn't opened yet
 }

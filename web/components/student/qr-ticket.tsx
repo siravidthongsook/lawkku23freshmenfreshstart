@@ -30,7 +30,10 @@ export function QrTicket({ qr }: { qr: RegistrationQr }) {
           <QRCodeSVG value={payload} size={208} level="M" aria-label="คิวอาร์โค้ดการลงทะเบียน" />
         </div>
         <p className="text-center text-sm text-muted-foreground">
-          แสดงโค้ดนี้ที่ทางเข้ากิจกรรมเพื่อเช็คอิน
+          {/* Same QR drives both phases — caption tells the student which scan is live now. */}
+          {qr.phase === "checkout"
+            ? "แสดงโค้ดนี้เพื่อสแกนออกจากกิจกรรม"
+            : "แสดงโค้ดนี้ที่ทางเข้ากิจกรรมเพื่อเช็คอิน"}
         </p>
       </CardContent>
     </Card>

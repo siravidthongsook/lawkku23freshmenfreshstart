@@ -15,7 +15,7 @@ import { checkinsTotal } from "../../lib/metrics";
 import { hashToken } from "../../lib/crypto";
 import { isWithinWindow, effectiveCheckinClose } from "../../lib/time";
 import { awardCheckinIn, awardCheckinOut, reverseCheckinOnUndo } from "../points/checkin-award";
-import { getEventPointConfig, getPointSettings, isCheckinOutEnabled, isPastCutoff, scanOutWindow } from "../points/config-service";
+import { getEventPointConfig, getPointSettings, isCheckinOutEnabled, isPastCutoff, scanOutWindow, isScanOutOpen } from "../points/config-service";
 
 const router = new Hono<{ Variables: AppVariables }>();
 
@@ -225,7 +225,7 @@ router.post(
         // Cutoff freeze blocks the OUT scan entirely (it only exists to award points).
         if (isPastCutoff(settings, now)) return { result: "points_closed", ...who };
         const win = scanOutWindow(config, event, settings);
-        if (!isWithinWindow(now, win.open, win.close)) return { result: "scan_window_closed", ...who };
+        if (!isScanOutOpen(win, now)) return { result: "scan_window_closed", ...who };
 
         await tx
           .update(registrations)

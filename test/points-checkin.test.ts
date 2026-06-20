@@ -67,12 +67,28 @@ async function getReg(id: string) {
   return r;
 }
 
-// Enable scan-out on an event by writing its point config row.
+// Enable scan-out on an event by writing its point config row. Also sets an explicit scan-out window
+// that's open NOW — scan-out only opens once anchored (event end or override), so without this the
+// window is unresolved and OUT scans return scan_window_closed.
 async function enableCheckout(eventId: string) {
+  const now = Date.now();
+  const scanOutOpenAt = new Date(now - 60 * 60 * 1000); // opened 1h ago
+  const scanOutCloseAt = new Date(now + 24 * 60 * 60 * 1000); // closes in 24h
   await db
     .insert(eventPointConfig)
-    .values({ eventId, checkinOutEnabled: true })
-    .onConflictDoUpdate({ target: eventPointConfig.eventId, set: { checkinOutEnabled: true } });
+    .values({ eventId, checkinOutEnabled: true, scanOutOpenAt, scanOutCloseAt })
+    .onConflictDoUpdate({
+      target: eventPointConfig.eventId,
+      set: { checkinOutEnabled: true, scanOutOpenAt, scanOutCloseAt },
+    });
+}
+
+// Disable scan-out explicitly (toggle defaults ON) to test the checkout_disabled gate.
+async function disableCheckout(eventId: string) {
+  await db
+    .insert(eventPointConfig)
+    .values({ eventId, checkinOutEnabled: false })
+    .onConflictDoUpdate({ target: eventPointConfig.eventId, set: { checkinOutEnabled: false } });
 }
 
 // =====================================================================
@@ -150,8 +166,9 @@ describe("points: cutoff freeze blocks earning", () => {
 // Check-out OUT
 // =====================================================================
 describe("points: check-out OUT", () => {
-  it("OUT requires the checkinOutEnabled toggle → checkout_disabled by default", async () => {
+  it("OUT respects the checkinOutEnabled toggle → checkout_disabled when off", async () => {
     const event = await makeCheckinEvent();
+    await disableCheckout(event.id); // toggle defaults ON now → disable explicitly to test the gate
     const { qrToken } = await registerStudent(event);
     const staff = await loginAs("checkin_staff");
     await scan(event.id, qrToken, staff.cookie); // IN first
