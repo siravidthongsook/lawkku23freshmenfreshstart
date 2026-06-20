@@ -407,6 +407,7 @@ router.post(
 
     // Capture the event id out of the tx so we can label the metric after commit.
     let checkedInEventId: string | null = null;
+    let pointsAwarded = 0; // surfaced in the response so the UI can show "+N" like the QR path
     await db.transaction(async (tx) => {
       const [reg] = await tx
         .select()
@@ -421,6 +422,14 @@ router.post(
       if (!event) throw notFound("Event not found");
       if (event.status !== "published")
         throw badRequest("event_not_published", "Event is not published");
+
+      // Registrant's role decides point eligibility (only students earn) — same as the QR scan path.
+      const [u] = await tx
+        .select({ role: users.role })
+        .from(users)
+        .where(eq(users.id, reg.userId))
+        .limit(1);
+      const studentRole = u?.role ?? "student";
       // Effective close = explicit close, else event end (scan-in must not outlast the event).
       if (!isWithinWindow(now, event.checkinOpenAt, effectiveCheckinClose(event.checkinCloseAt, event.eventEndAt)))
         throw badRequest("checkin_not_open", "Check-in window is not open");
@@ -443,6 +452,19 @@ router.post(
         })
         .where(eq(registrations.id, reg.id));
 
+      // Award checkin_in points in the SAME tx — mirrors the QR scan path so attendance is rewarded
+      // regardless of check-in method. Student + toggle + cutoff guarded inside; idempotent via dedupeKey.
+      const award = await awardCheckinIn(tx, {
+        eventId: reg.eventId,
+        registrationId: reg.id,
+        studentUserId: reg.userId,
+        studentRole,
+        scannedByUserId: staff.id,
+        eventTitle: event.title,
+        scanMethod: "manual_search",
+      });
+      pointsAwarded = award.pointsAwarded;
+
       await writeAudit(
         {
           actorUserId: staff.id,
@@ -454,7 +476,7 @@ router.post(
           registrationId: reg.id,
           targetUserId: reg.userId,
           oldValue: { status: "registered" },
-          newValue: { status: "checked_in", method: "manual_search" },
+          newValue: { status: "checked_in", method: "manual_search", pointsAwarded: award.pointsAwarded },
           ...meta,
         },
         tx,
@@ -464,7 +486,7 @@ router.post(
     // Tx committed → this is a real manual check-in; count it by event.
     if (checkedInEventId) checkinsTotal.inc({ event: checkedInEventId });
     log.set("outcome", "checked_in_success");
-    return c.json({ result: "checked_in_success", checkedInAt: now.toISOString() });
+    return c.json({ result: "checked_in_success", checkedInAt: now.toISOString(), pointsAwarded });
   },
 );
 

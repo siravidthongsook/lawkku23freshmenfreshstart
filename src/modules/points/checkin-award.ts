@@ -24,7 +24,8 @@ export type AwardOutcome = { pointsAwarded: number; deduped: boolean } | { point
 // Returns 0/skip reason on any guard miss so the caller never blocks the check-in itself.
 export async function awardCheckinIn(
   tx: Tx,
-  args: { eventId: string; registrationId: string; studentUserId: string; studentRole: string; scannedByUserId: string; eventTitle?: string | null },
+  // scanMethod defaults to qr_scan; manual check-in passes "manual_search" so metadata reflects how it happened.
+  args: { eventId: string; registrationId: string; studentUserId: string; studentRole: string; scannedByUserId: string; eventTitle?: string | null; scanMethod?: "qr_scan" | "manual_search" },
 ): Promise<AwardOutcome> {
   if (args.studentRole !== "student") return { pointsAwarded: 0, skipped: "not_student" };
   const settings = await getPointSettings(tx);
@@ -41,7 +42,7 @@ export async function awardCheckinIn(
       reasonCode: "checkin_in",
       dedupeKey: inKey(args.registrationId),
       createdByUserId: args.scannedByUserId,
-      metadata: { eventId: args.eventId, registrationId: args.registrationId, eventTitle: args.eventTitle ?? null, scanMethod: "qr_scan" },
+      metadata: { eventId: args.eventId, registrationId: args.registrationId, eventTitle: args.eventTitle ?? null, scanMethod: args.scanMethod ?? "qr_scan" },
     },
     tx,
   );
