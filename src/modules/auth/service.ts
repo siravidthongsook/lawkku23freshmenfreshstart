@@ -133,21 +133,55 @@ export async function recordAttempt(
 }
 
 // Active-lockout state for an email (used by user detail to show a lock badge + gate unlock).
+// Mirrors BOTH checkRateLimit account paths so the badge never says "unlocked" while login still
+// 429s: report locked if there's an active lockout row OR the windowed fail count is at threshold.
 export async function getLockoutState(email: string): Promise<{ locked: boolean; lockedUntil: string | null }> {
   const now = new Date();
+  const since = new Date(now.getTime() - WINDOW_MS);
   const [row] = await db
     .select({ lockedUntil: loginAttempts.lockedUntil })
     .from(loginAttempts)
     .where(and(eq(loginAttempts.email, email), gt(loginAttempts.lockedUntil, now)))
     .orderBy(desc(loginAttempts.lockedUntil))
     .limit(1);
-  return { locked: !!row?.lockedUntil, lockedUntil: row?.lockedUntil?.toISOString() ?? null };
+  if (row?.lockedUntil) {
+    return { locked: true, lockedUntil: row.lockedUntil.toISOString() };
+  }
+  // No active lockout row but window fails may still hard-block (path 2) — reflect that too.
+  const [emailFails] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(loginAttempts)
+    .where(
+      and(
+        eq(loginAttempts.email, email),
+        isNull(loginAttempts.success),
+        gt(loginAttempts.createdAt, since),
+      ),
+    );
+  return { locked: (emailFails?.n ?? 0) >= EMAIL_MAX_FAILS, lockedUntil: null };
 }
 
-// Admin unlock: clear active lockouts for an email (used by /admin/users/:id/unlock).
+// Admin unlock: clear lockout for an email across BOTH block paths in checkRateLimit.
+// Clearing lockedUntil alone is not enough — path (2) re-blocks purely on the windowed
+// count of recent failed (success IS NULL) rows for the email, so those must stop counting too.
 export async function clearLockout(email: string): Promise<void> {
+  const since = new Date(Date.now() - WINDOW_MS);
+  // (1) Drop any active hard lockout row.
   await db
     .update(loginAttempts)
     .set({ lockedUntil: null })
     .where(and(eq(loginAttempts.email, email), gt(loginAttempts.lockedUntil, new Date())));
+  // (2) Detach recent in-window failed rows from this email so the account window count drops
+  // below threshold immediately. Null the email (not success) so the per-IP/per-device gates —
+  // which key on ip_address/device_id and treat success IS NULL as a fail — stay untouched.
+  await db
+    .update(loginAttempts)
+    .set({ email: null })
+    .where(
+      and(
+        eq(loginAttempts.email, email),
+        isNull(loginAttempts.success),
+        gt(loginAttempts.createdAt, since),
+      ),
+    );
 }
