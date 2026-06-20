@@ -28,6 +28,7 @@ import { QrScanner } from "@/components/staff/qr-scanner";
 import { ScanResultPanel } from "@/components/staff/scan-result-panel";
 import { RecentScans } from "@/components/staff/recent-scans";
 import { ManualSearch } from "@/components/staff/manual-search";
+import { MyHistory } from "@/components/staff/my-history";
 import { primeAudio } from "@/components/staff/feedback";
 import type {
   ScanResponse,
@@ -271,12 +272,16 @@ export function ScannerScreen({ eventId, mode }: { eventId: string; mode: Mode }
       <RecentScans items={recent} />
 
       <Tabs defaultValue="scan">
-        <TabsList className="grid h-auto w-full grid-cols-2">
+        <TabsList className="grid h-auto w-full grid-cols-3">
           <TabsTrigger value="scan" className="h-11 text-base">
             สแกน QR
           </TabsTrigger>
           <TabsTrigger value="manual" className="h-11 text-base">
             ค้นหาด้วยตนเอง
+          </TabsTrigger>
+          {/* Persistent history of MY actions here — survives reload (unlike the recent-scans strip). */}
+          <TabsTrigger value="history" className="h-11 text-base">
+            ประวัติของฉัน
           </TabsTrigger>
         </TabsList>
 
@@ -286,6 +291,10 @@ export function ScannerScreen({ eventId, mode }: { eventId: string; mode: Mode }
 
         <TabsContent value="manual" className="mt-4">
           <ManualSearch eventId={eventId} mode={mode} onChanged={loadCtx} />
+        </TabsContent>
+
+        <TabsContent value="history" className="mt-4">
+          <MyHistory eventId={eventId} onChanged={loadCtx} />
         </TabsContent>
       </Tabs>
 

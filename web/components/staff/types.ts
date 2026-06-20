@@ -13,6 +13,8 @@ export type StaffEventListItem = {
   checkinCloseAt: string | null;
   checkinOpen: boolean;
   checkoutState?: CheckoutState; // check-out badge state (absent on older backend → treat as disabled)
+  scanOutOpenAt?: string | null; // resolved scan-out window (null when no check-out)
+  scanOutCloseAt?: string | null;
   // Counts are documented in the page-list but may be absent from the backend payload — tolerate.
   registeredCount?: number;
   checkedInCount?: number;
@@ -92,3 +94,27 @@ export type ManualCheckinResponse = { result: "checked_in_success"; checkedInAt:
 
 // POST /api/registrations/:id/manual-checkout — returns authoritative server check-out time.
 export type ManualCheckoutResponse = { result: "checked_out_success"; checkedOutAt: string };
+
+// GET /api/staff/events/:eventId/my-history — the current staff's own check-in/out actions for this event
+// (persistent audit-backed log, survives reload). canUndo* say if the action is still reversible NOW.
+export type MyHistoryAction =
+  | "qr_scan_checkin"
+  | "qr_scan_checkout"
+  | "manual_checkin"
+  | "manual_checkout"
+  | "manual_checkin_undo"
+  | "manual_checkout_undo";
+
+export type MyHistoryItem = {
+  id: string;
+  action: MyHistoryAction;
+  at: string; // ISO-8601 UTC
+  registrationId: string | null;
+  fullName: string | null;
+  studentId: string | null;
+  pointsAwarded: number | null;
+  canUndoCheckin: boolean;
+  canUndoCheckout: boolean;
+};
+
+export type MyHistoryResponse = { items: MyHistoryItem[] };
