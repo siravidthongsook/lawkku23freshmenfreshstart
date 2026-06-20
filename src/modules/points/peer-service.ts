@@ -90,7 +90,7 @@ export type ConnectOutcome = {
   pointsAwarded: number;
   profile?: PeerProfile;
   connectionId?: string;
-  retryAfterSec?: number; // set on connect_cooldown so the UI can count down
+  retryAfterSec?: number; // set on connect_cooldown AND connected_success so the UI scan-next countdown arms
 };
 
 function toProfile(u: {
@@ -246,6 +246,8 @@ export async function connectPeer(args: {
       pointsAwarded: settings.peerPoints,
       profile,
       connectionId: conn.id,
+      // Arm the UI scan-next countdown after a success too (0 = cooldown disabled).
+      retryAfterSec: settings.peerCooldownSec > 0 ? settings.peerCooldownSec : undefined,
     };
   });
 }
