@@ -8,7 +8,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { apiGet, apiPost, ApiError } from "@/lib/api";
-import type { EventPublic } from "@/lib/types";
+import type { EventPublic, Role } from "@/lib/types";
 import { useAuth } from "@/lib/auth";
 import { PublicShell } from "@/components/public/public-shell";
 import { EventStatusBadge } from "@/components/badges";
@@ -98,6 +98,8 @@ export default function EventDetailPage() {
       router.push(`/login?next=/events/${slug}`);
       return;
     }
+    // Defense: registration is student-only — block admin/staff even if a CTA leaks through.
+    if (user.role !== "student") return;
     if (action === "register") {
       setFormDialogOpen(true);
       return;
@@ -168,7 +170,7 @@ export default function EventDetailPage() {
         </div>
       ) : event ? (
         <>
-          <EventDetail event={event} submitting={submitting} onAction={onAction} />
+          <EventDetail event={event} submitting={submitting} onAction={onAction} userRole={user?.role ?? null} />
           {/* Register step. Always rendered — holds the PDPA gate; schema falls back to a fieldless
               form so formless / untied events still require consent before submit. */}
           {(
@@ -201,12 +203,23 @@ function EventDetail({
   event,
   submitting,
   onAction,
+  userRole,
 }: {
   event: EventPublic;
   submitting: boolean;
   onAction: (a: "register" | "waitlist") => void;
+  userRole: Role | null;
 }) {
-  const action = registrationAction(event);
+  let action = registrationAction(event);
+  // Registration is student-only. A logged-in admin/staff sees a block instead of a register/waitlist CTA.
+  // (Not-logged-in keeps the register button → login flow; they may be a student.)
+  if (
+    userRole &&
+    userRole !== "student" &&
+    (action.kind === "register" || action.kind === "waitlist" || action.kind === "full")
+  ) {
+    action = { kind: "students_only" };
+  }
   const cap = capacityLabel(event);
   const remaining = seatsRemaining(event);
 
@@ -343,6 +356,18 @@ function ActionArea({
         <Button className="w-full" disabled>
           เต็มแล้ว
         </Button>
+      );
+    case "students_only":
+      // Admin/staff are logged in but can't self-register — registration is student-only.
+      return (
+        <>
+          <Button className="w-full" disabled>
+            เฉพาะนักเรียนเท่านั้น
+          </Button>
+          <p className="mt-2 text-center text-xs text-muted-foreground">
+            บัญชีผู้ดูแล/เจ้าหน้าที่ไม่สามารถลงทะเบียนกิจกรรมได้
+          </p>
+        </>
       );
     case "not_open":
       return (

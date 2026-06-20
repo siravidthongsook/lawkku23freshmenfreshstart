@@ -57,6 +57,7 @@ function inRegistrationWindow(e: EventPublic, now = new Date()): boolean {
 export type RegistrationAction =
   | { kind: "already_registered"; registrationId: string; status: RegistrationStatus } // viewer already holds a (non-cancelled) reg
   | { kind: "register" } // self-register available now
+  | { kind: "students_only" } // logged-in non-student (admin/staff) — registration is student-only
   | { kind: "waitlist" } // full but waitlist enabled
   | { kind: "full" } // full, no waitlist
   | { kind: "not_open"; reason: string } // window not open / closed
