@@ -481,3 +481,70 @@ describe("registrations: admin manual register over-capacity override", () => {
     expect(res.status).toBe(403);
   });
 });
+
+// ===========================================================================
+// Admin unified status override — POST /admin/registrations/:id/status
+// ===========================================================================
+describe("registrations: admin status override", () => {
+  async function regRow(id: string) {
+    const [r] = await db.select().from(registrations).where(eq(registrations.id, id)).limit(1);
+    return r;
+  }
+  function setStatus(id: string, cookie: string, body: Record<string, unknown>) {
+    return request(`/admin/registrations/${id}/status`, { method: "POST", cookie, body });
+  }
+
+  it("registered → checked_in sets the check-in stamp + actor", async () => {
+    const admin = await loginAs("admin");
+    const reg = await makeRegistration({ status: "registered" });
+    const res = await setStatus(reg.id, admin.cookie, { status: "checked_in", reason: "manual" });
+    expect(res.status).toBe(200);
+    const after = await regRow(reg.id);
+    expect(after!.status).toBe("checked_in");
+    expect(after!.checkedInAt).not.toBeNull();
+    expect(after!.checkinMethod).toBe("manual_search");
+  });
+
+  it("checked_in → cancelled stamps cancelledAt and clears check-in", async () => {
+    const admin = await loginAs("admin");
+    const reg = await makeRegistration({ status: "checked_in" });
+    const res = await setStatus(reg.id, admin.cookie, { status: "cancelled", reason: "dup" });
+    expect(res.status).toBe(200);
+    const after = await regRow(reg.id);
+    expect(after!.status).toBe("cancelled");
+    expect(after!.cancelledAt).not.toBeNull();
+    expect(after!.checkedInAt).toBeNull(); // leaving checked_in clears the stamp
+  });
+
+  it("cancelled → registered re-activates and clears cancelledAt", async () => {
+    const admin = await loginAs("admin");
+    const reg = await makeRegistration({ status: "cancelled" });
+    const res = await setStatus(reg.id, admin.cookie, { status: "registered", reason: "reinstate" });
+    expect(res.status).toBe(200);
+    const after = await regRow(reg.id);
+    expect(after!.status).toBe("registered");
+    expect(after!.cancelledAt).toBeNull();
+  });
+
+  it("setting the same status → 400 status_unchanged", async () => {
+    const admin = await loginAs("admin");
+    const reg = await makeRegistration({ status: "registered" });
+    const res = await setStatus(reg.id, admin.cookie, { status: "registered", reason: "noop" });
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toMatchObject({ error: "status_unchanged" });
+  });
+
+  it("reason is required → 400", async () => {
+    const admin = await loginAs("admin");
+    const reg = await makeRegistration({ status: "registered" });
+    const res = await setStatus(reg.id, admin.cookie, { status: "checked_in" });
+    expect(res.status).toBe(400);
+  });
+
+  it("non-admin (student) is forbidden → 403", async () => {
+    const student = await loginAs("student");
+    const reg = await makeRegistration({ status: "registered" });
+    const res = await setStatus(reg.id, student.cookie, { status: "checked_in", reason: "x" });
+    expect(res.status).toBe(403);
+  });
+});

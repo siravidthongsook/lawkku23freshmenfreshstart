@@ -14,6 +14,13 @@ import { RegistrationStatusBadge } from "@/components/badges";
 import { ReasonDialog } from "@/components/admin-events/reason-dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/error-state";
@@ -73,35 +80,28 @@ type DetailResponse = {
   auditHistory: AuditRow[];
 };
 
+// Thai labels for each registration status (used by the unified status dropdown + dialog copy).
+const STATUS_LABEL: Record<RegistrationStatus, string> = {
+  registered: "ลงทะเบียนแล้ว",
+  waitlisted: "รายชื่อสำรอง",
+  checked_in: "เช็คอินแล้ว",
+  cancelled: "ยกเลิก",
+};
+const STATUS_ORDER: RegistrationStatus[] = ["registered", "waitlisted", "checked_in", "cancelled"];
+
 // Which reason-gated action the dialog is currently driving.
 type Action =
-  | { kind: "cancel" }
-  | { kind: "promote" }
-  | { kind: "demote" }
+  | { kind: "set_status"; status: RegistrationStatus }
   | { kind: "qr_regenerate" }
   | { kind: "qr_revoke" }
   | { kind: "edit_answers" };
 
-const ACTION_META: Record<
-  Action["kind"],
-  { title: string; description: string; confirm: string; destructive?: boolean }
+type ActionMeta = { title: string; description: string; confirm: string; destructive?: boolean };
+
+const STATIC_ACTION_META: Record<
+  Exclude<Action["kind"], "set_status">,
+  ActionMeta
 > = {
-  cancel: {
-    title: "ยกเลิกการลงทะเบียน",
-    description: "ตั้งค่าการลงทะเบียนเป็นยกเลิกและเพิกถอน QR ที่ใช้งานอยู่",
-    confirm: "ยกเลิกการลงทะเบียน",
-    destructive: true,
-  },
-  promote: {
-    title: "เลื่อนขึ้นจากรายชื่อสำรอง",
-    description: "ย้ายการลงทะเบียนจากรายชื่อสำรองไปเป็นลงทะเบียนแล้วและออก QR",
-    confirm: "เลื่อนขึ้น",
-  },
-  demote: {
-    title: "ลดลงไปยังรายชื่อสำรอง",
-    description: "ย้ายการลงทะเบียนกลับไปยังรายชื่อสำรองและเพิกถอน QR",
-    confirm: "ลดลง",
-  },
   qr_regenerate: {
     title: "สร้าง QR ใหม่",
     description: "เพิกถอน QR ปัจจุบันและออก QR ใหม่",
@@ -119,6 +119,21 @@ const ACTION_META: Record<
     confirm: "บันทึกคำตอบ",
   },
 };
+
+// Dialog copy for the current action — status change is dynamic (depends on the chosen target).
+function metaFor(action: Action): ActionMeta {
+  if (action.kind === "set_status") {
+    return {
+      title: `เปลี่ยนสถานะเป็น “${STATUS_LABEL[action.status]}”`,
+      description:
+        "เปลี่ยนสถานะการลงทะเบียนโดยตรง — ระบบจะออก/เพิกถอน QR และปรับเวลาให้ตามสถานะ" +
+        (action.status === "cancelled" ? " และยกเลิกแต้มเช็คอินที่เคยได้ (ถ้ามี)" : ""),
+      confirm: "เปลี่ยนสถานะ",
+      destructive: action.status === "cancelled",
+    };
+  }
+  return STATIC_ACTION_META[action.kind];
+}
 
 export default function RegistrationDetailPage({
   params,
@@ -162,14 +177,8 @@ export default function RegistrationDetailPage({
     const base = `/admin/registrations/${registrationId}`;
     if (!action) return;
     switch (action.kind) {
-      case "cancel":
-        await apiPost(`${base}/cancel`, { reason });
-        break;
-      case "promote":
-        await apiPost(`${base}/promote`, { reason });
-        break;
-      case "demote":
-        await apiPost(`${base}/demote`, { reason });
+      case "set_status":
+        await apiPost(`${base}/status`, { status: action.status, reason });
         break;
       case "qr_regenerate":
         await apiPost(`${base}/qr/regenerate`, { reason });
@@ -215,16 +224,22 @@ export default function RegistrationDetailPage({
         </div>
         {/* Status-aware action buttons. Each opens the reason dialog. */}
         <div className="flex flex-wrap items-center gap-2">
-          {status === "waitlisted" ? (
-            <Button variant="outline" size="sm" onClick={() => setAction({ kind: "promote" })}>
-              เลื่อนขึ้น
-            </Button>
-          ) : null}
-          {status === "registered" ? (
-            <Button variant="outline" size="sm" onClick={() => setAction({ kind: "demote" })}>
-              ลดลง
-            </Button>
-          ) : null}
+          {/* Unified status override — pick any other status; opens the reason dialog to confirm. */}
+          <Select
+            value={status}
+            onValueChange={(v) => setAction({ kind: "set_status", status: v as RegistrationStatus })}
+          >
+            <SelectTrigger className="h-9 w-44" aria-label="เปลี่ยนสถานะ">
+              <SelectValue placeholder="เปลี่ยนสถานะ" />
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_ORDER.map((s) => (
+                <SelectItem key={s} value={s} disabled={s === status}>
+                  {STATUS_LABEL[s]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           {status !== "cancelled" && status !== "waitlisted" ? (
             <>
               {/* Show current QR state so the admin knows what regenerate/revoke will do. */}
@@ -256,11 +271,6 @@ export default function RegistrationDetailPage({
                 เพิกถอน QR
               </Button>
             </>
-          ) : null}
-          {status !== "cancelled" ? (
-            <Button variant="destructive" size="sm" onClick={() => setAction({ kind: "cancel" })}>
-              ยกเลิก
-            </Button>
           ) : null}
         </div>
       </div>
@@ -412,10 +422,10 @@ export default function RegistrationDetailPage({
         onOpenChange={(next) => {
           if (!next) setAction(null);
         }}
-        title={action ? ACTION_META[action.kind].title : ""}
-        description={action ? ACTION_META[action.kind].description : undefined}
-        confirmLabel={action ? ACTION_META[action.kind].confirm : "ยืนยัน"}
-        destructive={action ? ACTION_META[action.kind].destructive : false}
+        title={action ? metaFor(action).title : ""}
+        description={action ? metaFor(action).description : undefined}
+        confirmLabel={action ? metaFor(action).confirm : "ยืนยัน"}
+        destructive={action ? metaFor(action).destructive : false}
         onConfirm={runAction}
       />
     </div>

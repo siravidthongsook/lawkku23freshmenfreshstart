@@ -26,6 +26,7 @@ import {
   hasActiveQrToken,
   getActiveQrTokenForOwner,
 } from "../qr-tokens/service";
+import { reverseCheckinOnUndo } from "../points/checkin-award";
 import {
   countActiveRegistrations,
   getActiveFormVersion,
@@ -52,6 +53,10 @@ const eventIdParam = z.object({ eventId: z.string().uuid() });
 const regIdParam = z.object({ registrationId: z.string().uuid() });
 const answersBody = z.object({ answers: z.record(z.string(), z.unknown()).default({}) });
 const reasonBody = z.object({ reason: z.string().min(1) });
+const statusChangeBody = z.object({
+  status: z.enum(["registered", "waitlisted", "checked_in", "cancelled"]),
+  reason: z.string().min(1),
+});
 const adminRegisterBody = z.object({
   userId: z.string().uuid(),
   answers: z.record(z.string(), z.unknown()).default({}),
@@ -721,6 +726,122 @@ router.post(
         },
         tx,
       );
+    });
+    return c.json({ ok: true });
+  },
+);
+
+// Admin override: set the registration status directly (reason + audit). Unified replacement for the
+// promote/demote/cancel/manual-checkin transitions — applies the right side-effects per target:
+//   active (registered/checked_in)  → issue QR if none; capacity-audit when entering from inactive
+//   inactive (waitlisted/cancelled) → revoke active QR
+//   leaving checked_in              → clear check-in/out stamps + reverse any awarded points
+// Intentionally does NOT gate on the check-in window/published (this is an explicit admin override).
+router.post(
+  "/admin/registrations/:registrationId/status",
+  requireAuth,
+  requirePermission(canManageEvents),
+  async (c) => {
+    const { registrationId } = regIdParam.parse(c.req.param());
+    const { status: target, reason } = statusChangeBody.parse(await c.req.json());
+    const admin = c.get("user");
+    const meta = requestMeta(c);
+
+    await db.transaction(async (tx) => {
+      const reg = await getRegistrationOrThrow(tx, registrationId);
+      // Lock the event row so the capacity count is race-safe when entering an active status.
+      const [event] = await tx.select().from(events).where(eq(events.id, reg.eventId)).for("update").limit(1);
+      if (!event) throw notFound("Event not found");
+      if (reg.status === target) throw badRequest("status_unchanged", "Registration already has this status");
+
+      const now = new Date();
+      const wasActive = reg.status === "registered" || reg.status === "checked_in";
+      const willBeActive = target === "registered" || target === "checked_in";
+
+      // Capacity: only when entering an active status from a non-active one. Admin may exceed it; we audit.
+      let count = 0;
+      let overCapacity = false;
+      if (willBeActive && !wasActive && event.capacityEnabled && event.capacityLimit != null) {
+        count = await countActiveRegistrations(tx, reg.eventId);
+        overCapacity = count >= event.capacityLimit;
+      }
+
+      // Leaving checked_in → reverse any awarded check-in/out points (idempotent; no-op if none).
+      const leavingCheckedIn = reg.status === "checked_in" && target !== "checked_in";
+      let pointsReversed = false;
+      if (leavingCheckedIn) {
+        const rev = await reverseCheckinOnUndo(tx, {
+          registrationId: reg.id,
+          studentUserId: reg.userId,
+          undoneByUserId: admin.id,
+          reason,
+        });
+        pointsReversed = rev.reversed;
+      }
+
+      // Build the status-specific patch (timestamps mirror the dedicated transition endpoints).
+      const patch: Record<string, unknown> = { status: target, updatedAt: now };
+      if (leavingCheckedIn) {
+        patch.checkedInAt = null;
+        patch.checkedInByUserId = null;
+        patch.checkinMethod = null;
+        patch.checkedOutAt = null;
+        patch.checkedOutByUserId = null;
+      }
+      if (reg.status === "cancelled" && target !== "cancelled") patch.cancelledAt = null; // re-activate clears it
+      if (target === "registered") patch.registeredAt = reg.registeredAt ?? now;
+      if (target === "waitlisted") patch.waitlistedAt = now;
+      if (target === "cancelled") patch.cancelledAt = now;
+      if (target === "checked_in") {
+        patch.checkedInAt = now;
+        patch.checkedInByUserId = admin.id;
+        patch.checkinMethod = "manual_search";
+        patch.manualCheckinReason = reason;
+      }
+      await tx.update(registrations).set(patch).where(eq(registrations.id, reg.id));
+
+      // QR follows status: active → ensure a token exists; inactive → revoke any active token.
+      if (willBeActive) {
+        if (!(await hasActiveQrToken(tx, reg.id))) await issueQrToken(tx, reg.id, admin.id);
+      } else {
+        await revokeActiveQrToken(tx, reg.id, admin.id);
+      }
+
+      await writeAudit(
+        {
+          actorUserId: admin.id,
+          actorRole: admin.role,
+          action: "registration_status_changed",
+          entityType: "registration",
+          entityId: reg.id,
+          eventId: reg.eventId,
+          registrationId: reg.id,
+          targetUserId: reg.userId,
+          oldValue: { status: reg.status },
+          newValue: { status: target, pointsReversed },
+          reason,
+          ...meta,
+        },
+        tx,
+      );
+      if (overCapacity) {
+        await writeAudit(
+          {
+            actorUserId: admin.id,
+            actorRole: admin.role,
+            action: "admin_register_over_capacity",
+            entityType: "registration",
+            entityId: reg.id,
+            eventId: reg.eventId,
+            registrationId: reg.id,
+            targetUserId: reg.userId,
+            metadata: { count, limit: event.capacityLimit },
+            reason,
+            ...meta,
+          },
+          tx,
+        );
+      }
     });
     return c.json({ ok: true });
   },
