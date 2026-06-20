@@ -9,3 +9,9 @@ dist
 
 # local + prod DB backups (contain hashes/PII)
 backups/
+
+# Playwright e2e
+playwright-report/
+test-results/
+/blob-report/
+.playwright/
