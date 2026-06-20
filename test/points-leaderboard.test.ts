@@ -31,7 +31,7 @@ describe("GET /leaderboard — ranking", () => {
     const tieLate = await seedUser({ role: "student", fullName: "TieLate", groupNumber: 2 });
     await setRank(tieLate.id, 50, t1);
 
-    // zero never earned (lastPositiveAt null) → sorts last among students.
+    // zero never earned (0 balance) → excluded from the board entirely (Boss decision, pointsBalance > 0).
     const zero = await seedUser({ role: "student", fullName: "Zero", groupNumber: 2 });
     await setRank(zero.id, 0, null);
 
@@ -46,12 +46,13 @@ describe("GET /leaderboard — ranking", () => {
     expect(status).toBe(200);
 
     const ids = body.leaderboard.map((r: any) => r.userId);
-    expect(ids).toEqual([top.id, tieEarly.id, tieLate.id, zero.id]);
-    expect(body.leaderboard.map((r: any) => r.rank)).toEqual([1, 2, 3, 4]);
-    // staff/admin/disabled absent
+    expect(ids).toEqual([top.id, tieEarly.id, tieLate.id]); // zero excluded (0 balance)
+    expect(body.leaderboard.map((r: any) => r.rank)).toEqual([1, 2, 3]);
+    // staff/admin/disabled/0-point absent
     expect(ids).not.toContain(staff.id);
     expect(ids).not.toContain(disabled.id);
-    expect(body.total).toBe(4); // only the 4 active students (admin auto-seeded by factories elsewhere is not in this DB after reset)
+    expect(ids).not.toContain(zero.id);
+    expect(body.total).toBe(3); // only the 3 active students with balance > 0
   });
 
   it("tie on equal balance AND equal lastPositiveAt breaks by id (deterministic)", async () => {
