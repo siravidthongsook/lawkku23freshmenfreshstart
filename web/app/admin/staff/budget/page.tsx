@@ -13,6 +13,7 @@ import { getStaffBudgets, topupStaffBudget, topupStaffBudgetBulk } from "@/lib/p
 import type { StaffBudgetOverviewRow } from "@/lib/points-types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/error-state";
@@ -33,6 +34,10 @@ export default function StaffBudgetOverviewPage() {
   const [error, setError] = useState<string | null>(null);
   const [order, setOrder] = useState<SortOrder>("asc"); // lowest-first default (§14)
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Client-side filters (dataset is small — whole staff list loaded at once).
+  const [query, setQuery] = useState("");
+  const [minBudget, setMinBudget] = useState(""); // empty = no lower bound
+  const [maxBudget, setMaxBudget] = useState(""); // empty = no upper bound
 
   // Dialog: single-staff topup (null) or bulk (the selected set). `bulk` distinguishes the two.
   const [topupTarget, setTopupTarget] = useState<{ row: StaffBudgetOverviewRow | null; bulk: boolean } | null>(
@@ -54,8 +59,20 @@ export default function StaffBudgetOverviewPage() {
     void load();
   }, [load]);
 
+  // Filter (search name/username + balance range) then sort. Bad/blank range bounds are ignored.
+  const min = minBudget.trim() === "" ? null : Number(minBudget);
+  const max = maxBudget.trim() === "" ? null : Number(maxBudget);
+  const q = query.trim().toLowerCase();
   const sorted = rows
-    ? [...rows].sort((a, b) => (order === "asc" ? a.budget - b.budget : b.budget - a.budget))
+    ? [...rows]
+        .filter((r) => {
+          if (q && !r.fullName.toLowerCase().includes(q) && !(r.username ?? "").toLowerCase().includes(q))
+            return false;
+          if (min != null && !Number.isNaN(min) && r.budget < min) return false;
+          if (max != null && !Number.isNaN(max) && r.budget > max) return false;
+          return true;
+        })
+        .sort((a, b) => (order === "asc" ? a.budget - b.budget : b.budget - a.budget))
     : [];
 
   function toggle(id: string) {
@@ -113,6 +130,59 @@ export default function StaffBudgetOverviewPage() {
         ) : null}
       </div>
 
+      {/* Filter/sort toolbar — search by name/username, balance range, sort order. All client-side. */}
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="flex-1 min-w-[12rem]">
+          <label className="mb-1 block text-xs text-muted-foreground">ค้นหา (ชื่อ / ชื่อผู้ใช้)</label>
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="พิมพ์ชื่อหรือ @username…"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">งบขั้นต่ำ</label>
+          <Input
+            type="number"
+            inputMode="numeric"
+            value={minBudget}
+            onChange={(e) => setMinBudget(e.target.value)}
+            placeholder="ต่ำสุด"
+            className="w-28"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">งบสูงสุด</label>
+          <Input
+            type="number"
+            inputMode="numeric"
+            value={maxBudget}
+            onChange={(e) => setMaxBudget(e.target.value)}
+            placeholder="สูงสุด"
+            className="w-28"
+          />
+        </div>
+        <Button
+          variant="outline"
+          onClick={() => setOrder((o) => (o === "asc" ? "desc" : "asc"))}
+          className="gap-1"
+        >
+          งบ {order === "asc" ? <ArrowUp className="size-4" /> : <ArrowDown className="size-4" />}
+        </Button>
+        {(query || minBudget || maxBudget) && (
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setQuery("");
+              setMinBudget("");
+              setMaxBudget("");
+            }}
+          >
+            ล้างตัวกรอง
+          </Button>
+        )}
+      </div>
+
       <Card>
         <CardContent className="pt-6">
           {rows === null ? (
@@ -122,7 +192,9 @@ export default function StaffBudgetOverviewPage() {
               ))}
             </div>
           ) : sorted.length === 0 ? (
-            <p className="py-10 text-center text-sm text-muted-foreground">ไม่มีเจ้าหน้าที่เช็คอิน</p>
+            <p className="py-10 text-center text-sm text-muted-foreground">
+              {rows.length === 0 ? "ไม่มีเจ้าหน้าที่เช็คอิน" : "ไม่พบผลลัพธ์ที่ตรงกับตัวกรอง"}
+            </p>
           ) : (
             <Table>
               <TableHeader>
