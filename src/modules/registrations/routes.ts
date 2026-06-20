@@ -5,6 +5,7 @@ import type { AppVariables } from "../../lib/context";
 import { db, type Tx } from "../../db/client";
 import { events } from "../../db/schema/events";
 import { registrations } from "../../db/schema/registrations";
+import { users } from "../../db/schema/users";
 import { auditLogs } from "../../db/schema/audit";
 import { requireAuth, requirePermission, requestMeta } from "../../lib/auth-middleware";
 import { canManageEvents } from "../../lib/permissions";
@@ -26,7 +27,7 @@ import {
   hasActiveQrToken,
   getActiveQrTokenForOwner,
 } from "../qr-tokens/service";
-import { reverseCheckinOnUndo } from "../points/checkin-award";
+import { awardCheckinIn, reverseCheckinOnUndo } from "../points/checkin-award";
 import {
   countActiveRegistrations,
   getActiveFormVersion,
@@ -56,6 +57,9 @@ const reasonBody = z.object({ reason: z.string().min(1) });
 const statusChangeBody = z.object({
   status: z.enum(["registered", "waitlisted", "checked_in", "cancelled"]),
   reason: z.string().min(1),
+  // Award checkin_in points when transitioning INTO checked_in (default on, mirrors QR/manual scan).
+  // Admin can opt OUT (e.g. a correction that shouldn't credit the student) by passing false.
+  awardPoints: z.boolean().default(true),
 });
 const adminRegisterBody = z.object({
   userId: z.string().uuid(),
@@ -743,12 +747,15 @@ router.post(
   requirePermission(canManageEvents),
   async (c) => {
     const { registrationId } = regIdParam.parse(c.req.param());
-    const { status: target, reason } = statusChangeBody.parse(await c.req.json());
+    const { status: target, reason, awardPoints } = statusChangeBody.parse(await c.req.json());
     const admin = c.get("user");
     const meta = requestMeta(c);
 
     await db.transaction(async (tx) => {
-      const reg = await getRegistrationOrThrow(tx, registrationId);
+      // Lock the registration row (not just the event): concurrent admin status-changes must serialize on a
+      // FRESH status, else the loser proceeds on a stale snapshot → stamp clobber + duplicate audit row.
+      const [reg] = await tx.select().from(registrations).where(eq(registrations.id, registrationId)).for("update").limit(1);
+      if (!reg) throw notFound("Registration not found");
       // Lock the event row so the capacity count is race-safe when entering an active status.
       const [event] = await tx.select().from(events).where(eq(events.id, reg.eventId)).for("update").limit(1);
       if (!event) throw notFound("Event not found");
@@ -800,6 +807,28 @@ router.post(
       }
       await tx.update(registrations).set(patch).where(eq(registrations.id, reg.id));
 
+      // Entering checked_in awards checkin_in by default (mirrors QR/manual scan), unless admin opted out.
+      // Same epoch-aware path as the scan flows; awardCheckinIn guards student-only + toggle + cutoff inside.
+      const enteringCheckedIn = target === "checked_in" && reg.status !== "checked_in";
+      let pointsAwarded = 0;
+      if (enteringCheckedIn && awardPoints) {
+        const [u] = await tx
+          .select({ role: users.role })
+          .from(users)
+          .where(eq(users.id, reg.userId))
+          .limit(1);
+        const award = await awardCheckinIn(tx, {
+          eventId: reg.eventId,
+          registrationId: reg.id,
+          studentUserId: reg.userId,
+          studentRole: u?.role ?? "student",
+          scannedByUserId: admin.id,
+          eventTitle: event.title,
+          scanMethod: "manual_search",
+        });
+        pointsAwarded = award.pointsAwarded;
+      }
+
       // QR follows status: active → ensure a token exists; inactive → revoke any active token.
       if (willBeActive) {
         if (!(await hasActiveQrToken(tx, reg.id))) await issueQrToken(tx, reg.id, admin.id);
@@ -818,7 +847,7 @@ router.post(
           registrationId: reg.id,
           targetUserId: reg.userId,
           oldValue: { status: reg.status },
-          newValue: { status: target, pointsReversed },
+          newValue: { status: target, pointsReversed, pointsAwarded },
           reason,
           ...meta,
         },
