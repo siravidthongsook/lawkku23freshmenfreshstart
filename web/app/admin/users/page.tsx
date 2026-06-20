@@ -302,6 +302,7 @@ export default function UsersPage() {
                         onClick={() => toggleSort("full_name")}
                       />
                       <TableHead>อีเมล</TableHead>
+                      <TableHead>ชื่อผู้ใช้</TableHead>
                       <TableHead>บทบาท</TableHead>
                       <TableHead>สถานะ</TableHead>
                       <SortHeader
@@ -344,6 +345,8 @@ export default function UsersPage() {
                           ) : null}
                         </TableCell>
                         <TableCell className="text-muted-foreground">{u.email}</TableCell>
+                        {/* username: staff login id; null for students/admins */}
+                        <TableCell className="font-mono text-muted-foreground">{u.username ?? "—"}</TableCell>
                         <TableCell>
                           <RoleBadge role={u.role} />
                         </TableCell>
