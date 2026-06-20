@@ -59,6 +59,12 @@ router.get("/events/:eventId/assessment", requireAuth, async (c) => {
   const [event] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);
   if (!event) throw notFound("Event not found");
 
+  // Only published events expose an assessment — mirrors the POST gate so a draft/cancelled/archived
+  // event never renders a submittable form (the submit would be rejected anyway).
+  if (event.status !== "published") {
+    return c.json({ enabled: false, form: null, submitted: false, submission: null });
+  }
+
   const version = await getActiveVersion(eventId, "assessment");
   const config = await getEventPointConfig(eventId);
   const submission = await getSubmission(db, eventId, user.id);
@@ -100,6 +106,10 @@ router.post("/events/:eventId/assessment", requireAuth, async (c) => {
   const out = await db.transaction(async (tx): Promise<SubmitOut> => {
     const [event] = await tx.select().from(events).where(eq(events.id, eventId)).limit(1);
     if (!event) throw notFound("Event not found");
+
+    // Event must be published — a draft/cancelled/archived event can't award assessment points
+    // (matches registration's event_not_open gate; keeps header guard order: student → published → …).
+    if (event.status !== "published") return { result: "assessment_not_open" };
 
     const settings = await getPointSettings(tx);
     const config = await getEventPointConfig(eventId, tx);

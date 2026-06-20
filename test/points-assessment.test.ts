@@ -116,6 +116,35 @@ describe("points: assessment award (default 100, idempotent, balance == SUM(delt
     expect(entries.filter((e) => e.reasonCode === "assessment_completed").length).toBe(1);
   });
 
+  // Real race (not the sequential re-submit above): two parallel POSTs hit the unique-submission
+  // insert at once → exactly one wins. Exactly one submission, one ledger row, one award worth.
+  it("two concurrent first-submits → exactly one award (one submission + one ledger row)", async () => {
+    const event = await makeEvent({ status: "published" });
+    await makeAssessmentForm(event);
+    await configureAssessment(event.id);
+    const { user, cookie } = await checkedInStudent(event);
+
+    const [a, b] = await Promise.all([submit(event.id, cookie), submit(event.id, cookie)]);
+    const results = [
+      ((await a.json()) as { result: string }).result,
+      ((await b.json()) as { result: string }).result,
+    ].sort();
+    // One success, one already_submitted (order non-deterministic) — never two successes.
+    expect(results).toEqual(["already_submitted", "submitted_success"]);
+
+    expect(await balanceOf(user.id)).toBe(100); // single award
+    expect(await ledgerSum(user.id)).toBe(100);
+    const subs = await db
+      .select()
+      .from(assessmentSubmissions)
+      .where(eq(assessmentSubmissions.userId, user.id));
+    expect(subs.length).toBe(1);
+    const awards = (
+      await db.select().from(pointLedger).where(eq(pointLedger.userId, user.id))
+    ).filter((e) => e.reasonCode === "assessment_completed");
+    expect(awards.length).toBe(1);
+  });
+
   it("per-event override beats the global default", async () => {
     const event = await makeEvent({ status: "published" });
     await makeAssessmentForm(event);
@@ -228,6 +257,30 @@ describe("points: assessment guards", () => {
     expect(((await res.json()) as { result: string }).result).toBe("submitted_success");
     expect(await balanceOf(user.id)).toBe(100);
   });
+
+  // Event must be published — a draft/cancelled/archived event must never award assessment points.
+  // No submission row and no ledger row may be written for a non-published event.
+  for (const status of ["draft", "cancelled", "archived"] as const) {
+    it(`event status=${status} → assessment_not_open, no submission, no ledger, balance 0`, async () => {
+      const event = await makeEvent({ status });
+      await makeAssessmentForm(event);
+      await configureAssessment(event.id, { requiresCheckin: false });
+      const { user, cookie } = await loginAs("student");
+
+      const res = await submit(event.id, cookie);
+      expect(((await res.json()) as { result: string }).result).toBe("assessment_not_open");
+
+      expect(await balanceOf(user.id)).toBe(0);
+      expect(await ledgerSum(user.id)).toBe(0);
+      const subs = await db
+        .select()
+        .from(assessmentSubmissions)
+        .where(eq(assessmentSubmissions.userId, user.id));
+      expect(subs.length).toBe(0);
+      const ledger = await db.select().from(pointLedger).where(eq(pointLedger.userId, user.id));
+      expect(ledger.length).toBe(0);
+    });
+  }
 
   it("no assessment form built → no_assessment_form", async () => {
     const event = await makeEvent({ status: "published" });
