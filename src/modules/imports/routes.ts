@@ -20,6 +20,12 @@ import { toCsv } from "./csv-out";
 const router = new Hono<{ Variables: AppVariables }>();
 const adminOnly = [requireAuth, requirePermission(canManageUsers)] as const;
 
+// KILL-SWITCH: imports disabled — result endpoint leaks plaintext temp passwords from result_summary.
+// Temporary 503 guard on ALL import routes (preview/confirm/result) pending the real fix; revert once fixed.
+router.use("*", async (c) =>
+  c.json({ error: "feature_disabled", message: "Import feature temporarily disabled" }, 503),
+);
+
 // POST /admin/imports/users/preview — parse CSV, compute row statuses, persist a previewed batch.
 router.post("/admin/imports/users/preview", ...adminOnly, async (c) => {
   const user = c.get("user");
