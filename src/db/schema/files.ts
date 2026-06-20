@@ -1,4 +1,5 @@
-import { index, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { events } from "./events";
 import { eventFormVersions } from "./forms";
 import { registrations } from "./registrations";
@@ -31,7 +32,13 @@ export const uploadedFiles = pgTable(
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     deletedReason: text("deleted_reason"), // replaced_by_user / replaced_by_admin
   },
-  (t) => [index("uploaded_files_reg_idx").on(t.registrationId)],
+  (t) => [
+    index("uploaded_files_reg_idx").on(t.registrationId),
+    // At most one live file per (registration, field) — prevents concurrent uploads creating two live rows.
+    uniqueIndex("uploaded_files_one_live_per_field")
+      .on(t.registrationId, t.formFieldKey)
+      .where(sql`deleted_at IS NULL`),
+  ],
 );
 
 export type UploadedFile = typeof uploadedFiles.$inferSelect;

@@ -7,7 +7,12 @@ import { users, temporaryPasswords } from "../../db/schema/users";
 import { requireAuth, requestMeta } from "../../lib/auth-middleware";
 import { getPointSettings } from "../points/config-service";
 import { AppError, badRequest, conflict } from "../../lib/errors";
-import { hashPassword, validatePasswordPolicy, verifyPassword } from "../../lib/password";
+import {
+  hashPassword,
+  validatePasswordPolicy,
+  verifyDummyPassword,
+  verifyPassword,
+} from "../../lib/password";
 import {
   clearSessionCookie,
   createSession,
@@ -83,17 +88,22 @@ router.post("/auth/login", zValidator("json", loginSchema), async (c) => {
   // Same generic path whether user is missing, disabled, unclaimed (null hash), or password wrong.
   // Null passwordHash = account not yet claimed — never reveal that, falls through to generic error.
   // verifyPassword wrapped with a SAFE pick — never log the plaintext password arg (pass userId only).
-  const ok =
-    user &&
-    user.status === "active" &&
-    user.passwordHash !== null &&
-    (await log.call(
+  const verifiable = !!user && user.status === "active" && user.passwordHash !== null;
+  let ok = false;
+  if (verifiable) {
+    ok = await log.call(
       "verifyPassword",
       { userId: user.id },
       () => verifyPassword(user.passwordHash as string, password),
       (r) => ({ ok: r }),
-    ));
-  log.event("credential_check", { ok: !!ok });
+    );
+  } else {
+    // Equal work on miss: spend the same argon2 time against a decoy hash so response latency can't
+    // distinguish a real claimed account (slow verify) from a missing/disabled/unclaimed one (fast).
+    // Result is intentionally discarded — this branch always falls through to the generic 401 below.
+    await verifyDummyPassword(password);
+  }
+  log.event("credential_check", { ok });
   if (!ok) {
     loginFailuresTotal.inc();
     const { justLocked } = await recordAttempt(rlKey, meta.ipAddress, meta.deviceId, false);
@@ -109,6 +119,8 @@ router.post("/auth/login", zValidator("json", loginSchema), async (c) => {
     log.set("outcome", "bad_credentials");
     throw invalidCredentials();
   }
+  // ok===true only via the verifiable branch (user present) — narrow it for the success path below.
+  if (!user) throw invalidCredentials();
 
   await recordAttempt(rlKey, meta.ipAddress, meta.deviceId, true);
   // createSession returns { token, id }; capture id for the log (never the token).
@@ -187,6 +199,9 @@ router.post("/auth/claim", zValidator("json", claimSchema), async (c) => {
 
   // Any mismatch → same generic invalid-credentials path as login (counts toward lockout). No enumeration.
   if (!user) {
+    // Equal work on miss: a hit hashes the new password (slow); without this a miss would return fast,
+    // letting latency enumerate valid unclaimed identifiers. Spend matching argon2 time, discard result.
+    await verifyDummyPassword(new_password);
     const { justLocked } = await recordAttempt(rlKey, meta.ipAddress, meta.deviceId, false);
     if (justLocked) {
       await writeAudit({

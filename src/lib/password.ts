@@ -1,5 +1,5 @@
 import argon2 from "argon2";
-import { randomInt } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 
 // Argon2id hashing. Policy + readable temp-password generation.
 export function hashPassword(plain: string): Promise<string> {
@@ -12,6 +12,18 @@ export async function verifyPassword(hash: string, plain: string): Promise<boole
   } catch {
     return false;
   }
+}
+
+// Decoy hash for equal-work-on-miss: a real argon2id hash of a random, never-disclosed secret.
+// Built via hashPassword() so params ALWAYS match real verifies; computed once at module load.
+// The supplied password can never match it (input bytes are unknowable), so it always returns false.
+const dummyHashPromise: Promise<string> = hashPassword(randomBytes(32).toString("base64"));
+
+// Run a verify against the decoy hash so a credential-miss spends ~the same CPU as a real check.
+// Prevents the login/claim timing side-channel that distinguishes a real claimed account from a
+// missing/disabled/unclaimed one. Result is meaningless and MUST NOT be used to authorize.
+export async function verifyDummyPassword(plain: string): Promise<void> {
+  await verifyPassword(await dummyHashPromise, plain);
 }
 
 // V1 policy: 10–128 chars, block a small common list. Returns error message or null.

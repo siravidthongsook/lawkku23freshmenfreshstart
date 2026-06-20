@@ -11,9 +11,15 @@ import { requireAuth, requirePermission, requestMeta } from "../../lib/auth-midd
 import { canManageUsers } from "../../lib/permissions";
 import { badRequest, notFound } from "../../lib/errors";
 import { hashPassword, generateTempPassword } from "../../lib/password";
-import { encryptSecret } from "../../lib/crypto";
+import { encryptSecret, decryptSecret } from "../../lib/crypto";
 import { writeAudit } from "../../lib/audit";
-import { confirmImportSchema, type ImportResultSummary, type ImportRow } from "./schema";
+import {
+  confirmImportSchema,
+  importResultQuery,
+  type ImportResultRow,
+  type ImportResultSummary,
+  type ImportRow,
+} from "./schema";
 import { buildPreviewRows, parseCsv, tallyCounts } from "./service";
 import { toCsv } from "./csv-out";
 
@@ -80,7 +86,7 @@ router.post(
   async (c) => {
     const user = c.get("user");
     const meta = requestMeta(c);
-    const { importId, scope, targetEventId } = c.req.valid("json");
+    const { importId } = c.req.valid("json");
 
     const [batch] = await db.select().from(userImports).where(eq(userImports.id, importId)).limit(1);
     if (!batch) throw notFound("Import batch not found");
@@ -90,6 +96,10 @@ router.post(
     const summary = batch.resultSummary as ImportResultSummary | null;
     if (!summary) throw badRequest("invalid_state", "Import has no preview data");
 
+    // BUG B fix: confirm applies EXACTLY what was previewed. scope/targetEventId come from the
+    // persisted batch, NOT the request body — preview-time capacity analysis can't be bypassed.
+    const scope = batch.scope;
+    const targetEventId = batch.targetEventId;
     const registerToEvent = scope === "user_pool_and_register_to_event";
     if (registerToEvent && !targetEventId)
       throw badRequest("missing_event", "targetEventId required");
@@ -104,7 +114,9 @@ router.post(
     }
 
     // Temp passwords are generated outside the tx (argon2 is async/CPU) then applied inside.
-    const resultRows: (ImportRow & { result: string; tempPassword?: string })[] = [];
+    // BUG A fix: result rows NEVER store the plaintext temp pw — created rows carry only the userId
+    // so the result endpoint can decrypt on demand (opt-in + reason + audit). Encrypted store is truth.
+    const resultRows: ImportResultRow[] = [];
     type Pending = { row: ImportRow; tempPlain: string; hash: string };
     const toCreate: Pending[] = [];
     const toUpdate: ImportRow[] = [];
@@ -151,7 +163,8 @@ router.post(
           createdByAdminId: user.id,
         });
         createdCount++;
-        resultRows.push({ ...p.row, result: "created", tempPassword: p.tempPlain });
+        // Store userId (not plaintext) — result endpoint decrypts temp pw on demand from encrypted store.
+        resultRows.push({ ...p.row, result: "created", userId: created.id });
 
         if (registerToEvent && targetEventId) {
           const over = await registerUser(tx, targetEventId, created.id);
@@ -284,44 +297,117 @@ router.post(
 );
 
 // GET /admin/imports/:importId/result — downloadable CSV of the stored result.
-router.get("/admin/imports/:importId/result", ...adminOnly, async (c) => {
-  const importId = c.req.param("importId");
-  const [batch] = await db.select().from(userImports).where(eq(userImports.id, importId)).limit(1);
-  if (!batch) throw notFound("Import batch not found");
+// temp_password is opt-in ONLY + reason-gated + audited (mirrors GET/POST users-export reveal in
+// src/modules/users/routes.ts). Default download carries NO temp_password column → never leaks plaintext.
+router.get(
+  "/admin/imports/:importId/result",
+  ...adminOnly,
+  zValidator("query", importResultQuery),
+  async (c) => {
+    const user = c.get("user");
+    const meta = requestMeta(c);
+    const importId = c.req.param("importId");
+    const { include_temp_password: includeTempPassword, reason } = c.req.valid("query");
 
-  const summary = batch.resultSummary as
-    | (ImportResultSummary & { result?: (ImportRow & { result?: string; tempPassword?: string })[] })
-    | null;
-  if (!summary) throw notFound("No result available");
+    // Reason guard fires before any DB/CSV/audit work — mirrors users export's reason_required gate.
+    if (includeTempPassword && !reason) {
+      return c.json(
+        { error: "reason_required", message: "Reason is required to reveal temporary passwords" },
+        400,
+      );
+    }
 
-  // Confirmed batches expose per-row outcome (incl. temp pw for created — admin-only download).
-  // Previewed batches expose the computed statuses only.
-  const source = summary.result ?? summary.rows;
-  const records = source.map((r) => ({
-    row_number: r.rowNumber,
-    email: r.email,
-    student_id: r.studentId ?? "",
-    full_name: r.fullName,
-    status: r.status,
-    result: ("result" in r ? r.result : "") ?? "",
-    temp_password: ("tempPassword" in r ? r.tempPassword : "") ?? "",
-    note: r.note ?? "",
-  }));
+    const [batch] = await db
+      .select()
+      .from(userImports)
+      .where(eq(userImports.id, importId))
+      .limit(1);
+    if (!batch) throw notFound("Import batch not found");
 
-  const csv = toCsv(records, [
-    "row_number",
-    "email",
-    "student_id",
-    "full_name",
-    "status",
-    "result",
-    "temp_password",
-    "note",
-  ]);
-  c.header("Content-Type", "text/csv; charset=utf-8");
-  c.header("Content-Disposition", `attachment; filename="import-${importId}-result.csv"`);
-  return c.body(csv);
-});
+    const summary = batch.resultSummary as ImportResultSummary | null;
+    if (!summary) throw notFound("No result available");
+
+    // Confirmed batches expose per-row outcome (summary.result); previewed expose computed rows only.
+    const source: (ImportRow | ImportResultRow)[] = summary.result ?? summary.rows;
+
+    // Decrypt temp pw on demand from the encrypted store (single source of truth) — only when opted in.
+    // Per-row try/catch so one undecryptable ciphertext (e.g. rotated key) can't 500 the whole download.
+    const tempPwById = new Map<string, string>();
+    let revealedCount = 0;
+    if (includeTempPassword && summary.result?.length) {
+      const ids = summary.result
+        .filter((r): r is ImportResultRow => "userId" in r && !!r.userId)
+        .map((r) => r.userId!);
+      if (ids.length) {
+        const pendingRows = await db
+          .select({
+            userId: temporaryPasswords.userId,
+            encrypted: temporaryPasswords.encryptedTempPassword,
+          })
+          .from(temporaryPasswords)
+          .where(inArray(temporaryPasswords.userId, ids));
+        for (const p of pendingRows) {
+          try {
+            tempPwById.set(p.userId, decryptSecret(p.encrypted));
+            revealedCount++;
+          } catch {
+            // never log/audit the plaintext; only the failure signal.
+            tempPwById.set(p.userId, "<decrypt-error>");
+            c.get("log")?.event("temp_pw_decrypt_failed", { userId: p.userId });
+          }
+        }
+      }
+    }
+
+    const records = source.map((r) => {
+      const userId = "userId" in r ? r.userId : undefined;
+      return {
+        row_number: r.rowNumber,
+        email: r.email,
+        student_id: r.studentId ?? "",
+        full_name: r.fullName,
+        status: r.status,
+        result: "result" in r ? (r.result ?? "") : "",
+        // temp_password column emitted ONLY when opted in; plaintext from on-demand decrypt.
+        temp_password: includeTempPassword ? (userId ? (tempPwById.get(userId) ?? "") : "") : "",
+        note: r.note ?? "",
+      };
+    });
+
+    // Columns: omit temp_password entirely unless opted in (default download never carries it).
+    const columns = [
+      "row_number",
+      "email",
+      "student_id",
+      "full_name",
+      "status",
+      "result",
+      ...(includeTempPassword ? (["temp_password"] as const) : []),
+      "note",
+    ];
+
+    const csv = toCsv(records, columns);
+
+    // Audit the reveal — mirrors users_exported: reason stored only when plaintext left the system,
+    // included_temp_password flag is greppable for security review; count only, never the plaintext.
+    if (includeTempPassword) {
+      await writeAudit({
+        actorUserId: user.id,
+        actorRole: user.role,
+        action: "import_result_revealed",
+        entityType: "user_import",
+        entityId: importId,
+        reason,
+        metadata: { included_temp_password: true, revealed_count: revealedCount },
+        ...meta,
+      });
+    }
+
+    c.header("Content-Type", "text/csv; charset=utf-8");
+    c.header("Content-Disposition", `attachment; filename="import-${importId}-result.csv"`);
+    return c.body(csv);
+  },
+);
 
 // --- helpers ---
 

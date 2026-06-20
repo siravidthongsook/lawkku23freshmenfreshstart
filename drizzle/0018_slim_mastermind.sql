@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX IF NOT EXISTS "uploaded_files_one_live_per_field" ON "uploaded_files" USING btree ("registration_id","form_field_key") WHERE deleted_at IS NULL;

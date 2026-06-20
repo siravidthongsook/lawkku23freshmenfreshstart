@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { stream } from "hono/streaming";
+import { bodyLimit } from "hono/body-limit";
 import { and, eq, isNull } from "drizzle-orm";
 import type { AppVariables } from "../../lib/context";
 import { db } from "../../db/client";
@@ -15,6 +16,7 @@ import { storage, buildObjectKey } from "../../lib/storage";
 import { writeAudit } from "../../lib/audit";
 import { formSchema, isFileField } from "../../lib/form-schema";
 import { isWithinWindow } from "../../lib/time";
+import { bytesMatchDeclaredType } from "../../lib/file-type";
 
 const router = new Hono<{ Variables: AppVariables }>();
 
@@ -25,6 +27,9 @@ const ALLOWED: Record<string, string[]> = {
   "image/png": [".png"],
 };
 const MAX_BYTES = 5 * 1024 * 1024; // 5MB default
+// bodyLimit cap sits slightly above MAX_BYTES so a max-size file + multipart framing still passes.
+// It bounds RAM by rejecting oversized bodies DURING read, before parseBody/arrayBuffer fully buffer them.
+const UPLOAD_BODY_LIMIT = MAX_BYTES + 64 * 1024; // +64KB multipart overhead margin
 
 function extOf(filename: string): string {
   const i = filename.lastIndexOf(".");
@@ -32,7 +37,17 @@ function extOf(filename: string): string {
 }
 
 // POST /registrations/:registrationId/files — multipart upload (owner student or admin).
-router.post("/registrations/:registrationId/files", requireAuth, async (c) => {
+// bodyLimit first: caps RAM by killing oversized bodies during read, before parseBody/arrayBuffer buffer them.
+router.post(
+  "/registrations/:registrationId/files",
+  bodyLimit({
+    maxSize: UPLOAD_BODY_LIMIT,
+    // Match the post-buffer check's error code (file_too_large); 413 for the early read-time reject.
+    onError: (c) =>
+      c.json({ error: "file_too_large", message: "File exceeds 5MB limit" }, 413),
+  }),
+  requireAuth,
+  async (c) => {
   const user = c.get("user");
   const registrationId = c.req.param("registrationId");
   const meta = requestMeta(c);
@@ -107,6 +122,12 @@ router.post("/registrations/:registrationId/files", requireAuth, async (c) => {
     throw badRequest("file_too_large", "File exceeds 5MB limit");
   }
 
+  // Magic-byte verification: the client Content-Type/extension above is just a cheap pre-filter.
+  // Reject if the actual bytes don't match the declared (allow-listed) type — no spoofed labels.
+  if (!bytesMatchDeclaredType(buffer, mime)) {
+    throw badRequest("invalid_file_content", "File content does not match its declared type");
+  }
+
   const checksum = sha256Hex(buffer);
   const objectKey = buildObjectKey(registrationId, fieldKey, filename);
   await storage.put(objectKey, buffer);
@@ -115,6 +136,11 @@ router.post("/registrations/:registrationId/files", requireAuth, async (c) => {
   const replaceReason = user.role === "admin" ? "replaced_by_admin" : "replaced_by_user";
 
   const inserted = await db.transaction(async (tx) => {
+    // Lock the registration row so two concurrent uploads for the same field serialize:
+    // the second waits, sees the first's soft-delete, and won't create a 2nd live row.
+    // Backstop is the partial unique index (one live row per registration+field).
+    await tx.select({ id: registrations.id }).from(registrations).where(eq(registrations.id, registrationId)).for("update");
+
     // Soft-delete any existing live file for the same (registration, field) — keep history.
     await tx
       .update(uploadedFiles)
@@ -174,7 +200,8 @@ router.post("/registrations/:registrationId/files", requireAuth, async (c) => {
     },
     201,
   );
-});
+  },
+);
 
 // GET /files/:fileId/download — authorize (student=own, admin=all, staff=none), stream from private storage.
 router.get("/files/:fileId/download", requireAuth, async (c) => {
@@ -209,7 +236,10 @@ router.get("/files/:fileId/download", requireAuth, async (c) => {
   }
 
   const nodeStream = storage.getStream(file.storedObjectKey);
-  c.header("Content-Type", file.mimeType);
+  // Serve only an allow-listed Content-Type. New uploads are magic-byte verified, but map
+  // through the allow-list anyway so legacy/pre-fix rows can't echo an attacker-chosen type.
+  const safeContentType = ALLOWED[file.mimeType] ? file.mimeType : "application/octet-stream";
+  c.header("Content-Type", safeContentType);
   c.header(
     "Content-Disposition",
     `attachment; filename="${file.originalFilename.replace(/"/g, "")}"`,

@@ -47,6 +47,8 @@ export async function getOrCreateConnectToken(
     }
 
     const plaintext = generateToken();
+    // First-create race: two concurrent first loads both insert → partial index 23505 → 500.
+    // onConflictDoNothing on the one-active predicate makes the loser insert no-op; we then reuse.
     const [row] = await tx
       .insert(userConnectTokens)
       .values({
@@ -54,9 +56,23 @@ export async function getOrCreateConnectToken(
         tokenHash: hashToken(plaintext), // connect-scan lookup
         tokenEnc: encryptSecret(plaintext), // owner re-display only
       })
+      .onConflictDoNothing({
+        target: userConnectTokens.userId,
+        where: sql`status = 'active'`, // must match user_connect_one_active_uq predicate
+      })
       .returning();
-    if (!row) throw new Error("getOrCreateConnectToken: insert returned no row");
-    return { token: row, plaintext };
+    if (row) return { token: row, plaintext };
+
+    // Lost the race: an active token now exists → reuse it (decrypt stored plaintext to re-display).
+    const [winner] = await tx
+      .select()
+      .from(userConnectTokens)
+      .where(
+        and(eq(userConnectTokens.userId, userId), eq(userConnectTokens.status, "active")),
+      )
+      .limit(1);
+    if (!winner) throw new Error("getOrCreateConnectToken: insert conflicted but no active token found");
+    return { token: winner, plaintext: decryptSecret(winner.tokenEnc) };
   });
 }
 
@@ -192,10 +208,10 @@ export async function connectPeer(args: {
       if (last) {
         const elapsedSec = (now.getTime() - last.createdAt.getTime()) / 1000;
         if (elapsedSec < settings.peerCooldownSec) {
+          // No connection recorded + no award on cooldown → withhold contact (no IG harvest via spam-scan).
           return {
             result: "connect_cooldown",
             pointsAwarded: 0,
-            profile,
             retryAfterSec: Math.ceil(settings.peerCooldownSec - elapsedSec),
           };
         }

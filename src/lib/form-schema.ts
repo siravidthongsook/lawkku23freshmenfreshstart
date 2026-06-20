@@ -63,7 +63,12 @@ export function validateAnswers(
 
   for (const f of schema.fields) {
     const raw = answers[f.key];
-    const missing = raw === undefined || raw === null || raw === "";
+    // Empty array counts as missing so required multi-selects (multiple_choice) can't be satisfied with zero selections.
+    const missing =
+      raw === undefined ||
+      raw === null ||
+      raw === "" ||
+      (Array.isArray(raw) && raw.length === 0);
 
     if (missing) {
       // Allow a missing required FILE field when the caller opts in (admin manual register).

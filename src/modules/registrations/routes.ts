@@ -292,7 +292,9 @@ router.post("/registrations/:registrationId/cancel", requireAuth, async (c) => {
   const meta = requestMeta(c);
 
   await db.transaction(async (tx) => {
-    const reg = await getRegistrationOrThrow(tx, registrationId);
+    // Lock the reg row: serialize concurrent status transitions on a FRESH status (see /status). The loser
+    // re-reads committed state, so the cancellable-status guard below correctly rejects a now-invalid move.
+    const reg = await getRegistrationOrThrow(tx, registrationId, { forUpdate: true });
     if (reg.userId !== user.id) throw forbidden();
     const event = await getEventOrThrow(tx, reg.eventId);
     if (!event.allowStudentCancelRegistration)
@@ -662,7 +664,9 @@ router.post(
     const meta = requestMeta(c);
 
     const out = await db.transaction(async (tx) => {
-      const reg = await getRegistrationOrThrow(tx, registrationId);
+      // Lock the reg row: serialize concurrent status transitions on a FRESH status (see /status). The loser
+      // re-reads committed state, so the waitlisted guard rejects a promote on an already-changed reg.
+      const reg = await getRegistrationOrThrow(tx, registrationId, { forUpdate: true });
       if (reg.status !== "waitlisted")
         throw badRequest("not_waitlisted", "Only waitlisted registrations can be promoted");
       await tx
@@ -705,7 +709,9 @@ router.post(
     const meta = requestMeta(c);
 
     await db.transaction(async (tx) => {
-      const reg = await getRegistrationOrThrow(tx, registrationId);
+      // Lock the reg row: serialize concurrent status transitions on a FRESH status (see /status). The loser
+      // re-reads committed state, so the registered guard rejects a demote on an already-changed reg.
+      const reg = await getRegistrationOrThrow(tx, registrationId, { forUpdate: true });
       if (reg.status !== "registered")
         throw badRequest("not_registered", "Only registered registrations can be demoted");
       await tx
