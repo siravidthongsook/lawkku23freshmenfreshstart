@@ -3,7 +3,7 @@
 // Check-in Staff landing: all check-in-capable events (global). Links each to its scanner.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { CalendarClock, MapPin, ScanLine, RefreshCw } from "lucide-react";
+import { CalendarClock, MapPin, ScanLine, LogOut, RefreshCw } from "lucide-react";
 import { apiGet, ApiError } from "@/lib/api";
 import { RequireRole } from "@/components/guards";
 import { AppShell } from "@/components/app-shell";
@@ -118,11 +118,19 @@ function EventsList() {
               </div>
             )}
 
-            <Button asChild className="mt-auto h-11 w-full text-base">
-              <Link href={`/staff/events/${e.id}/checkin`}>
-                <ScanLine className="size-5" /> เปิดเครื่องสแกน
-              </Link>
-            </Button>
+            {/* Two scanners per event: check-IN and check-OUT (§4.2). */}
+            <div className="mt-auto flex gap-2">
+              <Button asChild className="h-11 flex-1 text-base">
+                <Link href={`/staff/events/${e.id}/checkin`}>
+                  <ScanLine className="size-5" /> เช็คอิน
+                </Link>
+              </Button>
+              <Button asChild variant="outline" className="h-11 flex-1 text-base">
+                <Link href={`/staff/events/${e.id}/checkout`}>
+                  <LogOut className="size-5" /> เช็คเอาท์
+                </Link>
+              </Button>
+            </div>
           </CardContent>
         </Card>
       ))}

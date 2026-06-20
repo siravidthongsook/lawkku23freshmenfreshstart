@@ -102,7 +102,8 @@ export async function awardCheckinIn(
 // Award checkin_out points inside the caller's tx (scan OUT success path). Same guards as IN.
 export async function awardCheckinOut(
   tx: Tx,
-  args: { eventId: string; registrationId: string; studentUserId: string; studentRole: string; scannedByUserId: string; eventTitle?: string | null },
+  // scanMethod mirrors awardCheckinIn: qr_scan default, manual_search for the manual-checkout path.
+  args: { eventId: string; registrationId: string; studentUserId: string; studentRole: string; scannedByUserId: string; eventTitle?: string | null; scanMethod?: "qr_scan" | "manual_search" | "admin_override" },
 ): Promise<AwardOutcome> {
   if (args.studentRole !== "student") return { pointsAwarded: 0, skipped: "not_student" };
   const settings = await getPointSettings(tx);
@@ -121,7 +122,7 @@ export async function awardCheckinOut(
       reasonCode: "checkin_out",
       dedupeKey: epochKey("checkin_out", args.registrationId, k),
       createdByUserId: args.scannedByUserId,
-      metadata: { eventId: args.eventId, registrationId: args.registrationId, eventTitle: args.eventTitle ?? null, scanMethod: "qr_scan" },
+      metadata: { eventId: args.eventId, registrationId: args.registrationId, eventTitle: args.eventTitle ?? null, scanMethod: args.scanMethod ?? "qr_scan" },
     },
     tx,
   );
@@ -173,4 +174,21 @@ export async function reverseCheckinOnUndo(
   const inReversed = await reverseActiveAward(tx, { reason: "checkin_in", ...common });
   const outReversed = await reverseActiveAward(tx, { reason: "checkin_out", ...common });
   return { reversed: inReversed || outReversed };
+}
+
+// Reverse ONLY the checkin_out leg when a check-OUT is undone (manual undo-checkout). Unlike
+// reverseCheckinOnUndo, the check-in stays intact — we only clear the scan-out stamp + its points.
+// Idempotent; clean no-op when no active OUT award exists.
+export async function reverseCheckoutOnUndo(
+  tx: Tx,
+  args: { registrationId: string; studentUserId: string; undoneByUserId: string; reason: string },
+): Promise<{ reversed: boolean }> {
+  const reversed = await reverseActiveAward(tx, {
+    reason: "checkin_out",
+    registrationId: args.registrationId,
+    studentUserId: args.studentUserId,
+    undoneByUserId: args.undoneByUserId,
+    reason_: args.reason,
+  });
+  return { reversed };
 }

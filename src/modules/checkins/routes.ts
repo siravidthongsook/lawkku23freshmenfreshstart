@@ -14,7 +14,7 @@ import { writeAudit } from "../../lib/audit";
 import { checkinsTotal } from "../../lib/metrics";
 import { hashToken } from "../../lib/crypto";
 import { isWithinWindow, effectiveCheckinClose } from "../../lib/time";
-import { awardCheckinIn, awardCheckinOut, reverseCheckinOnUndo } from "../points/checkin-award";
+import { awardCheckinIn, awardCheckinOut, reverseCheckinOnUndo, reverseCheckoutOnUndo } from "../points/checkin-award";
 import { getEventPointConfig, getPointSettings, isCheckinOutEnabled, isPastCutoff, scanOutWindow, isScanOutOpen } from "../points/config-service";
 
 const router = new Hono<{ Variables: AppVariables }>();
@@ -23,15 +23,19 @@ const router = new Hono<{ Variables: AppVariables }>();
 const eventIdParam = z.object({ eventId: z.string().uuid() });
 const regIdParam = z.object({ registrationId: z.string().uuid() });
 // scan_type defaults to "in" so existing IN callers are unaffected; "out" runs the scan-out flow (§4.2).
+// dry_run = resolve-only preview: runs the full validation ladder but commits NOTHING, returning identity
+// + "ready" so the scanner can show a confirm dialog before the real (dry_run:false) commit scan.
 const scanBody = z.object({
   qr_token: z.string().min(1),
   scan_type: z.enum(["in", "out"]).default("in"),
+  dry_run: z.boolean().default(false),
 });
 const searchQuery = z.object({ q: z.string().min(1) });
 const reasonBody = z.object({ reason: z.string().min(1) });
 
 // Scan outcome codes — returned in body (HTTP 200) so the UI can branch. Never an exception.
 type ScanResult =
+  | "ready" // dry-run preview only: all checks pass, awaiting staff confirm (never a committed state)
   | "checked_in_success"
   | "already_checked_in"
   | "checked_out_success"
@@ -151,6 +155,7 @@ router.post(
     const { eventId } = eventIdParam.parse(c.req.param());
     const body = scanBody.parse(await c.req.json());
     const scanType = body.scan_type;
+    const dryRun = body.dry_run;
     const staff = c.get("user");
     const meta = requestMeta(c);
     const log = c.get("log");
@@ -164,6 +169,7 @@ router.post(
       registrationId?: string;
       fullName?: string | null;
       studentId?: string | null;
+      status?: string; // current reg status — surfaced on the "ready" preview so the confirm dialog shows it
       checkedInAt?: string | null;
       checkedOutAt?: string | null;
       originalCheckedInAt?: string | null;
@@ -232,6 +238,9 @@ router.post(
         const win = scanOutWindow(config, event, settings);
         if (!isScanOutOpen(win, now)) return { result: "scan_window_closed", ...who };
 
+        // All OUT checks pass — preview stops here (no mutation), real scan continues to commit.
+        if (dryRun) return { result: "ready", ...who, status: reg.status };
+
         await tx
           .update(registrations)
           .set({ checkedOutAt: now, checkedOutByUserId: staff.id, updatedAt: now })
@@ -290,6 +299,9 @@ router.post(
           checkedInBy,
         };
       }
+
+      // All IN checks pass — preview stops here (no mutation), real scan continues to commit.
+      if (dryRun) return { result: "ready", ...who, status: reg.status };
 
       // Success: registered → checked_in via QR scan.
       await tx
@@ -362,6 +374,7 @@ router.get(
         registrationId: registrations.id,
         status: registrations.status,
         checkedInAt: registrations.checkedInAt,
+        checkedOutAt: registrations.checkedOutAt,
         userId: users.id,
         studentId: users.studentId,
         fullName: users.fullName,
@@ -389,6 +402,7 @@ router.get(
         registrationId: r.registrationId,
         status: r.status,
         checkedInAt: r.checkedInAt?.toISOString() ?? null,
+        checkedOutAt: r.checkedOutAt?.toISOString() ?? null,
         studentId: r.studentId,
         fullName: r.fullName,
         faculty: r.faculty,
@@ -557,6 +571,152 @@ router.post(
           targetUserId: reg.userId,
           oldValue: { status: "checked_in" },
           newValue: { status: "registered", pointsReversed: rev.reversed },
+          reason,
+          ...meta,
+        },
+        tx,
+      );
+    });
+
+    return c.json({ ok: true });
+  },
+);
+
+// =====================================================================
+// MANUAL CHECK-OUT + UNDO  (§4.2 — mirrors manual check-in for the staff checkout surface)
+// =====================================================================
+
+// Manual check-out by registration id (after search). Same guard ladder as the QR scan-OUT path,
+// surfaced as thrown error codes (the manual UI toasts ApiError.message). scan_method = manual_search.
+router.post(
+  "/registrations/:registrationId/manual-checkout",
+  requireAuth,
+  requirePermission(canManualCheckin),
+  async (c) => {
+    const { registrationId } = regIdParam.parse(c.req.param());
+    const staff = c.get("user");
+    const meta = requestMeta(c);
+    const log = c.get("log");
+    log.set("action", "checkout.manual"); // WHAT — 5WH action marker
+    const now = new Date();
+
+    let pointsAwarded = 0; // surfaced so the UI can show "+N" like the QR path
+    await db.transaction(async (tx) => {
+      const [reg] = await tx
+        .select()
+        .from(registrations)
+        .where(eq(registrations.id, registrationId))
+        .for("update")
+        .limit(1);
+      if (!reg) throw notFound("Registration not found");
+
+      const [event] = await tx.select().from(events).where(eq(events.id, reg.eventId)).limit(1);
+      if (!event) throw notFound("Event not found");
+      if (event.status !== "published")
+        throw badRequest("event_not_published", "Event is not published");
+
+      // Registrant's role decides point eligibility (only students earn) — same as the QR path.
+      const [u] = await tx
+        .select({ role: users.role })
+        .from(users)
+        .where(eq(users.id, reg.userId))
+        .limit(1);
+      const studentRole = u?.role ?? "student";
+
+      // OUT requires an existing check-in, the toggle, an open window, and pre-cutoff (same as scan-OUT).
+      if (reg.status !== "checked_in") throw badRequest("not_checked_in", "Registration is not checked in");
+      if (reg.checkedOutAt) throw badRequest("already_checked_out", "Already checked out");
+      const settings = await getPointSettings(tx);
+      const config = await getEventPointConfig(reg.eventId, tx);
+      if (!isCheckinOutEnabled(config)) throw badRequest("checkout_disabled", "Check-out is not enabled for this event");
+      if (isPastCutoff(settings, now)) throw badRequest("points_closed", "Points are closed");
+      const win = scanOutWindow(config, event, settings);
+      if (!isScanOutOpen(win, now)) throw badRequest("scan_window_closed", "Check-out window is not open");
+
+      await tx
+        .update(registrations)
+        .set({ checkedOutAt: now, checkedOutByUserId: staff.id, updatedAt: now })
+        .where(eq(registrations.id, reg.id));
+
+      const award = await awardCheckinOut(tx, {
+        eventId: reg.eventId,
+        registrationId: reg.id,
+        studentUserId: reg.userId,
+        studentRole,
+        scannedByUserId: staff.id,
+        eventTitle: event.title,
+        scanMethod: "manual_search",
+      });
+      pointsAwarded = award.pointsAwarded;
+
+      await writeAudit(
+        {
+          actorUserId: staff.id,
+          actorRole: staff.role,
+          action: "manual_checkout",
+          entityType: "registration",
+          entityId: reg.id,
+          eventId: reg.eventId,
+          registrationId: reg.id,
+          targetUserId: reg.userId,
+          newValue: { checkedOut: true, method: "manual_search", pointsAwarded: award.pointsAwarded },
+          ...meta,
+        },
+        tx,
+      );
+    });
+
+    log.set("outcome", "checked_out_success");
+    return c.json({ result: "checked_out_success", checkedOutAt: now.toISOString(), pointsAwarded });
+  },
+);
+
+// Undo check-out (reason required). Clears ONLY the scan-out stamp + its points — the check-in stays.
+router.post(
+  "/registrations/:registrationId/undo-checkout",
+  requireAuth,
+  requirePermission(canManualCheckin),
+  async (c) => {
+    const { registrationId } = regIdParam.parse(c.req.param());
+    const { reason } = reasonBody.parse(await c.req.json());
+    const staff = c.get("user");
+    const meta = requestMeta(c);
+
+    await db.transaction(async (tx) => {
+      const [reg] = await tx
+        .select()
+        .from(registrations)
+        .where(eq(registrations.id, registrationId))
+        .for("update")
+        .limit(1);
+      if (!reg) throw notFound("Registration not found");
+      if (!reg.checkedOutAt) throw badRequest("not_checked_out", "Registration is not checked out");
+
+      await tx
+        .update(registrations)
+        .set({ checkedOutAt: null, checkedOutByUserId: null, updatedAt: new Date() })
+        .where(eq(registrations.id, reg.id));
+
+      // Reverse ONLY the checkin_out leg — the check-in (and its points) remain untouched.
+      const rev = await reverseCheckoutOnUndo(tx, {
+        registrationId: reg.id,
+        studentUserId: reg.userId,
+        undoneByUserId: staff.id,
+        reason,
+      });
+
+      await writeAudit(
+        {
+          actorUserId: staff.id,
+          actorRole: staff.role,
+          action: "manual_checkout_undo",
+          entityType: "registration",
+          entityId: reg.id,
+          eventId: reg.eventId,
+          registrationId: reg.id,
+          targetUserId: reg.userId,
+          oldValue: { checkedOut: true },
+          newValue: { checkedOut: false, pointsReversed: rev.reversed },
           reason,
           ...meta,
         },

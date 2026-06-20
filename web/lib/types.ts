@@ -112,6 +112,13 @@ export type UserListItem = {
 export type ScanResultCode =
   | "checked_in_success"
   | "already_checked_in"
+  // Scan-OUT outcomes (§4.2) — surfaced on the checkout scanner.
+  | "checked_out_success"
+  | "already_checked_out"
+  | "not_checked_in" // scan-out attempted before a check-in exists
+  | "scan_window_closed" // outside the scan-out window
+  | "points_closed" // past the leaderboard cutoff
+  | "checkout_disabled" // event's check-out toggle is off
   | "wrong_event"
   | "registration_cancelled"
   | "waitlisted_not_allowed"

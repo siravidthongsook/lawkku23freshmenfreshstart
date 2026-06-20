@@ -1,9 +1,9 @@
 "use client";
 
 // Renders the most recent scan outcome. Every ScanResultCode (+ network_error/processing) has an explicit
-// treatment. SAFETY: only `checked_in_success` is a success (green). Everything else is a denial/error/
-// pending — never green. The card remounts per scan (key={result.seq}) so back-to-back outcomes visibly
-// re-fire instead of looking like a stale previous result.
+// treatment. SAFETY: only `checked_in_success` / `checked_out_success` are a success (green). Everything
+// else is a denial/error/pending — never green. The card remounts per scan (key={result.seq}) so
+// back-to-back outcomes visibly re-fire instead of looking like a stale previous result.
 import { useEffect } from "react";
 import {
   CheckCircle2,
@@ -36,6 +36,21 @@ const PRESENTATION: Record<
     title: "เช็คอินไปแล้ว",
     hint: "ผู้เข้าร่วมรายนี้เช็คอินไปแล้ว",
   },
+  // Scan-OUT outcomes (§4.2).
+  checked_out_success: { tone: "success", title: "เช็คเอาท์สำเร็จ", hint: "ผู้เข้าร่วมเช็คเอาท์เรียบร้อยแล้ว" },
+  already_checked_out: {
+    tone: "warn",
+    title: "เช็คเอาท์ไปแล้ว",
+    hint: "ผู้เข้าร่วมรายนี้เช็คเอาท์ไปแล้ว",
+  },
+  not_checked_in: {
+    tone: "deny",
+    title: "ยังไม่ได้เช็คอิน",
+    hint: "ต้องเช็คอินก่อนจึงจะเช็คเอาท์ได้",
+  },
+  scan_window_closed: { tone: "info", title: "นอกช่วงเวลาเช็คเอาท์", hint: "ยังไม่ถึงหรือหมดช่วงเวลาเช็คเอาท์แล้ว" },
+  points_closed: { tone: "info", title: "ปิดรับแต้มแล้ว", hint: "เลยกำหนดเวลารับแต้มของกิจกรรมแล้ว" },
+  checkout_disabled: { tone: "deny", title: "ไม่ได้เปิดเช็คเอาท์", hint: "กิจกรรมนี้ไม่ได้เปิดให้เช็คเอาท์" },
   wrong_event: { tone: "deny", title: "ผิดกิจกรรม", hint: "บัตรนี้เป็นของกิจกรรมอื่น" },
   registration_cancelled: {
     tone: "deny",
@@ -126,8 +141,10 @@ export function ScanResultPanel({
   }
 
   const p = PRESENTATION[result.result];
-  const isSuccess = result.result === "checked_in_success";
-  const isAlready = result.result === "already_checked_in";
+  const isSuccess = result.result === "checked_in_success" || result.result === "checked_out_success";
+  const isAlready = result.result === "already_checked_in" || result.result === "already_checked_out";
+  // Direction-agnostic confirmation time: check-in stamps checkedInAt, check-out stamps checkedOutAt.
+  const successAt = result.checkedInAt ?? result.checkedOutAt ?? null;
   // Any reg-bearing outcome carries identity; show it so staff confirm WHO this scan was for.
   const hasIdentity = !!(result.fullName || result.studentId);
 
@@ -161,18 +178,25 @@ export function ScanResultPanel({
             <p className="mt-0.5 text-sm opacity-90">{p.hint}</p>
           )}
 
-          {/* Success: confirmation time. */}
-          {isSuccess && result.checkedInAt && (
-            <p className="mt-2 text-sm opacity-90">เวลา {formatBangkok(result.checkedInAt)}</p>
+          {/* Success: confirmation time (check-in or check-out). */}
+          {isSuccess && successAt && (
+            <p className="mt-2 text-sm opacity-90">เวลา {formatBangkok(successAt)}</p>
           )}
 
           {/* Already-checked-in: original time + who, so staff can tell a duplicate from a fresh check-in. */}
-          {isAlready && (result.originalCheckedInAt || result.checkedInBy) && (
+          {result.result === "already_checked_in" && (result.originalCheckedInAt || result.checkedInBy) && (
             <dl className="mt-2 space-y-0.5 text-sm">
               {result.originalCheckedInAt && (
                 <DetailRow label="เช็คอินเมื่อ" value={formatBangkok(result.originalCheckedInAt)} />
               )}
               {result.checkedInBy && <DetailRow label="โดย" value={result.checkedInBy} />}
+            </dl>
+          )}
+
+          {/* Already-checked-out: when it happened, so staff can tell a duplicate from a fresh check-out. */}
+          {result.result === "already_checked_out" && result.checkedOutAt && (
+            <dl className="mt-2 space-y-0.5 text-sm">
+              <DetailRow label="เช็คเอาท์เมื่อ" value={formatBangkok(result.checkedOutAt)} />
             </dl>
           )}
 

@@ -42,9 +42,18 @@ export type ScanResponse = {
   registrationId?: string;
   fullName?: string | null;
   studentId?: string | null;
+  status?: RegistrationStatus; // current reg status (on the "ready" preview, drives the confirm dialog)
   checkedInAt?: string | null;
+  checkedOutAt?: string | null;
   checkedInBy?: string | null;
   originalCheckedInAt?: string | null;
+  pointsAwarded?: number; // "+N" surfaced on success
+};
+
+// dry-run resolve response: same shape as ScanResponse but result may be "ready" (all checks pass,
+// awaiting staff confirm). "ready" never reaches ScanResultPanel — the page turns it into a confirm dialog.
+export type ScanPreviewResponse = Omit<ScanResponse, "result"> & {
+  result: ScanResultCode | "ready";
 };
 
 // Display wrapper: `seq` is a per-scan counter so the result card remounts (re-fires the pop animation)
@@ -65,6 +74,7 @@ export type CheckinSearchResult = {
   registrationId: string;
   status: RegistrationStatus;
   checkedInAt: string | null;
+  checkedOutAt: string | null;
   studentId: string | null;
   fullName: string;
   faculty: string | null;
@@ -75,3 +85,6 @@ export type CheckinSearchResponse = { results: CheckinSearchResult[] };
 
 // POST /api/registrations/:id/manual-checkin — returns authoritative server check-in time.
 export type ManualCheckinResponse = { result: "checked_in_success"; checkedInAt: string };
+
+// POST /api/registrations/:id/manual-checkout — returns authoritative server check-out time.
+export type ManualCheckoutResponse = { result: "checked_out_success"; checkedOutAt: string };
