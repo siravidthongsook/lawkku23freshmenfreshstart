@@ -27,7 +27,7 @@ function HistoryRow({ entry }: { entry: LedgerEntry }) {
         <CardContent className="flex items-center gap-3 py-3">
           <ReasonIcon reason={entry.reason_code} delta={entry.delta} />
           <div className="min-w-0 flex-1">
-            <p className="truncate font-medium">{pointReasonLabel(entry.reason_code)}</p>
+            <p className="truncate text-sm font-medium">{pointReasonLabel(entry.reason_code)}</p>
             <p className="text-xs text-muted-foreground">{formatBangkok(entry.created_at)}</p>
           </div>
           <DeltaPill delta={entry.delta} />
