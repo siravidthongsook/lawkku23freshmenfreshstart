@@ -1,16 +1,17 @@
 "use client";
 
-// Check-in Staff landing: all check-in-capable events (global). Links each to its scanner.
+// Attendance (เช็คชื่อ) staff landing: all check-in-capable events (global). Each links to its
+// check-IN and check-OUT scanners, with per-event in/out status badges.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { CalendarClock, MapPin, ScanLine, RefreshCw } from "lucide-react";
+import { CalendarClock, MapPin, ScanLine, LogOut, RefreshCw } from "lucide-react";
 import { apiGet, ApiError } from "@/lib/api";
 import { RequireRole } from "@/components/guards";
 import { AppShell } from "@/components/app-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { CheckinBadge, CheckoutBadge } from "@/components/staff/scan-status";
 import { ErrorState } from "@/components/ui/error-state";
 import { formatBangkok } from "@/lib/time";
 import type { StaffEventListItem, StaffEventListResponse } from "@/components/staff/types";
@@ -80,15 +81,11 @@ function EventsList() {
           <CardHeader className="pb-3">
             <div className="flex items-start justify-between gap-2">
               <CardTitle className="text-base leading-snug">{e.title}</CardTitle>
-              <Badge
-                className={
-                  e.checkinOpen
-                    ? "bg-green-100 text-green-800 border-transparent"
-                    : "bg-slate-200 text-slate-700 border-transparent"
-                }
-              >
-                {e.checkinOpen ? "เปิด" : "ปิด"}
-              </Badge>
+              {/* Two badges: check-in + check-out, each dynamic to the event's window settings. */}
+              <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                <CheckinBadge open={e.checkinOpen} />
+                <CheckoutBadge state={e.checkoutState ?? "disabled"} />
+              </div>
             </div>
           </CardHeader>
           <CardContent className="flex flex-1 flex-col gap-3 pt-0 text-sm">
@@ -118,11 +115,26 @@ function EventsList() {
               </div>
             )}
 
-            <Button asChild className="mt-auto h-11 w-full text-base">
-              <Link href={`/staff/events/${e.id}/checkin`}>
-                <ScanLine className="size-5" /> เปิดเครื่องสแกน
-              </Link>
-            </Button>
+            {/* Two scanners per event: check-IN and check-OUT (§4.2). */}
+            <div className="mt-auto flex gap-2">
+              <Button asChild className="h-11 flex-1 text-base">
+                <Link href={`/staff/events/${e.id}/checkin`}>
+                  <ScanLine className="size-5" /> เช็คอิน
+                </Link>
+              </Button>
+              {/* Disable check-out entirely when the event has no check-out configured. */}
+              {e.checkoutState === "disabled" ? (
+                <Button variant="outline" className="h-11 flex-1 text-base" disabled>
+                  <LogOut className="size-5" /> เช็คเอาท์
+                </Button>
+              ) : (
+                <Button asChild variant="outline" className="h-11 flex-1 text-base">
+                  <Link href={`/staff/events/${e.id}/checkout`}>
+                    <LogOut className="size-5" /> เช็คเอาท์
+                  </Link>
+                </Button>
+              )}
+            </div>
           </CardContent>
         </Card>
       ))}
@@ -135,7 +147,7 @@ function EventsList() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold">เช็คอิน</h1>
+        <h1 className="text-xl font-semibold">เช็คชื่อ</h1>
         {showRefresh && (
           <Button variant="outline" size="sm" onClick={() => void load()} disabled={refreshing}>
             <RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />

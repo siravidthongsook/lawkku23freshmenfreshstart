@@ -87,9 +87,11 @@ export type RegistrationListItem = {
   registeredAt: string | null;
   waitlistedAt: string | null;
   checkedInAt: string | null;
+  checkedOutAt: string | null;
   cancelledAt: string | null;
   checkinMethod: string | null;
   checkedInBy: string | null; // full name of staff/admin who checked them in
+  checkedOutBy: string | null; // full name of staff/admin who checked them out
   formVersion: number | null; // human-friendly version number
 };
 
@@ -109,9 +111,20 @@ export type UserListItem = {
 };
 
 // Scan result codes — see docs/02 §Check-in. UI maps each to a success/deny/error treatment.
+// Per-event check-OUT availability for staff UI badges. "disabled" = toggle off OR no resolvable
+// scan-out window (event has no check-out). before/open/closed = window timing relative to now.
+export type CheckoutState = "disabled" | "before" | "open" | "closed";
+
 export type ScanResultCode =
   | "checked_in_success"
   | "already_checked_in"
+  // Scan-OUT outcomes (§4.2) — surfaced on the checkout scanner.
+  | "checked_out_success"
+  | "already_checked_out"
+  | "not_checked_in" // scan-out attempted before a check-in exists
+  | "scan_window_closed" // outside the scan-out window
+  | "points_closed" // past the leaderboard cutoff
+  | "checkout_disabled" // event's check-out toggle is off
   | "wrong_event"
   | "registration_cancelled"
   | "waitlisted_not_allowed"

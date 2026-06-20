@@ -189,6 +189,9 @@ const AUDIT_ACTION: Record<string, string> = {
   qr_scan_checkin: "เช็คอินด้วยการสแกน QR",
   manual_checkin: "เช็คอินด้วยตนเอง",
   manual_checkin_undo: "ยกเลิกการเช็คอินด้วยตนเอง",
+  qr_scan_checkout: "เช็คเอาท์ด้วยการสแกน QR",
+  manual_checkout: "เช็คเอาท์ด้วยตนเอง",
+  manual_checkout_undo: "ยกเลิกการเช็คเอาท์ด้วยตนเอง",
   qr_regenerated: "สร้าง QR ใหม่",
   qr_revoked: "เพิกถอน QR",
   // files
