@@ -535,19 +535,17 @@ describe("uploads: edge cases", () => {
 });
 
 // ---------------------------------------------------------------------------
-// SECURITY NOTE (no magic-byte sniffing): the route trusts the multipart
-// Content-Type (file.type) + filename extension only — it does NOT inspect the
-// actual bytes. So a text/script payload renamed `x.png` and sent with
-// Content-Type image/png is ACCEPTED. This test documents that behavior.
+// SECURITY: magic-byte verification — the allow-list MIME+ext check is only a
+// pre-filter; the route also sniffs the actual bytes. A text/script payload
+// renamed `x.png` with Content-Type image/png is now REJECTED (invalid_file_content).
 // ---------------------------------------------------------------------------
-describe("uploads: content-type is trusted (NO magic-byte verification)", () => {
-  it("a non-image payload with spoofed image/png type + .png ext is ACCEPTED (documents missing magic-byte check)", async () => {
+describe("uploads: magic-byte verification (content must match declared type)", () => {
+  it("a non-image payload with spoofed image/png type + .png ext is REJECTED → 400 invalid_file_content", async () => {
     const { reg } = await makeUploadContext();
     const admin = await loginAs("admin");
     const spoof = Buffer.from("<script>alert(1)</script> not really a png");
     const res = await postUpload(reg.id, admin.cookie, uploadForm(spoof, "evil.png", "image/png"));
-    // Current code accepts it (allow-list is MIME+ext, not content). Flagged in report.
-    expect(res.status).toBe(201);
-    await liveFileRow(reg.id);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as Record<string, unknown>).error).toBe("invalid_file_content");
   });
 });

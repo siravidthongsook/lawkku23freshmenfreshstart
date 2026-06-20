@@ -10,6 +10,7 @@ import { badRequest, notFound } from "../../lib/errors";
 import { canManageEvents } from "../../lib/permissions";
 import { writeAudit } from "../../lib/audit";
 import { storage, buildEventPosterKey } from "../../lib/storage";
+import { bytesMatchDeclaredType } from "../../lib/file-type";
 import {
   computeEventStatus,
   countRegistrationsByStatusForEvents,
@@ -433,6 +434,12 @@ router.post(
   const buffer = Buffer.from(await file.arrayBuffer());
   if (buffer.byteLength === 0) throw badRequest("empty_file", "File is empty");
   if (buffer.byteLength > POSTER_MAX_BYTES) throw badRequest("file_too_large", "File exceeds 5MB limit");
+
+  // Magic-byte verification — the MIME/extension check above is just a cheap pre-filter.
+  // Reject if the actual bytes don't match the declared (allow-listed) image type.
+  if (!bytesMatchDeclaredType(buffer, mime)) {
+    throw badRequest("invalid_file_content", "File content does not match its declared type");
+  }
 
   const objectKey = buildEventPosterKey(eventId, filename);
   await storage.put(objectKey, buffer);

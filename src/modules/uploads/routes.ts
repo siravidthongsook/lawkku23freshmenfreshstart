@@ -16,6 +16,7 @@ import { storage, buildObjectKey } from "../../lib/storage";
 import { writeAudit } from "../../lib/audit";
 import { formSchema, isFileField } from "../../lib/form-schema";
 import { isWithinWindow } from "../../lib/time";
+import { bytesMatchDeclaredType } from "../../lib/file-type";
 
 const router = new Hono<{ Variables: AppVariables }>();
 
@@ -121,6 +122,12 @@ router.post(
     throw badRequest("file_too_large", "File exceeds 5MB limit");
   }
 
+  // Magic-byte verification: the client Content-Type/extension above is just a cheap pre-filter.
+  // Reject if the actual bytes don't match the declared (allow-listed) type — no spoofed labels.
+  if (!bytesMatchDeclaredType(buffer, mime)) {
+    throw badRequest("invalid_file_content", "File content does not match its declared type");
+  }
+
   const checksum = sha256Hex(buffer);
   const objectKey = buildObjectKey(registrationId, fieldKey, filename);
   await storage.put(objectKey, buffer);
@@ -129,6 +136,11 @@ router.post(
   const replaceReason = user.role === "admin" ? "replaced_by_admin" : "replaced_by_user";
 
   const inserted = await db.transaction(async (tx) => {
+    // Lock the registration row so two concurrent uploads for the same field serialize:
+    // the second waits, sees the first's soft-delete, and won't create a 2nd live row.
+    // Backstop is the partial unique index (one live row per registration+field).
+    await tx.select({ id: registrations.id }).from(registrations).where(eq(registrations.id, registrationId)).for("update");
+
     // Soft-delete any existing live file for the same (registration, field) — keep history.
     await tx
       .update(uploadedFiles)
@@ -224,7 +236,10 @@ router.get("/files/:fileId/download", requireAuth, async (c) => {
   }
 
   const nodeStream = storage.getStream(file.storedObjectKey);
-  c.header("Content-Type", file.mimeType);
+  // Serve only an allow-listed Content-Type. New uploads are magic-byte verified, but map
+  // through the allow-list anyway so legacy/pre-fix rows can't echo an attacker-chosen type.
+  const safeContentType = ALLOWED[file.mimeType] ? file.mimeType : "application/octet-stream";
+  c.header("Content-Type", safeContentType);
   c.header(
     "Content-Disposition",
     `attachment; filename="${file.originalFilename.replace(/"/g, "")}"`,
