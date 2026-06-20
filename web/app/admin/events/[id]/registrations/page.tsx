@@ -20,6 +20,7 @@ import { regStatusLabel } from "@/lib/labels";
 import { FormFieldInput } from "@/components/student/form-fields";
 import { formatBangkok } from "@/lib/time";
 import { RegistrationStatusBadge } from "@/components/badges";
+import { Badge } from "@/components/ui/badge";
 import { UserPicker } from "@/components/admin-tools/user-picker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -209,6 +210,8 @@ export default function EventRegistrationsPage({ params }: { params: Promise<{ i
                   <TableHead>ลงทะเบียน</TableHead>
                   <TableHead>เช็คอินแล้ว</TableHead>
                   <TableHead>เช็คอินโดย</TableHead>
+                  <TableHead>เช็คเอาท์แล้ว</TableHead>
+                  <TableHead>เช็คเอาท์โดย</TableHead>
                   <TableHead>เวอร์ชันฟอร์ม</TableHead>
                   <TableHead className="text-right">การกระทำ</TableHead>
                 </TableRow>
@@ -221,7 +224,15 @@ export default function EventRegistrationsPage({ params }: { params: Promise<{ i
                     <TableCell>{r.faculty ?? "—"}</TableCell>
                     <TableCell>{r.department ?? "—"}</TableCell>
                     <TableCell>
-                      <RegistrationStatusBadge status={r.status} />
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <RegistrationStatusBadge status={r.status} />
+                        {/* Check-out is a stamp, not a status — surface it as an extra badge. */}
+                        {r.checkedOutAt && (
+                          <Badge className="bg-slate-200 text-slate-700 border-transparent">
+                            เช็คเอาท์แล้ว
+                          </Badge>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {formatBangkok(r.registeredAt) || "—"}
@@ -231,6 +242,12 @@ export default function EventRegistrationsPage({ params }: { params: Promise<{ i
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {r.checkedInBy ?? "—"}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {formatBangkok(r.checkedOutAt) || "—"}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {r.checkedOutBy ?? "—"}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {r.formVersion != null ? `v${r.formVersion}` : "—"}

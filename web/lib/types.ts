@@ -87,9 +87,11 @@ export type RegistrationListItem = {
   registeredAt: string | null;
   waitlistedAt: string | null;
   checkedInAt: string | null;
+  checkedOutAt: string | null;
   cancelledAt: string | null;
   checkinMethod: string | null;
   checkedInBy: string | null; // full name of staff/admin who checked them in
+  checkedOutBy: string | null; // full name of staff/admin who checked them out
   formVersion: number | null; // human-friendly version number
 };
 

@@ -226,6 +226,7 @@ export type AdminRegistrationRow = ReturnType<typeof serializeRegistration> &
   RegistrationIdentity & {
     eventId: string;
     checkedInBy: string | null; // full name of the staff/admin who checked them in
+    checkedOutBy: string | null; // full name of the staff/admin who checked them out
     formVersion: number | null; // human-friendly version number, not the version UUID
   };
 
@@ -236,6 +237,7 @@ export async function listEventRegistrationsForAdmin(
   params: AdminRegistrationListParams,
 ): Promise<{ rows: AdminRegistrationRow[]; total: number }> {
   const checkedInByUser = alias(users, "checked_in_by_user");
+  const checkedOutByUser = alias(users, "checked_out_by_user");
 
   const conds: SQL[] = [eq(registrations.eventId, eventId)];
   if (params.status) conds.push(eq(registrations.status, params.status));
@@ -266,11 +268,13 @@ export async function listEventRegistrationsForAdmin(
       faculty: users.faculty,
       department: users.department,
       checkedInByName: checkedInByUser.fullName,
+      checkedOutByName: checkedOutByUser.fullName,
       formVersion: eventFormVersions.versionNumber,
     })
     .from(registrations)
     .innerJoin(users, eq(users.id, registrations.userId))
     .leftJoin(checkedInByUser, eq(checkedInByUser.id, registrations.checkedInByUserId))
+    .leftJoin(checkedOutByUser, eq(checkedOutByUser.id, registrations.checkedOutByUserId))
     .leftJoin(eventFormVersions, eq(eventFormVersions.id, registrations.formVersionId))
     .where(where)
     .orderBy(desc(registrations.createdAt))
@@ -286,6 +290,7 @@ export async function listEventRegistrationsForAdmin(
       faculty: r.faculty,
       department: r.department,
       checkedInBy: r.checkedInByName ?? null,
+      checkedOutBy: r.checkedOutByName ?? null,
       formVersion: r.formVersion ?? null,
     })),
     total,
