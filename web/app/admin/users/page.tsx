@@ -210,7 +210,7 @@ export default function UsersPage() {
                 id="q"
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="อีเมล รหัสนักศึกษา หรือชื่อ"
+                placeholder="อีเมล รหัสนักศึกษา ชื่อผู้ใช้ หรือชื่อ"
               />
             </div>
             <div className="space-y-1.5">

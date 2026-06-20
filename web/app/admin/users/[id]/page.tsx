@@ -53,6 +53,7 @@ export default function UserDetailPage() {
   const [form, setForm] = useState({
     email: "",
     student_id: "",
+    username: "", // staff login id (e.g. staff-01); blank for students/admins
     full_name: "",
     faculty: "",
     department: "",
@@ -91,6 +92,7 @@ export default function UserDetailPage() {
       setForm({
         email: res.user.email ?? "",
         student_id: res.user.student_id ?? "",
+        username: res.user.username ?? "",
         full_name: res.user.full_name ?? "",
         faculty: res.user.faculty ?? "",
         department: res.user.department ?? "",
@@ -123,6 +125,8 @@ export default function UserDetailPage() {
     const optional: [keyof typeof form, string | null][] = [
       ["email", user.email],
       ["student_id", user.student_id],
+      ["username", user.username], // staff login id — blank clears to null
+
       ["faculty", user.faculty],
       ["department", user.department],
       ["phone", user.phone],
@@ -371,6 +375,16 @@ export default function UserDetailPage() {
                 id="sid"
                 value={form.student_id}
                 onChange={(e) => setField("student_id", e.target.value)}
+              />
+            </div>
+            {/* Username — staff login id (e.g. staff-01). Blank for students/admins. */}
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="username">ชื่อผู้ใช้ (สำหรับเจ้าหน้าที่)</Label>
+              <Input
+                id="username"
+                value={form.username}
+                onChange={(e) => setField("username", e.target.value)}
+                placeholder="เช่น staff-01"
               />
             </div>
             <div className="space-y-1.5 sm:col-span-2">

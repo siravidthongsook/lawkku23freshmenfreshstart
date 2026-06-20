@@ -47,7 +47,14 @@ router.get("/admin/users", zValidator("query", listUsersQuery), async (c) => {
   if (claimed === "yes") conds.push(isNotNull(users.passwordHash));
   if (q) {
     const pat = `%${q}%`;
-    conds.push(or(ilike(users.email, pat), ilike(users.studentId, pat), ilike(users.fullName, pat)));
+    conds.push(
+      or(
+        ilike(users.email, pat),
+        ilike(users.studentId, pat),
+        ilike(users.username, pat), // staff login id searchable too
+        ilike(users.fullName, pat),
+      ),
+    );
   }
   const where = conds.length ? and(...conds) : undefined;
 
@@ -237,11 +244,14 @@ router.patch("/admin/users/:userId", zValidator("json", updateUserSchema), async
   if (body.email && body.email !== target.email) await assertEmailFree(body.email, target.id);
   if (body.student_id && body.student_id !== target.studentId)
     await assertStudentIdFree(body.student_id, target.id);
+  if (body.username && body.username !== target.username)
+    await assertUsernameFree(body.username, target.id);
 
   // Build patch from provided keys only (null clears nullable fields).
   const patch: Partial<typeof users.$inferInsert> = { updatedAt: new Date() };
   if (body.email !== undefined) patch.email = body.email;
   if (body.student_id !== undefined) patch.studentId = body.student_id;
+  if (body.username !== undefined) patch.username = body.username; // staff login id
   if (body.full_name !== undefined) patch.fullName = body.full_name;
   if (body.faculty !== undefined) patch.faculty = body.faculty;
   if (body.department !== undefined) patch.department = body.department;
@@ -527,10 +537,25 @@ async function assertStudentIdFree(studentId: string, excludeId: string | null):
   if (hit) throw conflict("student_id_taken", "Student ID already in use");
 }
 
+// Unique-username guard. excludeId lets PATCH ignore the row being edited.
+async function assertUsernameFree(username: string, excludeId: string | null): Promise<void> {
+  const [hit] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(
+      excludeId
+        ? and(eq(users.username, username), ne(users.id, excludeId))
+        : eq(users.username, username),
+    )
+    .limit(1);
+  if (hit) throw conflict("username_taken", "Username already in use");
+}
+
 function profileSnapshot(u: User) {
   return {
     email: u.email,
     student_id: u.studentId,
+    username: u.username,
     full_name: u.fullName,
     faculty: u.faculty,
     department: u.department,
@@ -544,6 +569,7 @@ function publicUser(u: User) {
     id: u.id,
     email: u.email,
     student_id: u.studentId,
+    username: u.username, // staff login id
     role: u.role,
     full_name: u.fullName,
     faculty: u.faculty,

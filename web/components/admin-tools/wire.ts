@@ -11,6 +11,7 @@ export type UserWire = {
   id: string;
   email: string | null; // claim users have none
   student_id: string | null;
+  username: string | null; // staff login id (e.g. staff-01); null for students/admins
   role: Role;
   full_name: string;
   faculty: string | null;

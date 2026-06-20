@@ -8,7 +8,7 @@ const userSortEnum = z.enum(["created_at", "last_active_at", "full_name", "stude
 
 // List/search filter for GET /admin/users. limit/offset paginate like audit-logs.
 export const listUsersQuery = z.object({
-  q: z.string().trim().min(1).optional(), // matches email / student_id / full_name
+  q: z.string().trim().min(1).optional(), // matches email / student_id / username / full_name
   role: roleEnum.optional(),
   status: statusEnum.optional(),
   // Claim filter: "yes" = password set, "no" = not yet claimed (passwordHash NULL). Omit = all.
@@ -65,6 +65,12 @@ export const updateUserSchema = z
       z.string().trim().toLowerCase().email().nullable().optional(),
     ),
     student_id: z.string().trim().min(1).nullable().optional(),
+    // Staff login id (e.g. staff-01); blank string -> null (clears). Stays unique like email/student_id.
+    // Lowercased to match the seed (staff-NN) so admin edits never silently break exact-match login.
+    username: z.preprocess(
+      (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+      z.string().trim().toLowerCase().min(1).nullable().optional(),
+    ),
     full_name: z.string().trim().min(1).optional(),
     faculty: z.string().trim().nullable().optional(),
     department: z.string().trim().nullable().optional(),
