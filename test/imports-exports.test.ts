@@ -213,6 +213,40 @@ describe("user import: confirm (commit)", () => {
     expect(regs[0]?.registeredAt).toBeInstanceOf(Date);
   });
 
+  it("BUG B: confirm is bound to the PREVIEWED batch — body scope/targetEventId cannot escalate", async () => {
+    // Preview as user_pool_only (no capacity analysis). Then try to confirm with a body that
+    // escalates to register-to-event B. Confirm must derive scope/event from the batch and ignore
+    // the body → NO registration is created (preview-bypass is impossible).
+    const { cookie, user: admin } = await loginAs("admin");
+    const eventB = await makeEvent({ createdByAdminId: admin.id });
+    const csv = ["email,full_name", "escalate@b.test,Escalate Me"].join("\n");
+    const prev = await previewCsv(csv, cookie); // scope defaults to user_pool_only
+    const { importId } = (await prev.json()) as { importId: string };
+
+    const confirm = await request("/admin/imports/users/confirm", {
+      method: "POST",
+      cookie,
+      // Malicious body attempting to register to an event the preview never analyzed.
+      body: {
+        importId,
+        scope: "user_pool_and_register_to_event",
+        targetEventId: eventB.id,
+      },
+    });
+    expect(confirm.status).toBe(200);
+    const result = (await confirm.json()) as { created: number; registered: number };
+    expect(result.created).toBe(1);
+    expect(result.registered).toBe(0); // body scope IGNORED — user_pool_only honored
+
+    // No registration row was created in event B.
+    const [u] = await db.select().from(users).where(eq(users.email, "escalate@b.test"));
+    const regs = await db
+      .select()
+      .from(registrations)
+      .where(and(eq(registrations.eventId, eventB.id), eq(registrations.userId, u!.id)));
+    expect(regs.length).toBe(0);
+  });
+
   it("rejects confirm when batch is not in previewed state (double confirm)", async () => {
     const { cookie } = await loginAs("admin");
     const csv = ["email,full_name", "dbl@b.test,Double"].join("\n");
@@ -276,11 +310,11 @@ describe("user import: result endpoint (GET /admin/imports/:id/result)", () => {
     expect(bad?.note).toBeTruthy(); // reason surfaced
   });
 
-  it("CONFIRMED result CSV lists created rows with temp password (per-row outcome)", async () => {
-    // FINDING: after confirm, the endpoint reads summary.result, which only holds
-    // created/updated/skipped_not_found rows. Invalid/duplicate rows are NOT carried
-    // into the confirmed result CSV (they're only in the preview result). Documenting
-    // actual behavior — counts in result_summary still tally invalid via preview.
+  it("CONFIRMED result CSV lists created rows; temp_password column ABSENT by default (no leak)", async () => {
+    // SECURITY (BUG A fix): the default result download NEVER carries plaintext temp passwords.
+    // The temp_password column is omitted entirely unless the caller opts in (see next test).
+    // After confirm, the endpoint reads summary.result, which only holds created/updated/
+    // skipped_not_found rows. Invalid/duplicate rows are NOT carried into the confirmed result CSV.
     const { cookie } = await loginAs("admin");
     const csv = [
       "email,full_name,student_id",
@@ -292,21 +326,79 @@ describe("user import: result endpoint (GET /admin/imports/:id/result)", () => {
     await request("/admin/imports/users/confirm", {
       method: "POST",
       cookie,
-      body: { importId, scope: "user_pool_only" },
+      body: { importId },
     });
 
     const res = await request(`/admin/imports/${importId}/result`, { cookie });
     expect(res.status).toBe(200);
-    const rows = parseCsv(await res.text());
+    const text = await res.text();
+    const header = text.split(/\r?\n/)[0] ?? "";
+    // Default download carries NO temp_password column → plaintext can never leak.
+    expect(header).not.toContain("temp_password");
+    const rows = parseCsv(text);
 
     // Only the created row is present in the confirmed-result CSV.
     expect(rows.length).toBe(1);
     const ok = rows.find((r) => r.email === "okrow@b.test");
     expect(ok?.status).toBe("will_create");
     expect(ok?.result).toBe("created");
-    expect(ok?.temp_password).toBeTruthy(); // created rows carry temp pw (admin-only download)
-    // The invalid row is absent here (see FINDING above), but its count survives in result_summary.
+    expect(ok?.temp_password).toBeUndefined(); // column absent in the default (non-opt-in) download
+    // The invalid row is absent here, but its count survives in result_summary.
     expect(rows.find((r) => r.email === "badrow")).toBeUndefined();
+  });
+
+  it("CONFIRMED result reveals temp_password ONLY with opt-in + reason (mirrors users-export reveal)", async () => {
+    // SECURITY (BUG A fix): plaintext temp pw is decrypted on demand from the encrypted store,
+    // requires include_temp_password=true AND a reason, and is audited (import_result_revealed).
+    const { cookie } = await loginAs("admin");
+    const csv = ["email,full_name,student_id", "reveal@b.test,Reveal Me,rv001"].join("\n");
+    const prev = await previewCsv(csv, cookie);
+    const { importId } = (await prev.json()) as { importId: string };
+    await request("/admin/imports/users/confirm", {
+      method: "POST",
+      cookie,
+      body: { importId },
+    });
+
+    // Opt-in WITHOUT reason → 400 reason_required (guard fires before any CSV/audit).
+    const noReason = await request(
+      `/admin/imports/${importId}/result?include_temp_password=true`,
+      { cookie },
+    );
+    expect(noReason.status).toBe(400);
+    expect(((await noReason.json()) as { error: string }).error).toBe("reason_required");
+
+    // Opt-in WITH reason → temp_password column present + a non-empty value for the created row.
+    const revealed = await request(
+      `/admin/imports/${importId}/result?include_temp_password=true&reason=handover%20to%20student`,
+      { cookie },
+    );
+    expect(revealed.status).toBe(200);
+    const text = await revealed.text();
+    expect(text.split(/\r?\n/)[0]).toContain("temp_password");
+    const rows = parseCsv(text);
+    const me = rows.find((r) => r.email === "reveal@b.test");
+    expect(me?.temp_password).toBeTruthy(); // decrypted on demand from encrypted store
+  });
+
+  it("CONFIRMED result_summary NEVER persists plaintext temp passwords (encrypted store is truth)", async () => {
+    // SECURITY (BUG A fix): result_summary.result rows carry only userId, never the plaintext secret.
+    const { cookie } = await loginAs("admin");
+    const csv = ["email,full_name,student_id", "noplain@b.test,No Plain,np001"].join("\n");
+    const prev = await previewCsv(csv, cookie);
+    const { importId } = (await prev.json()) as { importId: string };
+    await request("/admin/imports/users/confirm", {
+      method: "POST",
+      cookie,
+      body: { importId },
+    });
+
+    const [batch] = await db.select().from(userImports).where(eq(userImports.id, importId));
+    const stored = JSON.stringify(batch?.resultSummary ?? {});
+    // No tempPassword key persisted anywhere in the stored summary.
+    expect(stored).not.toContain("tempPassword");
+    const summary = batch?.resultSummary as { result?: { userId?: string }[] };
+    expect(summary.result?.[0]?.userId).toBeTruthy(); // userId stored for on-demand decrypt
   });
 
   it("returns 404 for an unknown import id", async () => {
