@@ -27,7 +27,7 @@ export const pointLedger = pgTable(
     reasonCode: pointReason("reason_code").notNull(),
     // self-ref → the entry this one reverses (correction_reverse only); nullable.
     reversalOfLedgerId: uuid("reversal_of_ledger_id"),
-    // idempotency key (e.g. "checkin_in:<regId>"); nullable when not deduped.
+    // idempotency key (e.g. "checkin_in:<regId>:v<epoch>"); nullable when not deduped.
     dedupeKey: text("dedupe_key"),
     metadata: jsonb("metadata"), // snapshot at award time; never store secrets/tokens/hashes
     createdByUserId: uuid("created_by_user_id").references(() => users.id), // null = system

@@ -257,6 +257,88 @@ describe("points: manual check-in awards checkin_in like the QR scan path", () =
 });
 
 // =====================================================================
+// Admin status-change into checked_in awards checkin_in (default on, opt-out)
+// =====================================================================
+function adminStatus(
+  registrationId: string,
+  cookie: string,
+  body: { status: string; reason: string; awardPoints?: boolean },
+) {
+  return request(`/admin/registrations/${registrationId}/status`, { method: "POST", cookie, body });
+}
+
+describe("points: admin status-change into checked_in awards checkin_in by default", () => {
+  it("status → checked_in (default) awards 20, one checkin_in row, balance == SUM(delta)", async () => {
+    const event = await makeCheckinEvent();
+    const { registrationId, userId } = await registerStudent(event);
+    const admin = await loginAs("admin");
+
+    const res = await adminStatus(registrationId, admin.cookie, {
+      status: "checked_in",
+      reason: "manual entry",
+    });
+    expect(res.status).toBe(200);
+    expect((await getReg(registrationId))!.status).toBe("checked_in");
+    expect(await balanceOf(userId)).toBe(20);
+    expect(await ledgerSum(userId)).toBe(20);
+    const ins = await db.select().from(pointLedger).where(eq(pointLedger.reasonCode, "checkin_in"));
+    expect(ins.length).toBe(1);
+    expect(ins[0]!.dedupeKey).toBe(`checkin_in:${registrationId}:v0`);
+  });
+
+  it("status → checked_in with awardPoints:false → checks in but awards 0", async () => {
+    const event = await makeCheckinEvent();
+    const { registrationId, userId } = await registerStudent(event);
+    const admin = await loginAs("admin");
+
+    const res = await adminStatus(registrationId, admin.cookie, {
+      status: "checked_in",
+      reason: "correction, no credit",
+      awardPoints: false,
+    });
+    expect(res.status).toBe(200);
+    expect((await getReg(registrationId))!.status).toBe("checked_in");
+    expect(await balanceOf(userId)).toBe(0);
+    expect(await ledgerSum(userId)).toBe(0);
+  });
+
+  it("leaving checked_in reverses the awarded points symmetrically → balance 0", async () => {
+    const event = await makeCheckinEvent();
+    const { registrationId, userId } = await registerStudent(event);
+    const admin = await loginAs("admin");
+
+    await adminStatus(registrationId, admin.cookie, { status: "checked_in", reason: "in" }); // +20
+    expect(await balanceOf(userId)).toBe(20);
+
+    const back = await adminStatus(registrationId, admin.cookie, {
+      status: "registered",
+      reason: "leaving checked_in",
+    });
+    expect(back.status).toBe(200);
+    expect(await balanceOf(userId)).toBe(0); // reversed
+    expect(await ledgerSum(userId)).toBe(0);
+    const reversals = await db
+      .select()
+      .from(pointLedger)
+      .where(eq(pointLedger.reasonCode, "correction_reverse"));
+    expect(reversals.length).toBe(1);
+
+    // Re-entering checked_in after the reverse re-awards via the next epoch (v1).
+    const again = await adminStatus(registrationId, admin.cookie, {
+      status: "checked_in",
+      reason: "redo",
+    });
+    expect(again.status).toBe(200);
+    expect(await balanceOf(userId)).toBe(20);
+    const ins = await db.select().from(pointLedger).where(eq(pointLedger.reasonCode, "checkin_in"));
+    expect(ins.map((r) => r.dedupeKey).sort()).toEqual([
+      `checkin_in:${registrationId}:v0`,
+      `checkin_in:${registrationId}:v1`,
+    ]);
+  });
+});
+
+// =====================================================================
 // Cutoff freeze
 // =====================================================================
 describe("points: cutoff freeze blocks earning", () => {
@@ -400,8 +482,17 @@ describe("points: undo-checkin reverses the awarded points (U6)", () => {
     expect(reversedIds).toContain(origIn.id);
     expect(reversedIds).toContain(origOut.id);
 
-    // Second undo cycle is a clean no-op: re-scan can't re-award (dedupeKeys burned), undo adds no reversals.
-    await scan(event.id, qrToken, staff.cookie); // re-IN → deduped
+    // Second cycle: re-scan IN after undo RE-AWARDS via a fresh epoch key (checkin_in:<reg>:v1).
+    // (OUT is not re-scanned here, so only the IN leg comes back: +20.)
+    const reIn = await scan(event.id, qrToken, staff.cookie); // re-IN → fresh +20
+    expect((await reIn.json()) as { result: string; pointsAwarded: number }).toMatchObject({
+      result: "checked_in_success",
+      pointsAwarded: 20,
+    });
+    expect(await balanceOf(userId)).toBe(20);
+    expect(await ledgerSum(userId)).toBe(20);
+
+    // Undo again reverses the fresh IN award (the active v1 epoch) → balance back to 0, 3rd reversal.
     await request(`/registrations/${registrationId}/undo-checkin`, {
       method: "POST",
       cookie: staff.cookie,
@@ -413,27 +504,28 @@ describe("points: undo-checkin reverses the awarded points (U6)", () => {
       .select()
       .from(pointLedger)
       .where(eq(pointLedger.reasonCode, "correction_reverse"));
-    expect(reversalsAfter.length).toBe(2); // still just two, no extra
+    expect(reversalsAfter.length).toBe(3); // two from the first undo + one for the re-awarded IN
   });
 
-  it("undo is idempotent on re-check-in/undo: a second undo cycle does not double-reverse", async () => {
+  it("re-check-in after undo RE-AWARDS via a fresh epoch key (bug fix); each undo reverses the active epoch", async () => {
     const event = await makeCheckinEvent();
     const { qrToken, registrationId, userId } = await registerStudent(event);
     const staff = await loginAs("checkin_staff");
-    await scan(event.id, qrToken, staff.cookie); // +20 (dedupeKey checkin_in:<reg>)
+    await scan(event.id, qrToken, staff.cookie); // +20 (dedupeKey checkin_in:<reg>:v0)
 
     await request(`/registrations/${registrationId}/undo-checkin`, {
       method: "POST",
       cookie: staff.cookie,
       body: { reason: "first undo" },
     });
-    expect(await balanceOf(userId)).toBe(0);
+    expect(await balanceOf(userId)).toBe(0); // v0 reversed
 
-    // Re-scan: dedupeKey already used → no new award (still 0).
-    await scan(event.id, qrToken, staff.cookie);
-    expect(await balanceOf(userId)).toBe(0);
+    // Re-scan after undo: v0 is reversed → epoch bumps to v1 → fresh +20 (the legit "redo" path).
+    const reIn = await scan(event.id, qrToken, staff.cookie);
+    expect((await reIn.json()) as { pointsAwarded: number }).toMatchObject({ pointsAwarded: 20 });
+    expect(await balanceOf(userId)).toBe(20);
 
-    // Second undo: original already reversed → no second reversal.
+    // Second undo: reverses the ACTIVE award (v1), not the already-reversed v0 → balance back to 0.
     await request(`/registrations/${registrationId}/undo-checkin`, {
       method: "POST",
       cookie: staff.cookie,
@@ -445,6 +537,94 @@ describe("points: undo-checkin reverses the awarded points (U6)", () => {
       .select()
       .from(pointLedger)
       .where(eq(pointLedger.reasonCode, "correction_reverse"));
-    expect(reversals.length).toBe(1); // still just one
+    expect(reversals.length).toBe(2); // one per epoch (v0, v1)
+    // Two distinct checkin_in awards exist (v0, v1), both now reversed.
+    const ins = await db
+      .select()
+      .from(pointLedger)
+      .where(eq(pointLedger.reasonCode, "checkin_in"));
+    expect(ins.length).toBe(2);
+    expect(ins.map((r) => r.dedupeKey).sort()).toEqual([
+      `checkin_in:${registrationId}:v0`,
+      `checkin_in:${registrationId}:v1`,
+    ]);
+  });
+
+  it("genuine double-scan WITHOUT undo stays idempotent (same epoch key, deduped)", async () => {
+    const event = await makeCheckinEvent();
+    const { qrToken, registrationId, userId } = await registerStudent(event);
+    const staff = await loginAs("checkin_staff");
+
+    await scan(event.id, qrToken, staff.cookie); // +20 at v0
+    await scan(event.id, qrToken, staff.cookie); // already_checked_in; no undo → still v0 → deduped
+    expect(await balanceOf(userId)).toBe(20);
+    expect(await ledgerSum(userId)).toBe(20);
+    const ins = await db
+      .select()
+      .from(pointLedger)
+      .where(eq(pointLedger.reasonCode, "checkin_in"));
+    expect(ins.length).toBe(1); // exactly one award row, no second credit
+    expect(ins[0]!.dedupeKey).toBe(`checkin_in:${registrationId}:v0`);
+  });
+
+  it("re-check-in after undo: scan IN→undo→re-scan IN → balance 20 (re-awarded), then double-scan stays 20", async () => {
+    const event = await makeCheckinEvent();
+    const { qrToken, registrationId, userId } = await registerStudent(event);
+    const staff = await loginAs("checkin_staff");
+
+    await scan(event.id, qrToken, staff.cookie); // +20 (v0)
+    await request(`/registrations/${registrationId}/undo-checkin`, {
+      method: "POST",
+      cookie: staff.cookie,
+      body: { reason: "wrong person" },
+    });
+    const reIn = await scan(event.id, qrToken, staff.cookie); // re-IN → +20 (v1)
+    const reBody = (await reIn.json()) as { result: string };
+    expect(reBody.result).toBe("checked_in_success");
+    expect((await getReg(registrationId))!.status).toBe("checked_in");
+    expect(await balanceOf(userId)).toBe(20); // re-awarded
+
+    // 2nd scan with NO undo in between → idempotent at v1, still 20.
+    await scan(event.id, qrToken, staff.cookie);
+    expect(await balanceOf(userId)).toBe(20);
+    expect(await ledgerSum(userId)).toBe(20);
+  });
+
+  it("two parallel re-scans after an undo → exactly one re-award (race-safe via reg row lock)", async () => {
+    const event = await makeCheckinEvent();
+    const { qrToken, registrationId, userId } = await registerStudent(event);
+    const staff = await loginAs("checkin_staff");
+
+    await scan(event.id, qrToken, staff.cookie); // +20 (v0)
+    await request(`/registrations/${registrationId}/undo-checkin`, {
+      method: "POST",
+      cookie: staff.cookie,
+      body: { reason: "undo before redo" },
+    });
+    expect(await balanceOf(userId)).toBe(0);
+
+    // Fire two re-scans simultaneously on the connection pool: the reg FOR UPDATE lock serializes them,
+    // so exactly ONE flips registered→checked_in and re-awards; the other sees already_checked_in.
+    const [r1, r2] = await Promise.all([
+      scan(event.id, qrToken, staff.cookie),
+      scan(event.id, qrToken, staff.cookie),
+    ]);
+    expect(r1.status).toBe(200);
+    expect(r2.status).toBe(200);
+    const outcomes = [
+      (await r1.json()) as { result: string },
+      (await r2.json()) as { result: string },
+    ]
+      .map((r) => r.result)
+      .sort();
+    expect(outcomes).toEqual(["already_checked_in", "checked_in_success"]);
+
+    expect(await balanceOf(userId)).toBe(20); // exactly one +20
+    expect(await ledgerSum(userId)).toBe(20); // cache == truth
+    const insAfter = await db
+      .select()
+      .from(pointLedger)
+      .where(eq(pointLedger.reasonCode, "checkin_in"));
+    expect(insAfter.length).toBe(2); // v0 + the single re-award v1 (no double)
   });
 });

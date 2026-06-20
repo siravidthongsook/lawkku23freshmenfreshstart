@@ -200,7 +200,8 @@ router.post(
       const studentRole = u?.role ?? "student";
 
       // Token must belong to a registration of THIS event.
-      if (reg.eventId !== eventId) return { result: "wrong_event", ...who };
+      // Do NOT leak identity (fullName/studentId) cross-event — only return WHO once the event matches.
+      if (reg.eventId !== eventId) return { result: "wrong_event", registrationId: reg.id };
 
       const [event] = await tx.select().from(events).where(eq(events.id, reg.eventId)).limit(1);
       if (!event) return { result: "event_not_published", ...who };

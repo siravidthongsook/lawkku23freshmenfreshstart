@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import type { Tx } from "../../db/client";
 import { pointLedger } from "../../db/schema/points";
 import { addPoints } from "./service";
@@ -12,9 +12,57 @@ import {
   isPastCutoff,
 } from "./config-service";
 
-// dedupeKey builders — user-scoped per registration (1 reg = 1 student) per addPoints invariant.
-const inKey = (regId: string) => `checkin_in:${regId}`;
-const outKey = (regId: string) => `checkin_out:${regId}`;
+// === Versioned/epoch dedupe keys (re-check-in-after-undo support) ===
+// dedupeKey is user-scoped per registration (1 reg = 1 student) per addPoints invariant, and now
+// carries an epoch suffix `:v<k>`. k = number of prior awards for this (reg, reason) that are
+// CURRENTLY net-reversed (have a matching correction_reverse). This keeps two behaviours honest:
+//  - genuine double-scan WITHOUT an undo in between → latest award not reversed → same key → deduped (0).
+//  - undo (reverses latest active award) then re-scan → latest award now reversed → k bumps → fresh key → re-award.
+// Epoch is computed INSIDE the caller's tx (reg row already FOR UPDATE-locked) so concurrent re-scans serialize.
+type CheckinReason = "checkin_in" | "checkin_out";
+const epochKey = (reason: CheckinReason, regId: string, k: number) => `${reason}:${regId}:v${k}`;
+
+// Count how many awards for this (reg, reason) are currently net-reversed → the next epoch to award at.
+// Also = the epoch a fresh award should use (first scan: 0 reversed → v0).
+async function reversedAwardCount(tx: Tx, reason: CheckinReason, regId: string): Promise<number> {
+  // An award is "net-reversed" when a correction_reverse row points back at it (reversal_uq → at most one).
+  const rev = tx
+    .select({ id: pointLedger.reversalOfLedgerId })
+    .from(pointLedger)
+    .where(and(eq(pointLedger.reasonCode, "correction_reverse"), isNotNull(pointLedger.reversalOfLedgerId)))
+    .as("rev");
+  const [row] = await tx
+    .select({ c: sql<number>`count(*)::int` })
+    .from(pointLedger)
+    .innerJoin(rev, eq(rev.id, pointLedger.id))
+    .where(
+      and(
+        eq(pointLedger.reasonCode, reason),
+        sql`${pointLedger.dedupeKey} like ${`${reason}:${regId}:v%`}`,
+      ),
+    );
+  return row?.c ?? 0;
+}
+
+// Locate the CURRENT active (latest, not-yet-reversed) award row for this (reg, reason), or null.
+// Used by undo to reverse the right epoch instead of a hardcoded :v0.
+async function activeAwardRow(tx: Tx, reason: CheckinReason, regId: string) {
+  const [row] = await tx
+    .select({ id: pointLedger.id, delta: pointLedger.delta, dedupeKey: pointLedger.dedupeKey })
+    .from(pointLedger)
+    .where(
+      and(
+        eq(pointLedger.reasonCode, reason),
+        sql`${pointLedger.dedupeKey} like ${`${reason}:${regId}:v%`}`,
+        // not yet reversed: no correction_reverse points back at this row
+        sql`not exists (select 1 from ${pointLedger} r where r.reversal_of_ledger_id = ${pointLedger.id} and r.reason_code = 'correction_reverse')`,
+      ),
+    )
+    // Tiebreak on id: if two epochs ever shared created_at (tx-start now()), pick the truly-latest row deterministically.
+    .orderBy(desc(pointLedger.createdAt), desc(pointLedger.id))
+    .limit(1);
+  return row ?? null;
+}
 
 // Outcome surfaced back to the scan response so the UI can show "+N".
 export type AwardOutcome = { pointsAwarded: number; deduped: boolean } | { pointsAwarded: 0; skipped: string };
@@ -35,12 +83,14 @@ export async function awardCheckinIn(
   if (!isCheckinInEnabled(config)) return { pointsAwarded: 0, skipped: "checkin_in_disabled" };
 
   const points = effectiveCheckinInPoints(config, settings);
+  // Epoch = number of prior checkin_in awards for this reg that are net-reversed → fresh key after undo.
+  const k = await reversedAwardCount(tx, "checkin_in", args.registrationId);
   const res = await addPoints(
     {
       userId: args.studentUserId,
       delta: points,
       reasonCode: "checkin_in",
-      dedupeKey: inKey(args.registrationId),
+      dedupeKey: epochKey("checkin_in", args.registrationId, k),
       createdByUserId: args.scannedByUserId,
       metadata: { eventId: args.eventId, registrationId: args.registrationId, eventTitle: args.eventTitle ?? null, scanMethod: args.scanMethod ?? "qr_scan" },
     },
@@ -60,12 +110,14 @@ export async function awardCheckinOut(
   if (isPastCutoff(settings, now)) return { pointsAwarded: 0, skipped: "points_closed" };
   const config = await getEventPointConfig(args.eventId, tx);
   const points = effectiveCheckinOutPoints(config, settings);
+  // Same epoch scheme as IN: undo reverses the OUT leg too, so a re-scan after undo must re-award.
+  const k = await reversedAwardCount(tx, "checkin_out", args.registrationId);
   const res = await addPoints(
     {
       userId: args.studentUserId,
       delta: points,
       reasonCode: "checkin_out",
-      dedupeKey: outKey(args.registrationId),
+      dedupeKey: epochKey("checkin_out", args.registrationId, k),
       createdByUserId: args.scannedByUserId,
       metadata: { eventId: args.eventId, registrationId: args.registrationId, eventTitle: args.eventTitle ?? null, scanMethod: "qr_scan" },
     },
@@ -74,31 +126,18 @@ export async function awardCheckinOut(
   return { pointsAwarded: res.deduped ? 0 : points, deduped: res.deduped };
 }
 
-// Reverse one awarded entry (looked up by dedupeKey) inside the undo tx. Internal helper.
-// Idempotent: no-op if the original is missing / zero / already reversed (reversal_uq guards
-// a double-reverse anyway). Posts a negative correction_reverse pointing at the original; addPoints
-// keeps lastPositiveAt unchanged on a negative delta (M2 tie-break stays honest).
-async function reverseAwardByDedupeKey(
+// Reverse the CURRENT active (latest, not-yet-reversed) award for this (reg, reason) inside the undo tx.
+// Resolves the active epoch via activeAwardRow (NOT a hardcoded :v0) so re-do-after-undo cycles work.
+// Idempotent: no-op when there is no active award (never awarded / already reversed / zero delta).
+// Posts a negative correction_reverse pointing at the original; addPoints keeps lastPositiveAt
+// unchanged on a negative delta (M2 tie-break stays honest). reversal_uq guards a double-reverse.
+async function reverseActiveAward(
   tx: Tx,
-  args: { dedupeKey: string; studentUserId: string; undoneByUserId: string; reason: string },
+  args: { reason: CheckinReason; registrationId: string; studentUserId: string; undoneByUserId: string; reason_: string },
 ): Promise<boolean> {
-  const [orig] = await tx
-    .select()
-    .from(pointLedger)
-    .where(eq(pointLedger.dedupeKey, args.dedupeKey))
-    .limit(1);
-  if (!orig) return false; // never awarded (toggle off / never checked out / pre-points reg)
+  const orig = await activeAwardRow(tx, args.reason, args.registrationId);
+  if (!orig) return false; // never awarded, or latest award already reversed
   if (orig.delta === 0) return false;
-
-  // Already reversed? then no-op (idempotent under repeated undo/redo).
-  const [existingReversal] = await tx
-    .select({ id: pointLedger.id })
-    .from(pointLedger)
-    .where(
-      and(eq(pointLedger.reversalOfLedgerId, orig.id), eq(pointLedger.reasonCode, "correction_reverse")),
-    )
-    .limit(1);
-  if (existingReversal) return false;
 
   await addPoints(
     {
@@ -107,8 +146,8 @@ async function reverseAwardByDedupeKey(
       reasonCode: "correction_reverse",
       reversalOfLedgerId: orig.id,
       createdByUserId: args.undoneByUserId,
-      reason: args.reason,
-      metadata: { reversedReason: "undo_checkin", originalReasonCode: orig.reasonCode, originalDelta: orig.delta },
+      reason: args.reason_,
+      metadata: { reversedReason: "undo_checkin", originalReasonCode: args.reason, originalDelta: orig.delta },
     },
     tx,
   );
@@ -123,8 +162,13 @@ export async function reverseCheckinOnUndo(
   tx: Tx,
   args: { registrationId: string; studentUserId: string; undoneByUserId: string; reason: string },
 ): Promise<{ reversed: boolean }> {
-  const common = { studentUserId: args.studentUserId, undoneByUserId: args.undoneByUserId, reason: args.reason };
-  const inReversed = await reverseAwardByDedupeKey(tx, { dedupeKey: inKey(args.registrationId), ...common });
-  const outReversed = await reverseAwardByDedupeKey(tx, { dedupeKey: outKey(args.registrationId), ...common });
+  const common = {
+    registrationId: args.registrationId,
+    studentUserId: args.studentUserId,
+    undoneByUserId: args.undoneByUserId,
+    reason_: args.reason,
+  };
+  const inReversed = await reverseActiveAward(tx, { reason: "checkin_in", ...common });
+  const outReversed = await reverseActiveAward(tx, { reason: "checkin_out", ...common });
   return { reversed: inReversed || outReversed };
 }

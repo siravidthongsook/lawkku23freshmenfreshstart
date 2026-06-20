@@ -10,6 +10,7 @@ import { loginAs, seedUser } from "./helpers/auth";
 import { makeEvent, makeRegistration } from "./helpers/factories";
 import { hashToken } from "../src/lib/crypto";
 import { events as eventsTable } from "../src/db/schema/events";
+import { eventPointConfig, pointSettings } from "../src/db/schema/point-config";
 import type { Event } from "../src/db/schema/events";
 
 // ---------------------------------------------------------------------------
@@ -58,13 +59,43 @@ async function registerStudent(
   return { qrToken: body.qrToken, registrationId: body.registration.id, cookie, userId: user.id };
 }
 
-// POST a scan as a given staff/admin cookie.
-function scan(eventId: string, qrToken: string, cookie?: string) {
+// POST a scan as a given staff/admin cookie. scanType "out" runs the scan-out flow.
+function scan(eventId: string, qrToken: string, cookie?: string, scanType?: "in" | "out") {
   return request(`/events/${eventId}/checkins/scan`, {
     method: "POST",
     cookie,
-    body: { qr_token: qrToken },
+    body: { qr_token: qrToken, ...(scanType ? { scan_type: scanType } : {}) },
   });
+}
+
+// Enable scan-out on an event with a window open NOW (mirrors points-checkin.test.ts).
+async function enableCheckout(eventId: string): Promise<void> {
+  const now = Date.now();
+  await db
+    .insert(eventPointConfig)
+    .values({
+      eventId,
+      checkinOutEnabled: true,
+      scanOutOpenAt: new Date(now - 60 * 60 * 1000),
+      scanOutCloseAt: new Date(now + 24 * 60 * 60 * 1000),
+    })
+    .onConflictDoUpdate({
+      target: eventPointConfig.eventId,
+      set: {
+        checkinOutEnabled: true,
+        scanOutOpenAt: new Date(now - 60 * 60 * 1000),
+        scanOutCloseAt: new Date(now + 24 * 60 * 60 * 1000),
+      },
+    });
+}
+
+// Set the global points cutoff in the past (singleton row id=1) → student earning is frozen.
+async function setPastCutoff(): Promise<void> {
+  const past = new Date(Date.now() - 60_000);
+  await db
+    .insert(pointSettings)
+    .values({ id: 1, cutoffAt: past })
+    .onConflictDoUpdate({ target: pointSettings.id, set: { cutoffAt: past } });
 }
 
 // Read the qr_tokens rows for a registration directly (to assert hash-not-plaintext + active count).
@@ -510,6 +541,28 @@ describe("checkins: cross-event scan rejection", () => {
     });
     expect((await getReg(registrationId))!.status).toBe("checked_in");
   });
+
+  // PII guard: a wrong_event scan must NOT de-anonymize the student cross-event (no name/student_id).
+  it("wrong_event response OMITS fullName + studentId (no cross-event PII leak)", async () => {
+    const eventA = await makeCheckinEvent();
+    const eventB = await makeCheckinEvent();
+    const { qrToken } = await registerStudent(eventA);
+    const staff = await loginAs("checkin_staff");
+
+    const res = await scan(eventB.id, qrToken, staff.cookie); // scanned at the WRONG event
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      result: string;
+      fullName?: unknown;
+      studentId?: unknown;
+    };
+    expect(body.result).toBe("wrong_event");
+    // Identity fields must be absent (not merely null) — they are only attached after the event matches.
+    expect(body.fullName).toBeUndefined();
+    expect(body.studentId).toBeUndefined();
+    expect("fullName" in body).toBe(false);
+    expect("studentId" in body).toBe(false);
+  });
 });
 
 // =====================================================================
@@ -529,5 +582,145 @@ describe("checkins: waitlisted registrations cannot check in", () => {
     expect((await res.json()) as { error: string }).toMatchObject({
       error: "waitlisted_not_allowed",
     });
+  });
+});
+
+// =====================================================================
+// SCAN OUT: ineligible-reg + cutoff rejects (the IN path tests these,
+// the OUT path was uncovered).
+// =====================================================================
+
+describe("checkins: scan-out reject paths", () => {
+  // Cancelled/waitlisted are rejected for OUT before the OUT block (common reject). We flip the reg
+  // status directly so the active token survives (student-cancel would revoke it → qr_revoked instead).
+  it("scan-OUT on a CANCELLED registration → registration_cancelled", async () => {
+    const event = await makeCheckinEvent();
+    await enableCheckout(event.id);
+    const { qrToken, registrationId } = await registerStudent(event);
+    await db
+      .update(registrations)
+      .set({ status: "cancelled" })
+      .where(eq(registrations.id, registrationId));
+
+    const staff = await loginAs("checkin_staff");
+    const out = await scan(event.id, qrToken, staff.cookie, "out");
+    expect(out.status).toBe(200);
+    expect((await out.json()) as { result: string }).toMatchObject({
+      result: "registration_cancelled",
+    });
+  });
+
+  it("scan-OUT on a WAITLISTED registration → waitlisted_not_allowed", async () => {
+    const event = await makeCheckinEvent();
+    await enableCheckout(event.id);
+    const { qrToken, registrationId } = await registerStudent(event);
+    await db
+      .update(registrations)
+      .set({ status: "waitlisted" })
+      .where(eq(registrations.id, registrationId));
+
+    const staff = await loginAs("checkin_staff");
+    const out = await scan(event.id, qrToken, staff.cookie, "out");
+    expect(out.status).toBe(200);
+    expect((await out.json()) as { result: string }).toMatchObject({
+      result: "waitlisted_not_allowed",
+    });
+  });
+
+  // Cutoff freeze blocks the OUT scan entirely (it only exists to award points) → points_closed.
+  it("scan-OUT past the points cutoff_at → points_closed (no checkout)", async () => {
+    const event = await makeCheckinEvent();
+    await enableCheckout(event.id);
+    const { qrToken, registrationId } = await registerStudent(event);
+    const staff = await loginAs("checkin_staff");
+    await scan(event.id, qrToken, staff.cookie); // IN first (still before cutoff)
+
+    await setPastCutoff();
+    const out = await scan(event.id, qrToken, staff.cookie, "out");
+    expect(out.status).toBe(200);
+    expect((await out.json()) as { result: string }).toMatchObject({ result: "points_closed" });
+    // No checkout stamp written when frozen.
+    expect((await getReg(registrationId))!.checkedOutAt).toBeNull();
+  });
+});
+
+// =====================================================================
+// Non-published event: scan rejects + manual throws event_not_published.
+// (Reg + token are minted on a published event, then the event is flipped.)
+// =====================================================================
+
+describe("checkins: non-published (draft/archived) event is not check-in-capable", () => {
+  it("scan against a DRAFT event → event_not_published (reg stays registered)", async () => {
+    const event = await makeCheckinEvent();
+    const { qrToken, registrationId } = await registerStudent(event);
+    await db.update(eventsTable).set({ status: "draft" }).where(eq(eventsTable.id, event.id));
+
+    const staff = await loginAs("checkin_staff");
+    const res = await scan(event.id, qrToken, staff.cookie);
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { result: string }).toMatchObject({
+      result: "event_not_published",
+    });
+    expect((await getReg(registrationId))!.status).toBe("registered");
+  });
+
+  it("scan against an ARCHIVED event → event_not_published", async () => {
+    const event = await makeCheckinEvent();
+    const { qrToken } = await registerStudent(event);
+    await db.update(eventsTable).set({ status: "archived" }).where(eq(eventsTable.id, event.id));
+
+    const staff = await loginAs("checkin_staff");
+    const res = await scan(event.id, qrToken, staff.cookie);
+    expect((await res.json()) as { result: string }).toMatchObject({
+      result: "event_not_published",
+    });
+  });
+
+  it("manual-checkin against a DRAFT event → 400 event_not_published", async () => {
+    const event = await makeCheckinEvent();
+    const { registrationId } = await registerStudent(event);
+    await db.update(eventsTable).set({ status: "draft" }).where(eq(eventsTable.id, event.id));
+
+    const staff = await loginAs("checkin_staff");
+    const res = await request(`/registrations/${registrationId}/manual-checkin`, {
+      method: "POST",
+      cookie: staff.cookie,
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toMatchObject({
+      error: "event_not_published",
+    });
+  });
+});
+
+// =====================================================================
+// Undo clears the scan-out stamp too (the check-in it depended on is gone).
+// =====================================================================
+
+describe("checkins: undo clears scan-out stamps", () => {
+  it("undo of an IN+OUT reg nulls checkedOutAt AND checkedOutByUserId", async () => {
+    const event = await makeCheckinEvent();
+    await enableCheckout(event.id);
+    const { qrToken, registrationId } = await registerStudent(event);
+    const staff = await loginAs("checkin_staff");
+
+    await scan(event.id, qrToken, staff.cookie); // IN
+    const out = await scan(event.id, qrToken, staff.cookie, "out"); // OUT
+    expect((await out.json()) as { result: string }).toMatchObject({ result: "checked_out_success" });
+    const checkedOut = (await getReg(registrationId))!;
+    expect(checkedOut.checkedOutAt).not.toBeNull();
+    expect(checkedOut.checkedOutByUserId).toBe(staff.user.id);
+
+    const undo = await request(`/registrations/${registrationId}/undo-checkin`, {
+      method: "POST",
+      cookie: staff.cookie,
+      body: { reason: "scanned wrong person" },
+    });
+    expect(undo.status).toBe(200);
+
+    const reg = (await getReg(registrationId))!;
+    expect(reg.status).toBe("registered");
+    expect(reg.checkedOutAt).toBeNull();
+    expect(reg.checkedOutByUserId).toBeNull();
   });
 });
