@@ -11,7 +11,7 @@ const nextConfig: NextConfig = {
   turbopack: { root: join(__dirname, "..") },
   // Allow LAN IP dev access (mobile testing on same wifi) — avoids cross-origin dev asset/HMR blocks.
   allowedDevOrigins: ["192.168.1.*"],
-  // Poster images proxy through /api/* and carry a ?t= cache-bust query after re-upload.
+  // Poster images proxy through /api/* and carry a ?v= cache-bust query after re-upload.
   // `search` omitted -> any query string allowed.
   images: { localPatterns: [{ pathname: "/**" }] },
   async rewrites() {

@@ -1,4 +1,4 @@
-// Public event list card. Gallery hero + title, time (Bangkok), capacity, status badge.
+// Public event list card. Poster image + title, time (Bangkok), capacity, status badge.
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { EventStatusBadge } from "@/components/badges";

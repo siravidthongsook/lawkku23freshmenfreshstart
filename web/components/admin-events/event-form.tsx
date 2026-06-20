@@ -667,11 +667,11 @@ export function EventForm({ mode, eventId, initial, pointConfig, cutoffAt }: Pro
             </Field>
             {mode === "edit" && eventId ? (
               <>
-              <Field label="สแกนออก เปิด (เวลาไทย)" hint="เว้นว่าง = เปิดเมื่อจบงาน แล้วปิดตามชั่วโมงที่ตั้งใน “ตั้งค่าแต้ม” (ถ้าไม่ได้ตั้งเวลาจบงาน = เปิดตลอด)">
+              <Field label="สแกนออก เปิด (เวลาไทย)" name="scanOutOpenAt" error={errors.scanOutOpenAt} hint="เว้นว่าง = เปิดเมื่อจบงาน แล้วปิดตามชั่วโมงที่ตั้งใน “ตั้งค่าแต้ม” (ถ้าไม่ได้ตั้งเวลาจบงาน = เปิดตลอด)">
                 <Input
                   type="datetime-local"
                   value={scanOutOpenAt}
-                  onChange={(e) => bind(setScanOutOpenAt)(e.target.value)}
+                  onChange={(e) => bind(setScanOutOpenAt, "scanOutOpenAt")(e.target.value)}
                 />
               </Field>
               <Field label="สแกนออก ปิด (เวลาไทย)" name="scanOutCloseAt" error={errors.scanOutCloseAt} hint="เว้นว่าง = เปิดเมื่อจบงาน แล้วปิดตามชั่วโมงที่ตั้งใน “ตั้งค่าแต้ม” (ถ้าไม่ได้ตั้งเวลาจบงาน = เปิดตลอด)">

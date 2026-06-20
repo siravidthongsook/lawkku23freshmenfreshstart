@@ -794,6 +794,7 @@ router.post(
         patch.checkinMethod = null;
         patch.checkedOutAt = null;
         patch.checkedOutByUserId = null;
+        patch.manualCheckinReason = null; // drop stale reason so it can't leak into a later checked_in state
       }
       if (reg.status === "cancelled" && target !== "cancelled") patch.cancelledAt = null; // re-activate clears it
       if (target === "registered") patch.registeredAt = reg.registeredAt ?? now;

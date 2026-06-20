@@ -109,6 +109,8 @@ export async function awardCheckinOut(
   const now = new Date();
   if (isPastCutoff(settings, now)) return { pointsAwarded: 0, skipped: "points_closed" };
   const config = await getEventPointConfig(args.eventId, tx);
+  // Defense-in-depth: mirror awardCheckinIn's toggle guard so a future caller can't award when OUT is off.
+  if (!isCheckinOutEnabled(config)) return { pointsAwarded: 0, skipped: "checkin_out_disabled" };
   const points = effectiveCheckinOutPoints(config, settings);
   // Same epoch scheme as IN: undo reverses the OUT leg too, so a re-scan after undo must re-award.
   const k = await reversedAwardCount(tx, "checkin_out", args.registrationId);

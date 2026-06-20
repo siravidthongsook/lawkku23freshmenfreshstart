@@ -26,10 +26,12 @@ export default function EditEventPage({ params }: { params: Promise<{ id: string
   useEffect(() => {
     let active = true;
     // Detail returns { event, computed }; we only need the event row. Fetch point-config in parallel.
+    // Point endpoints are secondary — degrade them to null on failure so a points 5xx can't kill the
+    // whole edit form; only the event fetch is authoritative (its error/404 surfaces below).
     Promise.all([
       apiGet<{ event: EventAdmin }>(`/admin/events/${id}`),
-      getEventPointConfig(id),
-      getPointSettings(),
+      getEventPointConfig(id).catch(() => ({ config: null })),
+      getPointSettings().catch(() => ({ settings: { cutoffAt: null } })),
     ])
       .then(([eventRes, cfgRes, settingsRes]) => {
         if (!active) return;
