@@ -23,6 +23,8 @@ export default async function setup() {
   ]);
   // CREATE DATABASE can't be parameterized; testDbName comes from our own .env.test, not user input.
   if (rowCount === 0) await admin.query(`CREATE DATABASE "${testDbName}"`);
+  // Throwaway test DB: skip WAL fsync wait on commit → faster TRUNCATE/insert. Persists per-DB, idempotent.
+  await admin.query(`ALTER DATABASE "${testDbName}" SET synchronous_commit = off`);
   await admin.end();
 
   // Migrate. Import AFTER env is set so the singleton db client targets eticket_test.

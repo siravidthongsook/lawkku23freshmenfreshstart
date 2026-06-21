@@ -2,8 +2,14 @@ import argon2 from "argon2";
 import { randomBytes, randomInt } from "node:crypto";
 
 // Argon2id hashing. Policy + readable temp-password generation.
+// Under test, use cheap KDF params — real-param hashing dominated the suite runtime.
+// Prod keeps library defaults (~64MB, t=3). verify() reads params from the hash, so it follows automatically.
+const TEST_PARAMS = { memoryCost: 4096, timeCost: 2, parallelism: 1 } as const;
 export function hashPassword(plain: string): Promise<string> {
-  return argon2.hash(plain, { type: argon2.argon2id });
+  return argon2.hash(plain, {
+    type: argon2.argon2id,
+    ...(process.env.NODE_ENV === "test" ? TEST_PARAMS : {}),
+  });
 }
 
 export async function verifyPassword(hash: string, plain: string): Promise<boolean> {
