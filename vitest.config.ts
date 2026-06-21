@@ -15,13 +15,18 @@ export default defineConfig({
     // Forwarded into each worker's process.env before module evaluation.
     env: parsed,
     globals: false,
-    // Provisions eticket_test (CREATE DATABASE if missing) + runs drizzle migrations once.
+    // Provisions eticket_test template (CREATE DATABASE if missing) + runs drizzle migrations once.
     globalSetup: ["./test/global-setup.ts"],
-    // Per-file: truncate all tables before each test for isolation (real commits, no tx rollback).
-    setupFiles: ["./test/setup.ts"],
+    // per-worker-db FIRST: clones a private DB per fork BEFORE any src/ import (env.ts parses URL at import time).
+    // Then setup.ts truncates all tables before each test (real commits, no tx rollback).
+    setupFiles: ["./test/per-worker-db.ts", "./test/setup.ts"],
     include: ["test/**/*.test.ts"],
-    // Single fork: tests share one Postgres DB; parallel files would race on TRUNCATE.
     pool: "forks",
-    fileParallelism: false,
+    // Parallel across files — each fork owns its own physical DB (no shared-DB TRUNCATE race).
+    fileParallelism: true,
+    // Cap forks: 4 was the safe sweet spot; more over-subscribes the shared prod runner → flaky timeouts.
+    poolOptions: { forks: { maxForks: 4 } },
+    // points-rate-limit fires 60 sequential argon2+DB round-trips — default 5s blows up under contention.
+    testTimeout: 20000,
   },
 });
