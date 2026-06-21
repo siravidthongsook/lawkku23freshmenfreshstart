@@ -69,7 +69,11 @@ export const adminEventsQuerySchema = z.object({
   q: z.string().trim().max(300).optional(),
   status: eventStatusEnum.optional(),
   // Default admin list hides archived; archived events live behind a dedicated view.
-  excludeArchived: z.coerce.boolean().optional(),
+  // Explicit "true"/"false" transform (NOT z.coerce.boolean, which turns ANY non-empty string — incl. "false" — true).
+  excludeArchived: z
+    .enum(["true", "false"])
+    .transform((v) => v === "true")
+    .optional(),
   // Sort: event-date desc/asc, title, or created. Default newest event date first.
   sort: z
     .enum(["date_desc", "date_asc", "title_asc", "created_desc"])

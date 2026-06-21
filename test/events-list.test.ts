@@ -199,18 +199,13 @@ describe("admin events list: excludeArchived flag", () => {
     expect(body.events.map((e) => e.id)).toContain(arch.id); // no flag → archived visible
   });
 
-  // KNOWN BUG: excludeArchived uses z.coerce.boolean() (schema.ts:72). z.coerce.boolean()
-  // coerces ANY non-empty string to true — so the literal string "false" becomes boolean
-  // `true`, which WRONGLY excludes archived events even though the caller asked to include
-  // them. Correct behavior: ?excludeArchived=false should INCLUDE archived events.
-  // This test asserts the CORRECT contract and is expected to FAIL until the schema is
-  // fixed (e.g. a proper string→boolean transform). Source NOT modified per task scope.
-  it.fails("?excludeArchived=false INCLUDES archived events (z.coerce.boolean() footgun)", async () => {
+  // Regression guard: excludeArchived uses z.stringbool() (schema.ts:72), so the literal
+  // string "false" parses to boolean false → archived stays INCLUDED. Was z.coerce.boolean(),
+  // which coerced ANY non-empty string (incl. "false") to true and wrongly excluded archived.
+  it("?excludeArchived=false INCLUDES archived events (stringbool parses 'false' correctly)", async () => {
     const admin = await loginAs("admin");
     const arch = await makeEvent({ createdByAdminId: admin.user.id, status: "archived", title: "FALSEARCH a", publicSlug: "falsearch-a" });
     const { body } = await list(admin.cookie, "?q=FALSEARCH&excludeArchived=false&limit=100");
-    // Expected: archived included because the caller said false. Actual: "false" coerces to
-    // true → archived excluded → this assertion fails → it.fails() turns the red into green.
     expect(body.events.map((e) => e.id)).toContain(arch.id);
   });
 });
