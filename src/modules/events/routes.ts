@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { stream } from "hono/streaming";
 import { bodyLimit } from "hono/body-limit";
-import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, ne, or, sql, type SQL } from "drizzle-orm";
 import { db } from "../../db/client";
 import { events } from "../../db/schema/events";
 import { requireAuth, requirePermission, requestMeta } from "../../lib/auth-middleware";
@@ -174,6 +174,8 @@ router.get("/admin/events", async (c) => {
   // WHERE: optional status + case-insensitive title/slug match.
   const conds: SQL[] = [];
   if (query.status) conds.push(eq(events.status, query.status));
+  // Hide archived from the default list (archived has its own dedicated view).
+  if (query.excludeArchived) conds.push(ne(events.status, "archived"));
   if (query.q) {
     const like = `%${query.q}%`;
     conds.push(or(ilike(events.title, like), ilike(events.publicSlug, like))!);

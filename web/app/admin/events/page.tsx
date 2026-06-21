@@ -5,7 +5,7 @@
 // server-computed effective state + counts (no client clock / no N+1 recompute).
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Loader2, Plus } from "lucide-react";
+import { Archive, ArrowLeft, Loader2, Plus } from "lucide-react";
 import { apiGet, ApiError } from "@/lib/api";
 import type { EventAdmin, EventStatus, EventVisibility } from "@/lib/types";
 import { eventStateLabel } from "@/lib/labels";
@@ -46,13 +46,12 @@ const STATE_TONE: Record<string, string> = {
   closed_mode: "bg-amber-100 text-amber-800",
 };
 
-// Status filter options (incl. "all"). Mirrors event_status enum + a catch-all.
+// Status filter options (incl. "all"). Archived omitted — it lives in its own dedicated view.
 const STATUS_FILTER: { value: string; label: string }[] = [
   { value: "all", label: "ทุกสถานะ" },
   { value: "draft", label: "ฉบับร่าง" },
   { value: "published", label: "เผยแพร่แล้ว" },
   { value: "cancelled", label: "ยกเลิกแล้ว" },
-  { value: "archived", label: "เก็บถาวรแล้ว" },
 ];
 
 // Sort options. Default = newest event date first (matches public page's date sort, server-side).
@@ -81,6 +80,8 @@ export default function AdminEventsPage() {
   const [status, setStatus] = useState("all");
   const [sort, setSort] = useState<SortKey>("date_desc");
   const [offset, setOffset] = useState(0);
+  // Archived view = dedicated mode (status=archived); default view hides archived.
+  const [archivedView, setArchivedView] = useState(false);
 
   // Debounce the text input so we don't refetch on every keystroke.
   useEffect(() => {
@@ -91,12 +92,17 @@ export default function AdminEventsPage() {
   // Reset to first page whenever the filters change.
   useEffect(() => {
     setOffset(0);
-  }, [debouncedSearch, status, sort]);
+  }, [debouncedSearch, status, sort, archivedView]);
 
   const load = useCallback(async () => {
     const qs = new URLSearchParams();
     if (debouncedSearch) qs.set("q", debouncedSearch);
-    if (status !== "all") qs.set("status", status);
+    if (archivedView) {
+      qs.set("status", "archived"); // dedicated archived view
+    } else {
+      if (status !== "all") qs.set("status", status);
+      qs.set("excludeArchived", "true"); // default list hides archived
+    }
     qs.set("sort", sort);
     qs.set("limit", String(PAGE_SIZE));
     qs.set("offset", String(offset));
@@ -115,7 +121,7 @@ export default function AdminEventsPage() {
     } finally {
       setReloading(false);
     }
-  }, [debouncedSearch, status, sort, offset]);
+  }, [debouncedSearch, status, sort, offset, archivedView]);
 
   useEffect(() => {
     void load();
@@ -127,13 +133,29 @@ export default function AdminEventsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">กิจกรรม</h1>
-        <Button asChild>
-          <Link href="/admin/events/new">
-            <Plus className="size-4" />
-            สร้างกิจกรรมใหม่
-          </Link>
-        </Button>
+        <h1 className="text-xl font-semibold">
+          {archivedView ? "กิจกรรมที่เก็บถาวร" : "กิจกรรม"}
+        </h1>
+        <div className="flex gap-2">
+          {/* Dedicated archived view toggle — keeps the archived clutter out of the main list. */}
+          {archivedView ? (
+            <Button variant="outline" onClick={() => setArchivedView(false)}>
+              <ArrowLeft className="size-4" />
+              กลับไปกิจกรรมทั้งหมด
+            </Button>
+          ) : (
+            <Button variant="outline" onClick={() => setArchivedView(true)}>
+              <Archive className="size-4" />
+              กิจกรรมที่เก็บถาวร
+            </Button>
+          )}
+          <Button asChild>
+            <Link href="/admin/events/new">
+              <Plus className="size-4" />
+              สร้างกิจกรรมใหม่
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {/* Search + status filter bar. */}
@@ -148,18 +170,21 @@ export default function AdminEventsPage() {
             <Loader2 className="absolute right-2 top-1/2 size-4 -translate-y-1/2 animate-spin text-muted-foreground" />
           ) : null}
         </div>
-        <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="w-44">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {STATUS_FILTER.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {/* Status filter hidden in archived view — status is fixed to archived there. */}
+        {!archivedView ? (
+          <Select value={status} onValueChange={setStatus}>
+            <SelectTrigger className="w-44">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_FILTER.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null}
         <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
           <SelectTrigger className="w-full sm:w-64" aria-label="เรียงลำดับ">
             <SelectValue />
@@ -186,7 +211,9 @@ export default function AdminEventsPage() {
         <div className="rounded-md border py-16 text-center text-sm text-muted-foreground">
           {hasActiveFilter
             ? "ไม่พบกิจกรรมที่ตรงกับตัวกรอง"
-            : "ยังไม่มีกิจกรรม สร้างกิจกรรมแรกของคุณ"}
+            : archivedView
+              ? "ยังไม่มีกิจกรรมที่เก็บถาวร"
+              : "ยังไม่มีกิจกรรม สร้างกิจกรรมแรกของคุณ"}
         </div>
       ) : (
         <>
