@@ -25,6 +25,9 @@
     "reconcile:points": "tsx --env-file-if-exists=.env src/db/reconcile-points.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:db:up": "docker run -d --rm --name eticket_test_pg -p 33399:5432 -e POSTGRES_USER=lawkku_freshstart23 -e POSTGRES_PASSWORD=lawkku_freshstart23 -e POSTGRES_DB=lawkku_freshstart23 postgres:16-alpine && until docker exec eticket_test_pg pg_isready -U lawkku_freshstart23 >/dev/null 2>&1; do sleep 0.5; done",
+    "test:db:down": "docker stop eticket_test_pg",
+    "test:local": "pnpm test:db:up && vitest run; pnpm test:db:down",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
   },

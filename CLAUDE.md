@@ -2,7 +2,7 @@
 
 Internal single-site LawKKUFreshmenFreshStart23 system for student events. Not multi-tenant SaaS.
 Full spec: `spec.md`. Derived docs: `docs/01-database-schema.md`, `docs/02-api-contract.md`, `docs/03-page-list.md`, `docs/04-implementation-tasks.md`, `docs/05-points-and-assessments.md` (post-spec subsystems).
-Operational/contract docs: `docs/CONTRACT-backend.md` (module-worker boundaries), `docs/migrations-policy.md`, `docs/deploy-runner.md`, `docs/observability-deploy.md`, `docs/observability-runbook.md`.
+Operational/contract docs: `docs/CONTRACT-backend.md` (module-worker boundaries), `docs/migrations-policy.md`, `docs/deploy-runner.md`, `docs/observability-deploy.md`, `docs/observability-runbook.md`, `docs/testing.md` (backend test suite — throwaway pg on port 33399).
 
 ---
 

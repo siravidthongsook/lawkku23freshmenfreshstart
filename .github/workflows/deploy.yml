@@ -69,12 +69,9 @@ jobs:
           pnpm typecheck
           pnpm --dir web typecheck
 
-      # Backend test suite. CI overrides DATABASE_URL → host 33399 (service above); vitest.config
-      # prefers process.env.DATABASE_URL over .env.test, so local dev keeps its own 5432 value.
+      # Backend test suite. .env.test points DATABASE_URL at localhost:33399/eticket_test → service above.
       - name: Test (backend)
         run: pnpm test
-        env:
-          DATABASE_URL: postgres://lawkku_freshstart23:lawkku_freshstart23@localhost:33399/eticket_test
 
   deploy:
     needs: gate # no deploy unless the gate (confirm + typecheck + test) passed
