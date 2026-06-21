@@ -24,8 +24,9 @@ export default defineConfig({
     pool: "forks",
     // Parallel across files — each fork owns its own physical DB (no shared-DB TRUNCATE race).
     fileParallelism: true,
-    // Cap forks: 4 was the safe sweet spot; more over-subscribes the shared prod runner → flaky timeouts.
-    poolOptions: { forks: { maxForks: 4 } },
+    // Cap forks at 2: conservative for the shared prod runner — keeps a speedup with minimal
+    // over-subscription risk (flaky timeouts). Bump toward 4 only if the runner has spare cores.
+    poolOptions: { forks: { maxForks: 2 } },
     // points-rate-limit fires 60 sequential argon2+DB round-trips — default 5s blows up under contention.
     testTimeout: 20000,
   },
