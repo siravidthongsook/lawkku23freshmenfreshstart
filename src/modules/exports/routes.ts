@@ -249,6 +249,11 @@ router.get(
       checked_in_at_bangkok: toBangkokString(reg.checkedInAt),
       checkin_method: reg.checkinMethod ?? "",
       checked_in_by_user_id: reg.checkedInByUserId ?? "",
+      // Scan-out is a first-class stamp — admins need to see who left + who scanned them out.
+      // No separate checkout-method column exists in schema (checkin_method is shared), so emit
+      // only the timestamp + scanned-by, adjacent to the check-in columns.
+      checked_out_at_bangkok: toBangkokString(reg.checkedOutAt),
+      checked_out_by_user_id: reg.checkedOutByUserId ?? "",
       manual_checkin_reason: reg.manualCheckinReason ?? "",
     }));
 
@@ -264,6 +269,8 @@ router.get(
       "checked_in_at_bangkok",
       "checkin_method",
       "checked_in_by_user_id",
+      "checked_out_at_bangkok",
+      "checked_out_by_user_id",
       "manual_checkin_reason",
     ]);
     await auditExport(c, eventId, "checkin_attendance", records.length);

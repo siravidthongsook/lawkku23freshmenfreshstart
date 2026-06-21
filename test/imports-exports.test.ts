@@ -608,6 +608,47 @@ describe("export: checkin-attendance", () => {
     expect(attended?.checked_in_at_bangkok).toBe(toBangkokString(knownUtc));
     expect(notAttended?.attended).toBe("no");
   });
+
+  it("exposes Bangkok check-out time + who scanned out; leaves blank for not-checked-out rows", async () => {
+    // Regression (Bug 2): check-out is a first-class stamp but the attendance export omitted it.
+    const { cookie, user: admin } = await loginAs("admin");
+    const event = await makeEvent({ createdByAdminId: admin.id });
+    const inUtc = new Date("2026-06-19T03:30:00.000Z");
+    const outUtc = new Date("2026-06-19T08:15:00.000Z"); // Bangkok 15:15:00 +07:00
+
+    // A row that checked IN then OUT, stamped by the admin.
+    const out = await makeRegistration({ event, status: "checked_in" });
+    await db
+      .update(registrations)
+      .set({ checkedInAt: inUtc, checkedOutAt: outUtc, checkedOutByUserId: admin.id })
+      .where(eq(registrations.id, out.id));
+    // A row that checked IN but never OUT → check-out columns must be blank.
+    const stayed = await makeRegistration({ event, status: "checked_in" });
+    await db
+      .update(registrations)
+      .set({ checkedInAt: inUtc })
+      .where(eq(registrations.id, stayed.id));
+
+    const res = await request(
+      `/admin/events/${event.id}/export/checkin-attendance`,
+      { cookie },
+    );
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    const header = (text.split(/\r?\n/)[0] ?? "").split(",");
+    expect(header).toContain("checked_out_at_bangkok");
+    expect(header).toContain("checked_out_by_user_id");
+
+    const rows = parseCsv(text);
+    const checkedOut = rows.find((r) => r.registration_id === out.id);
+    const notCheckedOut = rows.find((r) => r.registration_id === stayed.id);
+    expect(checkedOut?.checked_out_at_bangkok).toBe(toBangkokString(outUtc));
+    expect(toBangkokString(outUtc)).toBe("2026-06-19 15:15:00 +07:00"); // sanity-check lib
+    expect(checkedOut?.checked_out_by_user_id).toBe(admin.id);
+    // Not-checked-out row leaves the column blank (null → empty string).
+    expect(notCheckedOut?.checked_out_at_bangkok).toBe("");
+    expect(notCheckedOut?.checked_out_by_user_id).toBe("");
+  });
 });
 
 describe("export: registrations-full", () => {
