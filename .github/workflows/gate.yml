@@ -1,0 +1,57 @@
+# Manual gate-only check. Runs the SAME quality gate as deploy.yml (typecheck + backend tests)
+# on the prod runner, but NEVER deploys — no DEPLOY guard, no deploy job. Use to measure/validate
+# the test suite on the real runner without touching prod.
+name: Gate only (manual)
+
+on:
+  workflow_dispatch:
+
+# Separate group from prod-deploy so this can't block (or be blocked by) a real deploy.
+concurrency:
+  group: gate-only
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: [self-hosted, eticket]
+    services:
+      # Throwaway Postgres for the backend test suite. global-setup CREATEs eticket_test + migrates.
+      # Bind host 33399 (not 5432) so it can't collide with any other 5432 listener on the box.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: lawkku_freshstart23
+          POSTGRES_PASSWORD: lawkku_freshstart23
+          POSTGRES_DB: lawkku_freshstart23
+        ports:
+          - 33399:5432
+        options: >-
+          --health-cmd "pg_isready -U lawkku_freshstart23"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable pnpm (corepack)
+        run: corepack enable
+
+      - name: Install deps (root + web)
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm --dir web install --frozen-lockfile
+
+      - name: Typecheck (backend + web)
+        run: |
+          set -euo pipefail
+          pnpm typecheck
+          pnpm --dir web typecheck
+
+      # Backend test suite. .env.test points DATABASE_URL at localhost:33399/eticket_test → service above.
+      - name: Test (backend)
+        run: pnpm test
