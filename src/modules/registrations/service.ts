@@ -87,10 +87,11 @@ export function parseFormSchema(version: EventFormVersion): FormSchema {
 // Validate submitted answers against a version's schema → normalized values or 400 with field errors.
 // `allowMissingRequiredFiles` relaxes the required check for FILE fields only (admin manual register,
 // where the registration — and thus file attach — doesn't exist yet).
+// `allowMissingRequired` relaxes ALL required fields (gate walk-in — minimal data, form filled later).
 export function validateAgainstVersion(
   version: EventFormVersion,
   answers: AnswerMap,
-  opts?: { allowMissingRequiredFiles?: boolean },
+  opts?: { allowMissingRequiredFiles?: boolean; allowMissingRequired?: boolean },
 ): AnswerMap {
   const schema = parseFormSchema(version);
   const result = validateAnswers(schema, answers, opts);
@@ -191,6 +192,7 @@ export function serializeRegistration(reg: Registration) {
     eventId: reg.eventId,
     userId: reg.userId,
     status: reg.status,
+    registrationSource: reg.registrationSource, // "normal" | "walkin" — origin of the reg
     formVersionId: reg.formVersionId,
     registeredAt: reg.registeredAt?.toISOString() ?? null,
     waitlistedAt: reg.waitlistedAt?.toISOString() ?? null,

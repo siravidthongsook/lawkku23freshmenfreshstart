@@ -47,10 +47,12 @@ export type AnswerMap = Record<string, unknown>;
 // `allowMissingRequiredFiles`: admin manual-register sends answers BEFORE a registration exists, so a
 // required file can't be attached yet — relax the required check for file fields only (the user
 // attaches the file afterward). Non-file required fields are still enforced.
+// `allowMissingRequired`: relax ALL required-field validation (text + files) — gate walk-in registers a
+// student with minimal data (answers default {}); the form is filled in later. Supersedes the files-only flag.
 export function validateAnswers(
   schema: FormSchema,
   answers: AnswerMap,
-  opts?: { allowMissingRequiredFiles?: boolean },
+  opts?: { allowMissingRequiredFiles?: boolean; allowMissingRequired?: boolean },
 ): { ok: true; values: AnswerMap } | { ok: false; errors: Record<string, string> } {
   const errors: Record<string, string> = {};
   const values: AnswerMap = {};
@@ -71,9 +73,10 @@ export function validateAnswers(
       (Array.isArray(raw) && raw.length === 0);
 
     if (missing) {
-      // Allow a missing required FILE field when the caller opts in (admin manual register).
-      const fileExempt = opts?.allowMissingRequiredFiles && isFileField(f);
-      if (f.required && !fileExempt) errors[f.key] = "Required";
+      // Walk-in relaxes ALL required fields; admin manual register relaxes only required FILE fields.
+      const exempt =
+        opts?.allowMissingRequired || (opts?.allowMissingRequiredFiles && isFileField(f));
+      if (f.required && !exempt) errors[f.key] = "Required";
       continue;
     }
 

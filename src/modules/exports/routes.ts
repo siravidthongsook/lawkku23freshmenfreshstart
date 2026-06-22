@@ -101,6 +101,7 @@ router.get(
       department: user.department ?? "",
       phone: user.phone ?? "",
       status: reg.status,
+      registration_source: reg.registrationSource, // normal | walkin (gate origin)
       registered_at_bangkok: toBangkokString(reg.registeredAt),
       waitlisted_at_bangkok: toBangkokString(reg.waitlistedAt),
       checked_in_at_bangkok: toBangkokString(reg.checkedInAt),
@@ -116,6 +117,7 @@ router.get(
       "department",
       "phone",
       "status",
+      "registration_source",
       "registered_at_bangkok",
       "waitlisted_at_bangkok",
       "checked_in_at_bangkok",
@@ -190,6 +192,7 @@ router.get(
         department: user.department ?? "",
         phone: user.phone ?? "",
         status: reg.status,
+        registration_source: reg.registrationSource, // normal | walkin (gate origin)
         form_version_id: reg.formVersionId ?? "",
         registered_at_bangkok: toBangkokString(reg.registeredAt),
         checked_in_at_bangkok: toBangkokString(reg.checkedInAt),
@@ -214,6 +217,7 @@ router.get(
       "department",
       "phone",
       "status",
+      "registration_source",
       "form_version_id",
       "registered_at_bangkok",
       "checked_in_at_bangkok",

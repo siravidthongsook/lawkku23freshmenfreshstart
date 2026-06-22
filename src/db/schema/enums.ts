@@ -19,7 +19,11 @@ export const registrationStatus = pgEnum("registration_status", [
   "cancelled",
 ]);
 // admin_override = admin force-set status via the status-change route (not a real scan/search).
-export const checkinMethod = pgEnum("checkin_method", ["qr_scan", "manual_search", "admin_override"]);
+// walkin = check-in stamped by the gate walk-in flow (brand-new no-account student created on the spot).
+export const checkinMethod = pgEnum("checkin_method", ["qr_scan", "manual_search", "admin_override", "walkin"]);
+
+// Origin of a registration: normal self/admin/import path vs gate walk-in (no-account student created on the spot).
+export const registrationSource = pgEnum("registration_source", ["normal", "walkin"]);
 
 export const qrTokenStatus = pgEnum("qr_token_status", ["active", "revoked"]);
 

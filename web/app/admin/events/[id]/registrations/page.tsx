@@ -8,7 +8,7 @@ import Link from "next/link";
 import { ArrowLeft, Loader2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { apiGet, apiPost, ApiError } from "@/lib/api";
-import type { RegistrationListItem, RegistrationStatus } from "@/lib/types";
+import type { RegistrationListItem, RegistrationStatus, RegistrationSource } from "@/lib/types";
 import {
   formSchema,
   isFileField,
@@ -19,7 +19,8 @@ import {
 import { regStatusLabel } from "@/lib/labels";
 import { FormFieldInput } from "@/components/student/form-fields";
 import { formatBangkok } from "@/lib/time";
-import { RegistrationStatusBadge } from "@/components/badges";
+import { RegistrationStatusBadge, RegistrationSourceBadge } from "@/components/badges";
+import { WalkinDialog } from "@/components/walkin/walkin-dialog";
 import { Badge } from "@/components/ui/badge";
 import { UserPicker } from "@/components/admin-tools/user-picker";
 import { Button } from "@/components/ui/button";
@@ -74,6 +75,7 @@ export default function EventRegistrationsPage({ params }: { params: Promise<{ i
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
+  const [walkinOpen, setWalkinOpen] = useState(false); // create a brand-new attendee at the desk
 
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"all" | RegistrationStatus>("all");
@@ -142,10 +144,18 @@ export default function EventRegistrationsPage({ params }: { params: Promise<{ i
           </Button>
           <h1 className="text-xl font-semibold">การลงทะเบียน</h1>
         </div>
-        <Button onClick={() => setManualOpen(true)}>
-          <UserPlus className="size-4" />
-          ลงทะเบียนด้วยตนเอง
-        </Button>
+        <div className="flex gap-2">
+          {/* New attendee = create user + register only (no check-in here), via the walk-in endpoint. */}
+          <Button variant="outline" onClick={() => setWalkinOpen(true)}>
+            <UserPlus className="size-4" />
+            เพิ่มผู้เข้าร่วมใหม่
+          </Button>
+          {/* Existing user manual register (unchanged path). */}
+          <Button onClick={() => setManualOpen(true)}>
+            <UserPlus className="size-4" />
+            ลงทะเบียนด้วยตนเอง
+          </Button>
+        </div>
       </div>
 
       {/* Server-side search + status filter. */}
@@ -207,6 +217,7 @@ export default function EventRegistrationsPage({ params }: { params: Promise<{ i
                   <TableHead>คณะ</TableHead>
                   <TableHead>สาขา</TableHead>
                   <TableHead>สถานะ</TableHead>
+                  <TableHead>ที่มา</TableHead>
                   <TableHead>ลงทะเบียน</TableHead>
                   <TableHead>เช็คอินแล้ว</TableHead>
                   <TableHead>เช็คอินโดย</TableHead>
@@ -233,6 +244,9 @@ export default function EventRegistrationsPage({ params }: { params: Promise<{ i
                           </Badge>
                         )}
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      <RegistrationSourceBadge source={r.registrationSource} />
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {formatBangkok(r.registeredAt) || "—"}
@@ -296,6 +310,15 @@ export default function EventRegistrationsPage({ params }: { params: Promise<{ i
         onOpenChange={setManualOpen}
         onDone={() => load({ silent: true })}
       />
+
+      {/* Create a brand-new attendee at the desk — register only (no check-in), shares the walk-in endpoint. */}
+      <WalkinDialog
+        eventId={id}
+        open={walkinOpen}
+        onOpenChange={setWalkinOpen}
+        checkinNow={false}
+        onDone={() => load({ silent: true })}
+      />
     </div>
   );
 }
@@ -316,6 +339,7 @@ function ManualRegisterDialog({
 }) {
   const [userId, setUserId] = useState("");
   const [reason, setReason] = useState("");
+  const [source, setSource] = useState<RegistrationSource>("normal"); // origin recorded on the reg
   const [submitting, setSubmitting] = useState(false);
 
   // Active form (null = formless event). loadingForm guards the initial fetch on open.
@@ -374,6 +398,7 @@ function ManualRegisterDialog({
   function reset() {
     setUserId("");
     setReason("");
+    setSource("normal");
     setSchema(null);
     setValues({});
     setFieldErrors({});
@@ -410,6 +435,7 @@ function ManualRegisterDialog({
       await apiPost(`/admin/events/${eventId}/registrations`, {
         userId: userId.trim(),
         reason: reason.trim(),
+        source,
         answers,
       });
       if (hasRequiredFile) {
@@ -465,6 +491,18 @@ function ManualRegisterDialog({
               จำเป็น เพราะการลงทะเบียนด้วยตนเองเป็นการข้ามช่วงเวลา/จำนวนที่รับ
               และถูกบันทึกไว้ในบันทึกการตรวจสอบ
             </p>
+          </div>
+          <div className="space-y-1.5">
+            <Label>ที่มาการลงทะเบียน</Label>
+            <Select value={source} onValueChange={(v) => setSource(v as RegistrationSource)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="normal">ปกติ</SelectItem>
+                <SelectItem value="walkin">Walk-in</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Form answers (only when the event has an active form). */}

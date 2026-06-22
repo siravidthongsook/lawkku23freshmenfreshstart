@@ -1,5 +1,5 @@
 import { index, jsonb, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
-import { checkinMethod, registrationStatus } from "./enums";
+import { checkinMethod, registrationSource, registrationStatus } from "./enums";
 import { events } from "./events";
 import { eventFormVersions } from "./forms";
 import { users } from "./users";
@@ -16,6 +16,8 @@ export const registrations = pgTable(
       .notNull()
       .references(() => users.id),
     status: registrationStatus("status").notNull(),
+    // Origin of the reg: normal (self/admin/import) vs gate walk-in (no-account student created at the gate).
+    registrationSource: registrationSource("registration_source").notNull().default("normal"),
     formVersionId: uuid("form_version_id").references(() => eventFormVersions.id),
     registeredAt: timestamp("registered_at", { withTimezone: true }),
     waitlistedAt: timestamp("waitlisted_at", { withTimezone: true }),

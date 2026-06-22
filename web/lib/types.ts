@@ -9,6 +9,8 @@ export type EventStatus = "draft" | "published" | "cancelled" | "archived";
 export type EventVisibility = "listed" | "unlisted";
 export type RegistrationMode = "public_self_register" | "closed";
 export type RegistrationStatus = "registered" | "waitlisted" | "checked_in" | "cancelled";
+// Origin of a registration (matches the backend `registration_source` enum).
+export type RegistrationSource = "normal" | "walkin";
 
 // GET /auth/me — current user + forced-change flag.
 export type Me = {
@@ -78,6 +80,7 @@ export type RegistrationListItem = {
   eventId: string;
   userId: string;
   status: RegistrationStatus;
+  registrationSource: RegistrationSource; // origin of the reg: ปกติ vs Walk-in
   formVersionId: string | null;
   studentId: string | null;
   fullName: string | null;

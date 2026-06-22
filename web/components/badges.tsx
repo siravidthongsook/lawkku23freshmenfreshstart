@@ -1,7 +1,7 @@
 // Color-coded status badges shared across all roles. Import these instead of hand-rolling badge styles.
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import type { EventStatus, RegistrationStatus, Role } from "@/lib/types";
+import type { EventStatus, RegistrationStatus, RegistrationSource, Role } from "@/lib/types";
 
 const EVENT_STATUS_STYLE: Record<EventStatus, string> = {
   draft: "bg-slate-200 text-slate-800 border-transparent",
@@ -35,6 +35,20 @@ const REG_STATUS_LABEL: Record<RegistrationStatus, string> = {
 
 export function RegistrationStatusBadge({ status }: { status: RegistrationStatus }) {
   return <Badge className={cn(REG_STATUS_STYLE[status])}>{REG_STATUS_LABEL[status]}</Badge>;
+}
+
+// Registration origin badge — "normal" reads as a quiet default, "walkin" stands out as desk-created.
+const REG_SOURCE_STYLE: Record<RegistrationSource, string> = {
+  normal: "bg-slate-100 text-slate-600 border-transparent",
+  walkin: "bg-purple-100 text-purple-800 border-transparent",
+};
+const REG_SOURCE_LABEL: Record<RegistrationSource, string> = {
+  normal: "ปกติ",
+  walkin: "Walk-in",
+};
+
+export function RegistrationSourceBadge({ source }: { source: RegistrationSource }) {
+  return <Badge className={cn(REG_SOURCE_STYLE[source])}>{REG_SOURCE_LABEL[source]}</Badge>;
 }
 
 const ROLE_STYLE: Record<Role, string> = {

@@ -13,7 +13,7 @@
 // returned by the server is treated as a success.
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, UserPlus } from "lucide-react";
 import { apiGet, apiPost, ApiError } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,7 @@ import { QrScanner } from "@/components/staff/qr-scanner";
 import { ScanResultPanel } from "@/components/staff/scan-result-panel";
 import { RecentScans } from "@/components/staff/recent-scans";
 import { ManualSearch } from "@/components/staff/manual-search";
+import { WalkinDialog } from "@/components/walkin/walkin-dialog";
 import { MyHistory } from "@/components/staff/my-history";
 import { primeAudio } from "@/components/staff/feedback";
 import type {
@@ -79,6 +80,7 @@ export function ScannerScreen({ eventId, mode }: { eventId: string; mode: Mode }
   const [result, setResult] = useState<DisplayScan | null>(null);
   const [recent, setRecent] = useState<RecentScan[]>([]);
   const [pending, setPending] = useState<PendingConfirm | null>(null);
+  const [walkinOpen, setWalkinOpen] = useState(false);
   const inFlightRef = useRef(false);
   const lastTokenRef = useRef<string | null>(null);
   const seqRef = useRef(0);
@@ -199,11 +201,19 @@ export function ScannerScreen({ eventId, mode }: { eventId: string; mode: Mode }
 
   return (
     <div className="space-y-4">
-      <Button asChild variant="ghost" size="sm" className="-ml-2">
-        <Link href="/staff/events">
-          <ArrowLeft className="size-4" /> กิจกรรมทั้งหมด
-        </Link>
-      </Button>
+      <div className="flex items-center justify-between gap-2">
+        <Button asChild variant="ghost" size="sm" className="-ml-2">
+          <Link href="/staff/events">
+            <ArrowLeft className="size-4" /> กิจกรรมทั้งหมด
+          </Link>
+        </Button>
+        {/* Walk-in entry only on the check-IN surface — it creates + registers + checks in in one go. */}
+        {mode === "in" && (
+          <Button variant="outline" size="sm" onClick={() => setWalkinOpen(true)}>
+            <UserPlus className="size-4" /> เพิ่ม Walk-in
+          </Button>
+        )}
+      </div>
 
       {/* Event header + live counts. */}
       <Card>
@@ -312,6 +322,15 @@ export function ScannerScreen({ eventId, mode }: { eventId: string; mode: Mode }
         }
         confirmLabel={t.confirmLabel}
         onConfirm={commitScan}
+      />
+
+      {/* Walk-in gate: create a brand-new student + register + check in now. Refresh counts on done. */}
+      <WalkinDialog
+        eventId={eventId}
+        open={walkinOpen}
+        onOpenChange={setWalkinOpen}
+        checkinNow
+        onDone={loadCtx}
       />
     </div>
   );
