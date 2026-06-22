@@ -17,6 +17,9 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 
 const GENERIC_ERROR = "อีเมลหรือรหัสผ่านไม่ถูกต้อง";
+// 429 from backend = rate-limit lockout (5 fails / 10 min → 15-min lock). Distinct text so the user
+// stops hammering and waits, instead of reading the generic "wrong password" and retrying (which re-arms the lock).
+const LOCKED_ERROR = "พยายามเข้าสู่ระบบไม่สำเร็จหลายครั้งเกินไป บัญชีถูกล็อกชั่วคราว กรุณารอประมาณ 15 นาที แล้วลองใหม่อีกครั้ง";
 
 function LoginForm() {
   const { login, user, loading } = useAuth();
@@ -28,6 +31,8 @@ function LoginForm() {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Locked = rate-limit 429 (not a wrong-password case) → swap the "you mistyped" hint for wait guidance.
+  const [locked, setLocked] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   // Refocus password after a failed login so the user can retype without reaching for the field.
   const passwordRef = useRef<HTMLInputElement>(null);
@@ -42,6 +47,7 @@ function LoginForm() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setLocked(false);
     setSubmitting(true);
     try {
       const me = await login(identifier.trim(), password);
@@ -53,8 +59,12 @@ function LoginForm() {
       const dest = next && next.startsWith("/") ? next : roleHome(me.role);
       router.replace(dest);
     } catch (err) {
-      // Never leak whether the email exists. Surface a single generic message for all auth failures.
-      if (err instanceof ApiError && err.status >= 500) {
+      // 429 = locked out: show distinct wait text (still no enumeration — lockout is keyed on the typed identifier).
+      if (err instanceof ApiError && err.status === 429) {
+        setError(LOCKED_ERROR);
+        setLocked(true);
+      } else if (err instanceof ApiError && err.status >= 500) {
+        // Never leak whether the email exists. Surface a single generic message for all auth failures.
         setError("เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง");
       } else {
         setError(GENERIC_ERROR);
@@ -98,7 +108,10 @@ function LoginForm() {
                 value={identifier}
                 onChange={(e) => {
                   setIdentifier(e.target.value);
-                  if (error) setError(null); // clear stale error while the user fixes input
+                  if (error) {
+                    setError(null);
+                    setLocked(false);
+                  } // clear stale error while the user fixes input
                 }}
                 required
                 autoFocus
@@ -113,7 +126,10 @@ function LoginForm() {
                 value={password}
                 onChange={(e) => {
                   setPassword(e.target.value);
-                  if (error) setError(null); // clear stale error while the user fixes input
+                  if (error) {
+                    setError(null);
+                    setLocked(false);
+                  } // clear stale error while the user fixes input
                 }}
                 required
               />
@@ -122,13 +138,19 @@ function LoginForm() {
             {error ? (
               <div role="alert" className="space-y-1">
                 <p className="text-sm font-medium text-destructive">{error}</p>
-                {/* Recovery hint: temp-password users often mistype the issued password. */}
-                <p className="text-xs text-muted-foreground">
-                  ลืมรหัสผ่าน หรือใช้รหัสผ่านชั่วคราว?{" "}
-                  <Link href="/forgot-password" className="underline underline-offset-4">
-                    ขอความช่วยเหลือ
-                  </Link>
-                </p>
+                {/* Locked: don't imply a typo — point to admin unlock. Otherwise hint at temp-pw mistypes. */}
+                {locked ? (
+                  <p className="text-xs text-muted-foreground">
+                    หากต้องการเข้าใช้งานทันที กรุณาติดต่อผู้ดูแลระบบเพื่อปลดล็อกบัญชี
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    ลืมรหัสผ่าน หรือใช้รหัสผ่านชั่วคราว?{" "}
+                    <Link href="/forgot-password" className="underline underline-offset-4">
+                      ขอความช่วยเหลือ
+                    </Link>
+                  </p>
+                )}
               </div>
             ) : null}
 
