@@ -5,9 +5,10 @@ import { eventFormVersions } from "../src/db/schema/forms";
 import { registrations } from "../src/db/schema/registrations";
 import { users } from "../src/db/schema/users";
 import { pointLedger } from "../src/db/schema/points";
+import { auditLogs } from "../src/db/schema/audit";
 import { request } from "./helpers/db";
 import { loginAs, seedUser } from "./helpers/auth";
-import { makeEvent } from "./helpers/factories";
+import { makeEvent, makeRegistration } from "./helpers/factories";
 import type { Event } from "../src/db/schema/events";
 
 // ---------------------------------------------------------------------------
@@ -70,6 +71,15 @@ async function regCount(eventId: string): Promise<number> {
     .select({ c: sql<number>`count(*)::int` })
     .from(registrations)
     .where(eq(registrations.eventId, eventId));
+  return r!.c;
+}
+
+// Count audit rows for a given action on a registration (over-capacity is audited per new reg).
+async function auditCount(action: string, registrationId: string): Promise<number> {
+  const [r] = await db
+    .select({ c: sql<number>`count(*)::int` })
+    .from(auditLogs)
+    .where(and(eq(auditLogs.action, action), eq(auditLogs.registrationId, registrationId)));
   return r!.c;
 }
 
@@ -172,6 +182,124 @@ describe("walk-in: duplicate student_id is rejected", () => {
     const res = await walkin(event.id, staff.cookie, walkinBody({ student_id: sid }));
     expect(res.status).toBe(409);
     expect((await res.json()) as { error: string }).toMatchObject({ error: "user_exists" });
+  });
+
+  it("existing email on file (different student_id) → 409 user_exists, no second user row", async () => {
+    const event = await makeWalkinEvent();
+    const staff = await loginAs("checkin_staff");
+    const email = `walkin-dup-${Date.now()}-${++sidSeq}@example.test`;
+    await seedUser({ role: "student", email });
+
+    const before = await userCount();
+    // Same email, but a brand-new student_id → the email dup guard must still trip.
+    const res = await walkin(
+      event.id,
+      staff.cookie,
+      walkinBody({ student_id: uniqueStudentId(), email }),
+    );
+    expect(res.status).toBe(409);
+    expect((await res.json()) as { error: string }).toMatchObject({ error: "user_exists" });
+
+    // Rejected before any insert — no second user created.
+    expect(await userCount()).toBe(before);
+    expect(await regCount(event.id)).toBe(0);
+  });
+});
+
+describe("walk-in: over-capacity is captured (not blocked) and audited", () => {
+  it("event at capacity → 201 success + admin_register_over_capacity audit row for the new reg", async () => {
+    // Capacity 1, already met by one existing checked-in reg → next walk-in is over capacity.
+    const event = await makeWalkinEvent({ capacity: 1 });
+    await makeRegistration({ event, status: "checked_in" });
+    const staff = await loginAs("checkin_staff");
+
+    const res = await walkin(event.id, staff.cookie, walkinBody({ checkin_now: false }));
+    expect(res.status).toBe(201); // mirrors admin manual register — over-capacity never blocks
+    const body = (await res.json()) as {
+      user: { id: string };
+      registration: { id: string; status: string };
+    };
+    expect(body.registration.status).toBe("registered");
+
+    // Over-capacity is audited against the freshly-created reg, with the count/limit + walkin marker.
+    expect(await auditCount("admin_register_over_capacity", body.registration.id)).toBe(1);
+    const [audit] = await db
+      .select()
+      .from(auditLogs)
+      .where(
+        and(
+          eq(auditLogs.action, "admin_register_over_capacity"),
+          eq(auditLogs.registrationId, body.registration.id),
+        ),
+      );
+    expect(audit!.entityType).toBe("registration");
+    expect(audit!.targetUserId).toBe(body.user.id);
+    expect(audit!.metadata as Record<string, unknown>).toMatchObject({
+      count: 1,
+      limit: 1,
+      walkin: true,
+    });
+
+    // The walk-in reg really landed (2 regs now: the pre-existing one + this one).
+    expect(await regCount(event.id)).toBe(2);
+  });
+});
+
+describe("walk-in: rejected when the event can't be registered into", () => {
+  it("event has no active form version → 400 no_active_form, nothing created", async () => {
+    // Note: makeEvent (not makeWalkinEvent) → published event WITHOUT a form version.
+    const event = await makeEvent({ status: "published" });
+    const staff = await loginAs("checkin_staff");
+
+    const before = await userCount();
+    const res = await walkin(event.id, staff.cookie, walkinBody());
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toMatchObject({ error: "no_active_form" });
+
+    expect(await userCount()).toBe(before);
+    expect(await regCount(event.id)).toBe(0);
+  });
+
+  it("event not published (draft) → 400 event_not_published, nothing created", async () => {
+    // Has an active form version, but status=draft → the publish gate must reject first.
+    const event = await makeWalkinEvent({ status: "draft" });
+    const staff = await loginAs("checkin_staff");
+
+    const before = await userCount();
+    const res = await walkin(event.id, staff.cookie, walkinBody());
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toMatchObject({ error: "event_not_published" });
+
+    expect(await userCount()).toBe(before);
+    expect(await regCount(event.id)).toBe(0);
+  });
+});
+
+describe("walk-in: check-in window not yet open still captures the walk-in", () => {
+  it("checkin_now=true but check-in opens in the future → user+reg created, check-in skipped, no points", async () => {
+    const future = new Date(Date.now() + 60 * 60 * 1000); // check-in opens 1h from now
+    const event = await makeWalkinEvent({ checkinOpenAt: future });
+    const staff = await loginAs("checkin_staff");
+
+    const res = await walkin(event.id, staff.cookie, walkinBody({ checkin_now: true }));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      user: { id: string };
+      registration: { status: string };
+      checkedIn: boolean;
+      checkinSkipped?: string;
+      pointsAwarded: number;
+    };
+    expect(body.checkedIn).toBe(false);
+    expect(body.checkinSkipped).toBe("checkin_not_open");
+    expect(body.pointsAwarded).toBe(0);
+    expect(body.registration.status).toBe("registered"); // captured, just not checked in yet
+
+    // Reg row is real but not stamped; no points awarded.
+    const [reg] = await db.select().from(registrations).where(eq(registrations.eventId, event.id));
+    expect(reg!.status).toBe("registered");
+    expect(reg!.checkedInAt).toBeNull();
+    expect(await balanceOf(body.user.id)).toBe(0);
   });
 });
 

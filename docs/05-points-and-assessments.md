@@ -21,7 +21,7 @@ App-wide point/reward system, independent of per-event registration.
 
 | reason_code | trigger | amount | dedupe key | guards |
 |---|---|---|---|---|
-| `checkin_in` | scan-in / manual / admin status→checked_in | `effectiveCheckinInPoints` (override → default 20) | `checkin_in:<regId>:v<epoch>` | student + toggle + not past cutoff |
+| `checkin_in` | scan-in / manual / walk-in (gate) / admin status→checked_in | `effectiveCheckinInPoints` (override → default 20) | `checkin_in:<regId>:v<epoch>` | student + toggle + not past cutoff |
 | `checkin_out` | scan-out success | `effectiveCheckinOutPoints` (def 20) | `checkin_out:<regId>:v<epoch>` | student + not past cutoff |
 | `assessment_completed` | assessment submit | `effectiveAssessmentPoints` (def 100) | `assessment:<eventId>:<userId>` | student + enabled + cutoff + window + requires-checkin |
 | `staff_grant_qr` | student claims grant QR | token.points_value | `grant:<tokenId>:<userId>` | student + token active/seats left/not expired + not cutoff |
@@ -33,6 +33,8 @@ App-wide point/reward system, independent of per-event registration.
 **Core invariant (`addPoints`, `src/modules/points/service.ts`):** in one tx — row-lock the user → idempotent on `dedupe_key` → insert ledger row → `points_balance += delta` → advance `last_positive_at` ONLY on positive delta (keeps leaderboard tie-break honest) → write audit.
 
 **Check-in epoch keys (`src/modules/points/checkin-award.ts`):** `checkin_in`/`checkin_out` dedupe keys carry an epoch `:v<k>` where `k` = number of prior awards for that `(reg, reason)` currently net-reversed (have a matching `correction_reverse`). First award → `v0`. A genuine double-scan (no undo between) keeps the same key → deduped (idempotent). Undo reverses the *active* (latest, not-yet-reversed) award; a re-check-in afterwards bumps `k` → fresh key → re-award (fixes "undo wrong person then redo" silently losing the +20). Epoch is computed inside the reg-row-locked tx so concurrent re-scans serialize (exactly one re-award). Same scheme used by the admin status-change route when transitioning into `checked_in` (default-on, `awardPoints:false` opts out).
+
+**Walk-in entry path (`POST /events/:eventId/walkin`, staff/admin):** the gate flow creates a CLAIM-mode student + registration on the spot and, when the check-in window is open, stamps check-in and awards `checkin_in` via `awardCheckinIn` with `scanMethod="walkin"` (same guards/epoch keys as any other check-in). Closed window → reg created, no check-in/points (returns `checkinSkipped`). Full contract: `docs/02-api-contract.md` (Check-in).
 
 ### A.3 Staff budget (spending)
 

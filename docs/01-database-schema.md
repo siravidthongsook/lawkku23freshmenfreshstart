@@ -121,7 +121,8 @@ New version created when schema changes after submissions exist. Old registratio
 | checked_in_at | timestamptz | null |
 | cancelled_at | timestamptz | null |
 | checked_in_by_user_id | uuid | null → users(id) |
-| checkin_method | enum(`qr_scan`,`manual_search`) | null |
+| checkin_method | enum(`qr_scan`,`manual_search`,`admin_override`,`walkin`) | null |
+| registration_source | enum(`normal`,`walkin`) | not null default `normal` |
 | manual_checkin_reason | text | null |
 | created_at | timestamptz | not null |
 | updated_at | timestamptz | not null |

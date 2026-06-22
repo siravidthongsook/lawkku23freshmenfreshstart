@@ -50,6 +50,7 @@
 | Event Check-in List | `/staff/events` | all check-in-capable events (global): title, date, check-in window, status, counts |
 | Scanner Page | `/staff/events/:eventId/checkin` | QR scan-in/out, manual search, recent scan result, network error display |
 | Manual Search | (within scanner) | search within current event only by student_id/full_name/faculty/department; minimal info; manual check-in, undo check-in (reason) |
+| Walk-in (gate) | (within scanner) | register a person with no account on the spot — capture minimal data (full_name, student_id, email?…) + reason → create CLAIM-mode student + register + check in (one tx). Dup student_id/email → search + check in instead. `POST /events/:eventId/walkin` |
 | Staff Points | `/staff/points` | own budget gauge; issue/revoke grant QR (plaintext shown once); manual give to a student; self-reverse a recent grant within window |
 
 Scan result UI: success (name/student_id/time), already checked-in (orig time + by), wrong event, cancelled/waitlisted (deny), invalid/revoked (suggest manual fallback), network error (retry, not success).
@@ -73,7 +74,7 @@ Staff never see: email, phone, form answers, files, audit logs.
 ### Registrations (dashboard L2 + L3)
 | page | route | shows / does |
 |---|---|---|
-| Registration List | `/admin/events/:id/registrations` | student_id, full_name, faculty, department, status, registered_at, checked_in_at, checked_in_by, form_version. Actions: view, cancel, override, promote/demote, reset QR |
+| Registration List | `/admin/events/:id/registrations` | student_id, full_name, faculty, department, status, registered_at, checked_in_at, checked_in_by, form_version, source badge (normal/walk-in). Actions: view, cancel, override, promote/demote, reset QR; manual register (source select normal/walk-in); add new attendee (walk-in dialog → create account + register on the spot) |
 | Registration Detail | `/admin/registrations/:registrationId` | user profile, status, form answers, file download, QR token status, audit history for this registration. Manual register/cancel/override/promote/demote/QR regen-revoke/edit answers (reason) |
 
 ### Users

@@ -100,7 +100,7 @@ Slug change → audit `event_slug_changed`.
 |---|---|---|
 | GET | `/admin/events/:eventId/registrations` | list |
 | GET | `/admin/registrations/:registrationId` | detail + audit history |
-| POST | `/admin/events/:eventId/registrations` | manual register (override window/capacity; reason+audit) |
+| POST | `/admin/events/:eventId/registrations` | manual register (override window/capacity; reason+audit). Body `source: "normal"\|"walkin"` (default `normal`) records the reg origin for an existing user |
 | POST | `/admin/registrations/:registrationId/cancel` | reason+audit |
 | POST | `/admin/registrations/:registrationId/promote` | waitlist→registered; audit |
 | POST | `/admin/registrations/:registrationId/demote` | registered→waitlisted; audit |
@@ -122,6 +122,16 @@ Over-capacity override → audit `admin_register_over_capacity`.
 | GET | `/events/:eventId/checkins/search` | staff/admin | manual search within event only; minimal info |
 | POST | `/registrations/:registrationId/manual-checkin` | staff/admin | audit `manual_checkin` |
 | POST | `/registrations/:registrationId/undo-checkin` | staff/admin | reason required; audit `manual_checkin_undo` |
+| POST | `/events/:eventId/walkin` | staff/admin (`canWalkinRegister`) | gate flow: create new no-account student + register + optional check-in, all in ONE tx |
+
+**Walk-in register** (`POST /events/:eventId/walkin`, perm `canWalkinRegister` = staff or admin): in one tx, create a brand-new student (CLAIM mode — role forced `student`, `passwordHash=null`, `passwordMustChange=false`; student self-claims later via `student_id`) → register to event (`registration_source="walkin"`) → optionally check in + award `checkin_in` points (scan method `walkin`).
+- Body: `full_name`*, `student_id`*, `email?`, `faculty?`, `department?`, `phone?`, `nickname?`, `year?`, `answers` (default `{}`), `checkin_now` (default `true`), `reason`* (audited on `user_created` + `registration_created`), `dry_run` (default `false`).
+- Form answers FULLY relaxed (`allowMissingRequired` + files) — gate captures minimal data, form filled later.
+- Response (`201`, `200` on dry_run): `{ user, registration (incl. registrationSource), qrToken (plaintext once; null on dry_run), checkedIn, checkinSkipped?, pointsAwarded, dryRun }`.
+- `dry_run=true` → full validation + dup check + window preview, **NO writes** (no user/reg/qr/audit), returns `dryRun:true`.
+- Check-in window enforced like manual-checkin: closed window does NOT fail the tx — reg is still created, no check-in/points, and `checkinSkipped` returns `checkin_not_open` | `checkin_closed`.
+- Over-capacity → reg still created + audit `admin_register_over_capacity` (never rejected, mirrors admin manual register).
+- Errors: `user_exists` (409, dup `student_id`/`email` — search + check them in instead; also catches the concurrent race via unique-constraint), `event_not_published` (400), `no_active_form` (400), `invalid_form_answers` (400), `not_found` (404, event).
 
 **Scan validate**: token exists/active, registration belongs to event, event published, checkin window open, status valid (not cancelled/waitlisted/already checked_in).
 
