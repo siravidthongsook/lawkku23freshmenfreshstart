@@ -7,6 +7,7 @@ import Link from "next/link";
 import { ArrowLeft, Download } from "lucide-react";
 import { toast } from "sonner";
 import { apiGet, apiPatch, apiPost, ApiError } from "@/lib/api";
+import { pointsSkipToThai } from "@/lib/error-messages";
 import type { RegistrationStatus } from "@/lib/types";
 import { checkinMethodLabel, qrStatusLabel } from "@/lib/labels";
 import { formatBangkok } from "@/lib/time";
@@ -234,7 +235,7 @@ export default function RegistrationDetailPage({
         });
         // Stamp committed but points withheld (cutoff/toggle/role) → warn the admin explicitly. [E1/E2]
         if (res.points_skipped && res.points_skipped.length > 0) {
-          toast.warning(`บันทึกเวลาแล้ว แต่ไม่ได้ให้แต้ม: ${res.points_skipped.join(", ")}`);
+          toast.warning(`บันทึกเวลาแล้ว แต่ไม่ได้ให้แต้ม: ${res.points_skipped.map(pointsSkipToThai).join(", ")}`);
         } else {
           toast.success("เสร็จสิ้น มีการบันทึกไว้ในบันทึกการตรวจสอบ");
         }

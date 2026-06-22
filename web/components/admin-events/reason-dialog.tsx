@@ -16,7 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { reasonSchema } from "@/lib/schemas";
 import { toast } from "sonner";
-import { ApiError } from "@/lib/api";
+import { errorToThai } from "@/lib/error-messages";
 
 export type ReasonDialogProps = {
   open: boolean;
@@ -52,8 +52,8 @@ export function ReasonDialog({
       setReason("");
       onOpenChange(false);
     } catch (err) {
-      // Surface failure as toast + keep dialog open (don't bubble → no Next error overlay).
-      toast.error(err instanceof ApiError ? err.message : "ไม่สามารถดำเนินการได้");
+      // Surface failure as Thai toast + keep dialog open (don't bubble → no Next error overlay).
+      toast.error(errorToThai(err));
     } finally {
       setSubmitting(false);
     }
