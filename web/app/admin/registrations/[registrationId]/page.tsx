@@ -148,6 +148,25 @@ function bangkokLocalToUtcIso(local: string): string | undefined {
   return d.toISOString();
 }
 
+// Inverse of bangkokLocalToUtcIso: UTC ISO → naive datetime-local ("YYYY-MM-DDTHH:mm") in Bangkok wall time.
+// Used to PREFILL the panel inputs with the current truth so editing = overwrite.
+function utcIsoToBangkokLocal(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const b = new Date(d.getTime() + 7 * 60 * 60 * 1000); // shift +07:00, then read UTC parts as wall time
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${b.getUTCFullYear()}-${p(b.getUTCMonth() + 1)}-${p(b.getUTCDate())}T${p(b.getUTCHours())}:${p(b.getUTCMinutes())}`;
+}
+
+// Derive the wire action from the panel's edit state (direct-edit model, no dropdown):
+// cleared → clear; has-stamp & time edited → set (overwrite); no-stamp & adding → set; otherwise no-op.
+function deriveAxis(currentLocal: string, val: string, cleared: boolean, setNew: boolean): AxisAction {
+  if (cleared) return "clear";
+  if (currentLocal) return val !== currentLocal ? "set" : "unchanged";
+  return setNew ? "set" : "unchanged";
+}
+
 // Dialog copy for the current action — status change is dynamic (depends on the chosen target).
 function metaFor(action: Action): ActionMeta {
   if (action.kind === "set_status") {
@@ -178,13 +197,16 @@ export default function RegistrationDetailPage({
   // Per-field client errors (e.g. invalid number) — block save when present.
   const [answerErrors, setAnswerErrors] = useState<Record<string, string>>({});
 
-  // ---- Check-in/out state-override panel (admin stamp control) ----
-  const [inAction, setInAction] = useState<AxisAction>("unchanged");
-  const [outAction, setOutAction] = useState<AxisAction>("unchanged");
-  const [inAt, setInAt] = useState(""); // naive datetime-local (Bangkok wall time); empty = now()
+  // ---- Check-in/out state-override panel (admin stamp control, direct-edit model) ----
+  // Inputs are PREFILLED with the current stamp; editing the time = overwrite, ล้าง = wipe, untouched = no-op.
+  const [inAt, setInAt] = useState(""); // naive datetime-local (Bangkok wall time)
   const [outAt, setOutAt] = useState("");
   const [inAward, setInAward] = useState(true);
   const [outAward, setOutAward] = useState(true);
+  const [inClear, setInClear] = useState(false); // ล้าง pressed on check-in axis
+  const [outClear, setOutClear] = useState(false);
+  const [inSetNew, setInSetNew] = useState(false); // +ตั้งเวลา pressed on a no-stamp axis
+  const [outSetNew, setOutSetNew] = useState(false);
 
   // Answers are dirty when the draft differs from what's stored — gates the save button + audit noise.
   const answersDirty = data
@@ -207,6 +229,18 @@ export default function RegistrationDetailPage({
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Reset the panel to mirror the current truth on load / after every save.
+  const checkedInAtSrc = data?.registration.checkedInAt ?? null;
+  const checkedOutAtSrc = data?.registration.checkedOutAt ?? null;
+  useEffect(() => {
+    setInAt(utcIsoToBangkokLocal(checkedInAtSrc));
+    setOutAt(utcIsoToBangkokLocal(checkedOutAtSrc));
+    setInClear(false);
+    setOutClear(false);
+    setInSetNew(false);
+    setOutSetNew(false);
+  }, [checkedInAtSrc, checkedOutAtSrc]);
 
   // Single reason-gated mutation dispatcher. Throws on failure to keep the dialog open.
   async function runAction(reason: string) {
@@ -266,6 +300,12 @@ export default function RegistrationDetailPage({
 
   const reg = data.registration;
   const status = reg.status;
+
+  // Panel: current truth (Bangkok local) + derived wire action per axis.
+  const currentInLocal = utcIsoToBangkokLocal(reg.checkedInAt);
+  const currentOutLocal = utcIsoToBangkokLocal(reg.checkedOutAt);
+  const inAction = deriveAxis(currentInLocal, inAt, inClear, inSetNew);
+  const outAction = deriveAxis(currentOutLocal, outAt, outClear, outSetNew);
 
   return (
     <div className="space-y-6">
@@ -383,23 +423,31 @@ export default function RegistrationDetailPage({
           {/* CHECK-IN axis */}
           <AxisControl
             label="เช็คอิน"
-            action={inAction}
-            onAction={setInAction}
+            hasStamp={!!reg.checkedInAt}
+            currentLocal={currentInLocal}
             at={inAt}
             onAt={setInAt}
             award={inAward}
             onAward={setInAward}
+            cleared={inClear}
+            onCleared={setInClear}
+            setNew={inSetNew}
+            onSetNew={setInSetNew}
             disableSet={status === "cancelled" || status === "waitlisted"}
           />
           {/* CHECK-OUT axis */}
           <AxisControl
             label="เช็คเอาท์"
-            action={outAction}
-            onAction={setOutAction}
+            hasStamp={!!reg.checkedOutAt}
+            currentLocal={currentOutLocal}
             at={outAt}
             onAt={setOutAt}
             award={outAward}
             onAward={setOutAward}
+            cleared={outClear}
+            onCleared={setOutClear}
+            setNew={outSetNew}
+            onSetNew={setOutSetNew}
             disableSet={false}
           />
 
@@ -546,55 +594,114 @@ export default function RegistrationDetailPage({
   );
 }
 
-// One axis (เช็คอิน / เช็คเอาท์) of the state-override panel: action select + optional datetime + award toggle.
+// One axis (เช็คอิน / เช็คเอาท์) of the state-override panel — direct-edit:
+// prefilled datetime = current truth (edit to overwrite) + ล้าง to wipe; no-stamp shows +ตั้งเวลา.
 function AxisControl({
   label,
-  action,
-  onAction,
+  hasStamp,
+  currentLocal,
   at,
   onAt,
   award,
   onAward,
+  cleared,
+  onCleared,
+  setNew,
+  onSetNew,
   disableSet,
 }: {
   label: string;
-  action: AxisAction;
-  onAction: (a: AxisAction) => void;
+  hasStamp: boolean;
+  currentLocal: string; // current truth as Bangkok datetime-local ("" if none)
   at: string;
   onAt: (v: string) => void;
   award: boolean;
   onAward: (v: boolean) => void;
-  disableSet: boolean; // block "set" (e.g. cancelled/waitlisted reg) — mirrors server reject [E5]
+  cleared: boolean;
+  onCleared: (v: boolean) => void;
+  setNew: boolean;
+  onSetNew: (v: boolean) => void;
+  disableSet: boolean; // block adding a stamp (cancelled/waitlisted reg) — mirrors server reject [E5]
 }) {
+  const inputCls =
+    "rounded-md border border-input bg-transparent px-2 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring";
+  const retiming = hasStamp && !cleared && at !== currentLocal; // existing stamp, time edited
   return (
     <div className="space-y-2 rounded-md border p-3">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-3">
         <span className="w-20 text-xs font-medium text-muted-foreground">{label}</span>
-        <Select value={action} onValueChange={(v) => onAction(v as AxisAction)}>
-          <SelectTrigger className="h-8 w-36" aria-label={`${label} action`}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="unchanged">ไม่เปลี่ยน</SelectItem>
-            <SelectItem value="set" disabled={disableSet}>ตั้งเวลา</SelectItem>
-            <SelectItem value="clear">ล้าง</SelectItem>
-          </SelectContent>
-        </Select>
+
+        {cleared ? (
+          // Had a stamp, user chose to wipe it.
+          <>
+            <span className="text-sm text-destructive line-through">{currentLocal || "—"}</span>
+            <span className="text-xs text-destructive">จะล้าง</span>
+            <Button size="sm" variant="ghost" className="h-7" onClick={() => onCleared(false)}>
+              ยกเลิก
+            </Button>
+          </>
+        ) : hasStamp ? (
+          // Has a stamp: editable datetime prefilled with the current truth.
+          <>
+            <input type="datetime-local" className={inputCls} value={at} onChange={(e) => onAt(e.target.value)} />
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 text-destructive"
+              onClick={() => onCleared(true)}
+            >
+              ล้าง
+            </Button>
+          </>
+        ) : setNew ? (
+          // No stamp, adding one. Empty = now().
+          <>
+            <input type="datetime-local" className={inputCls} value={at} onChange={(e) => onAt(e.target.value)} />
+            <span className="text-xs text-muted-foreground">เว้นว่าง = ตอนนี้</span>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7"
+              onClick={() => {
+                onSetNew(false);
+                onAt("");
+              }}
+            >
+              ยกเลิก
+            </Button>
+          </>
+        ) : (
+          // No stamp, default.
+          <>
+            <span className="text-sm text-muted-foreground">— ยังไม่{label} —</span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7"
+              disabled={disableSet}
+              onClick={() => onSetNew(true)}
+            >
+              + ตั้งเวลา
+            </Button>
+          </>
+        )}
       </div>
-      {action === "set" ? (
-        <div className="flex flex-wrap items-center gap-3 pl-22">
-          {/* Naive Bangkok wall time; empty = ตอนนี้ (server now()). Converted to UTC before POST. */}
-          <input
-            type="datetime-local"
-            className="rounded-md border border-input bg-transparent px-2 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-            value={at}
-            onChange={(e) => onAt(e.target.value)}
-          />
-          <span className="text-xs text-muted-foreground">เว้นว่าง = ตอนนี้</span>
-          <label className="flex items-center gap-1.5 text-xs">
-            <input type="checkbox" checked={award} onChange={(e) => onAward(e.target.checked)} />
-            ให้แต้ม
-          </label>
+
+      {/* Award toggle only matters when actually setting a time (new add or retime). */}
+      {setNew || retiming ? (
+        <label className="flex items-center gap-1.5 pl-22 text-xs">
+          <input type="checkbox" checked={award} onChange={(e) => onAward(e.target.checked)} />
+          ให้แต้ม
+        </label>
+      ) : null}
+
+      {/* Retime hint + one-click revert to the original truth. */}
+      {retiming ? (
+        <div className="flex items-center gap-2 pl-22 text-xs text-amber-600">
+          <span>จะเปลี่ยนจาก {currentLocal}</span>
+          <Button size="sm" variant="ghost" className="h-6" onClick={() => onAt(currentLocal)}>
+            คืนค่าเดิม
+          </Button>
         </div>
       ) : null}
     </div>
