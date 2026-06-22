@@ -47,6 +47,7 @@ type FormState = {
   department: string;
   phone: string;
   nickname: string;
+  group_number: string; // บรรพ — kept as string for the input; parsed to int in buildBody
 };
 
 const EMPTY: FormState = {
@@ -57,6 +58,7 @@ const EMPTY: FormState = {
   department: "",
   phone: "",
   nickname: "",
+  group_number: "",
 };
 
 // Build the request body from the form. Empty optional strings are dropped (schema wants undefined, not "").
@@ -76,6 +78,7 @@ function buildBody(
     department: f.department.trim() || undefined,
     phone: f.phone.trim() || undefined,
     nickname: f.nickname.trim() || undefined,
+    group_number: f.group_number.trim() ? Number(f.group_number.trim()) : undefined,
     reason: reason.trim(),
     source: checkinNow ? "walkin" : source,
     checkin_now: checkinNow,
@@ -228,6 +231,11 @@ export function WalkinDialog({
                 <Field label="ชื่อเล่น" value={form.nickname} onChange={(v) => set("nickname", v)} />
                 <Field label="เบอร์โทร" value={form.phone} onChange={(v) => set("phone", v)} />
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                {/* บรรพ = group 1..16; staff-assigned, used later as the account-claim 2nd factor. */}
+                <Field label="บรรพ" value={form.group_number} onChange={(v) => set("group_number", v)} type="number" />
+                <div />
+              </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="walkin-reason">
@@ -340,6 +348,9 @@ function PreviewView({
           {preview.user.email ? <Row label="อีเมล" value={preview.user.email} /> : null}
           {preview.user.faculty ? <Row label="คณะ" value={preview.user.faculty} /> : null}
           {preview.user.department ? <Row label="สาขา" value={preview.user.department} /> : null}
+          {preview.user.group_number != null ? (
+            <Row label="บรรพ" value={String(preview.user.group_number)} />
+          ) : null}
         </dl>
 
         {checkinNow ? (

@@ -82,6 +82,7 @@ export const walkinRegisterBody = z.object({
   phone: z.string().trim().optional(),
   nickname: z.string().trim().optional(),
   year: z.coerce.number().int().optional(),
+  group_number: z.coerce.number().int().min(1).max(16).optional(), // บรรพ — group 1..16; claim 2nd factor
   answers: z.record(z.string(), z.unknown()).default({}),
   // Provenance of the registration. Admin desk can choose; staff gate always sends "walkin".
   // Default "walkin" keeps existing callers/behavior unchanged.
@@ -104,6 +105,7 @@ const walkinPublicUser = z.object({
   phone: z.string().nullable(),
   nickname: z.string().nullable(),
   year: z.number().nullable(),
+  group_number: z.number().nullable(),
   status: z.string(),
   claimed: z.boolean(), // false here — claim account not yet self-claimed
   created_at: z.string(),
@@ -1149,6 +1151,7 @@ router.post(
             phone: body.phone ?? null,
             nickname: body.nickname ?? null,
             year: body.year ?? null,
+            group_number: body.group_number ?? null,
             status: "active",
             claimed: false,
             created_at: now.toISOString(),
@@ -1183,6 +1186,7 @@ router.post(
           phone: body.phone ?? null,
           nickname: body.nickname ?? null,
           year: body.year ?? null,
+          groupNumber: body.group_number ?? null, // บรรพ — staff-assigned at walk-in
           passwordHash: null, // CLAIM mode — student self-claims later via student_id
           passwordMustChange: false,
           createdByAdminId: actor.id,
@@ -1211,6 +1215,7 @@ router.post(
             email: created.email,
             student_id: created.studentId,
             role: created.role,
+            group_number: created.groupNumber,
             provision_mode: "claim",
             walkin: true,
           },
@@ -1361,6 +1366,7 @@ function serializeWalkinUser(u: typeof users.$inferSelect): WalkinRegisterRespon
     phone: u.phone,
     nickname: u.nickname,
     year: u.year,
+    group_number: u.groupNumber,
     status: u.status,
     claimed: u.passwordHash !== null, // false for a fresh claim account
     created_at: u.createdAt.toISOString(),

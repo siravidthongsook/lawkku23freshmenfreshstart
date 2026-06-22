@@ -156,6 +156,42 @@ describe("walk-in: happy path (new student + register + check-in + points)", () 
   });
 });
 
+describe("walk-in: บรรพ (group_number) is staff-assignable", () => {
+  it("group_number → persisted to the user row + echoed in the response", async () => {
+    const event = await makeWalkinEvent();
+    const staff = await loginAs("checkin_staff");
+
+    const res = await walkin(event.id, staff.cookie, walkinBody({ checkin_now: false, group_number: 7 }));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { user: { id: string; group_number: number | null } };
+    expect(body.user.group_number).toBe(7);
+
+    const [u] = await db.select({ g: users.groupNumber }).from(users).where(eq(users.id, body.user.id));
+    expect(u!.g).toBe(7);
+  });
+
+  it("dry_run reflects group_number without writing", async () => {
+    const event = await makeWalkinEvent();
+    const staff = await loginAs("checkin_staff");
+
+    const res = await walkin(event.id, staff.cookie, walkinBody({ group_number: 12, dry_run: true }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { user: { group_number: number | null }; dryRun: boolean };
+    expect(body.dryRun).toBe(true);
+    expect(body.user.group_number).toBe(12);
+  });
+
+  it("out-of-range group_number (>16) → 400, nothing created", async () => {
+    const event = await makeWalkinEvent();
+    const staff = await loginAs("checkin_staff");
+
+    const before = await userCount();
+    const res = await walkin(event.id, staff.cookie, walkinBody({ group_number: 99 }));
+    expect(res.status).toBe(400);
+    expect(await userCount()).toBe(before);
+  });
+});
+
 describe("walk-in: dry_run previews without persisting anything", () => {
   it("dry_run=true → 200 preview, NO user/registration/ledger rows written", async () => {
     const event = await makeWalkinEvent();
