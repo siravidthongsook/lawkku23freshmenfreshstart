@@ -27,7 +27,7 @@ import {
   hasActiveQrToken,
   getActiveQrTokenForOwner,
 } from "../qr-tokens/service";
-import { awardCheckinIn, reverseCheckinOnUndo } from "../points/checkin-award";
+import { awardCheckinIn, getActiveCheckinPoints, reverseCheckinOnUndo } from "../points/checkin-award";
 import {
   countActiveRegistrations,
   getActiveFormVersion,
@@ -521,11 +521,15 @@ router.get(
     // (not a raw UUID). Null when no actor recorded (e.g. legacy or never-stamped).
     const checkedInBy = reg.checkedInByUserId ? await getUserName(db, reg.checkedInByUserId) : null;
     const checkedOutBy = reg.checkedOutByUserId ? await getUserName(db, reg.checkedOutByUserId) : null;
+    // Active points per leg so the panel can warn "clearing this stamp also removes N points".
+    const checkinPoints = await getActiveCheckinPoints(db, reg.id);
     return c.json({
       registration: {
         ...serializeRegistration(reg),
         checkedInBy, // staff/admin display name (state-override panel)
         checkedOutBy,
+        checkinInPoints: checkinPoints.checkinIn, // active checkin_in award (null = none)
+        checkinOutPoints: checkinPoints.checkinOut,
       },
       user, // { userId, studentId, fullName, email, faculty, department }
       answers,

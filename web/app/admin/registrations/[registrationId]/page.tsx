@@ -49,6 +49,8 @@ type RegistrationDetail = {
   checkinMethod: string | null;
   checkedInBy: string | null; // display name of the staff/admin who checked in
   checkedOutBy: string | null; // display name of the staff/admin who checked out
+  checkinInPoints: number | null; // active checkin_in award tied to this reg (null = none)
+  checkinOutPoints: number | null; // active checkin_out award (null = none)
   createdAt: string;
   updatedAt: string;
 };
@@ -434,6 +436,9 @@ export default function RegistrationDetailPage({
             setNew={inSetNew}
             onSetNew={setInSetNew}
             disableSet={status === "cancelled" || status === "waitlisted"}
+            points={reg.checkinInPoints}
+            // Clearing check-in reverses the check-in points (and cascades the OUT leg — warned below).
+            pointsWillReverse={inClear}
           />
           {/* CHECK-OUT axis */}
           <AxisControl
@@ -449,6 +454,11 @@ export default function RegistrationDetailPage({
             setNew={outSetNew}
             onSetNew={setOutSetNew}
             disableSet={false}
+            points={reg.checkinOutPoints}
+            // OUT points reverse if check-out cleared OR check-in cleared (server cascades the clear).
+            pointsWillReverse={outClear || inClear}
+            // Surface the cascade: clearing check-in also wipes the check-out stamp.
+            cascadeNote={inClear && !!reg.checkedOutAt ? "การล้างเช็คอินจะล้างเช็คเอาท์นี้ด้วย" : undefined}
           />
 
           <Button
@@ -609,6 +619,9 @@ function AxisControl({
   setNew,
   onSetNew,
   disableSet,
+  points,
+  pointsWillReverse,
+  cascadeNote,
 }: {
   label: string;
   hasStamp: boolean;
@@ -622,6 +635,9 @@ function AxisControl({
   setNew: boolean;
   onSetNew: (v: boolean) => void;
   disableSet: boolean; // block adding a stamp (cancelled/waitlisted reg) — mirrors server reject [E5]
+  points: number | null; // active award tied to this leg (null = none)
+  pointsWillReverse: boolean; // true → the linked points will be reversed by this change (strike them)
+  cascadeNote?: string; // extra warning (e.g. check-out cleared as a side effect of clearing check-in)
 }) {
   const inputCls =
     "rounded-md border border-input bg-transparent px-2 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring";
@@ -704,6 +720,19 @@ function AxisControl({
           </Button>
         </div>
       ) : null}
+
+      {/* Linked points: struck through when this change will reverse them, so admin sees the cost. */}
+      {points !== null ? (
+        <div className="flex items-center gap-2 pl-22 text-xs">
+          <span className={pointsWillReverse ? "text-destructive line-through" : "text-muted-foreground"}>
+            แต้มที่ได้: +{points}
+          </span>
+          {pointsWillReverse ? <span className="font-medium text-destructive">จะถูกยกเลิกด้วย</span> : null}
+        </div>
+      ) : null}
+
+      {/* Cascade warning (e.g. clearing check-in also clears this check-out). */}
+      {cascadeNote ? <p className="pl-22 text-xs font-medium text-destructive">{cascadeNote}</p> : null}
     </div>
   );
 }

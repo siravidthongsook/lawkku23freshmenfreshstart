@@ -447,3 +447,63 @@ describe("admin state-override: audit, provenance, dedupe, authz", () => {
     expect(res.status).toBe(403);
   });
 });
+
+// =====================================================================
+// DETAIL endpoint exposes active points per leg (powers the UI strike-through warning)
+// =====================================================================
+describe("admin registration detail: active checkin points", () => {
+  async function getDetail(registrationId: string, cookie: string) {
+    const res = await request(`/admin/registrations/${registrationId}`, { method: "GET", cookie });
+    expect(res.status).toBe(200);
+    return (await res.json()) as {
+      registration: { checkinInPoints: number | null; checkinOutPoints: number | null };
+    };
+  }
+
+  it("returns +20/+20 after check-in+out, then null for the OUT leg once cleared", async () => {
+    const event = await makeCheckinEvent();
+    await enableCheckout(event.id);
+    const { registrationId } = await registerStudent(event);
+    const admin = await loginAs("admin");
+    await stateOverride(registrationId, admin.cookie, {
+      checkin: { action: "set", at: "2026-06-20T07:00:00.000Z" },
+      checkout: { action: "set", at: "2026-06-20T09:00:00.000Z" },
+      reason: "setup",
+    });
+    let d = await getDetail(registrationId, admin.cookie);
+    expect(d.registration.checkinInPoints).toBe(20);
+    expect(d.registration.checkinOutPoints).toBe(20);
+
+    // Clear checkout → OUT leg reversed → detail no longer reports an active OUT award.
+    await stateOverride(registrationId, admin.cookie, { checkout: { action: "clear" }, reason: "out mistake" });
+    d = await getDetail(registrationId, admin.cookie);
+    expect(d.registration.checkinInPoints).toBe(20); // IN preserved
+    expect(d.registration.checkinOutPoints).toBeNull(); // OUT gone
+  });
+
+  it("clearing check-in reverses BOTH legs → both null in detail", async () => {
+    const event = await makeCheckinEvent();
+    await enableCheckout(event.id);
+    const { registrationId } = await registerStudent(event);
+    const admin = await loginAs("admin");
+    await stateOverride(registrationId, admin.cookie, {
+      checkin: { action: "set", at: "2026-06-20T07:00:00.000Z" },
+      checkout: { action: "set", at: "2026-06-20T09:00:00.000Z" },
+      reason: "setup",
+    });
+    await stateOverride(registrationId, admin.cookie, { checkin: { action: "clear" }, reason: "wipe" });
+    const d = await getDetail(registrationId, admin.cookie);
+    expect(d.registration.checkinInPoints).toBeNull();
+    expect(d.registration.checkinOutPoints).toBeNull();
+  });
+
+  it("null when no points ever awarded", async () => {
+    const event = await makeCheckinEvent();
+    const { registrationId } = await registerStudent(event);
+    const admin = await loginAs("admin");
+    const res = await request(`/admin/registrations/${registrationId}`, { method: "GET", cookie: admin.cookie });
+    const d = (await res.json()) as { registration: { checkinInPoints: number | null; checkinOutPoints: number | null } };
+    expect(d.registration.checkinInPoints).toBeNull();
+    expect(d.registration.checkinOutPoints).toBeNull();
+  });
+});

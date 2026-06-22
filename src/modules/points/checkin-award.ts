@@ -1,5 +1,5 @@
 import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
-import type { Tx } from "../../db/client";
+import type { DB, Tx } from "../../db/client";
 import { pointLedger } from "../../db/schema/points";
 import { addPoints } from "./service";
 import {
@@ -62,6 +62,31 @@ async function activeAwardRow(tx: Tx, reason: CheckinReason, regId: string) {
     .orderBy(desc(pointLedger.createdAt), desc(pointLedger.id))
     .limit(1);
   return row ?? null;
+}
+
+// Read-only preview of the CURRENT active (not-yet-reversed) award delta per leg for one registration.
+// Powers the admin panel warning "clearing this stamp also removes N points". null = no active award.
+// Mirrors activeAwardRow's "not yet reversed" predicate; safe on db or tx.
+export async function getActiveCheckinPoints(
+  exec: DB | Tx,
+  registrationId: string,
+): Promise<{ checkinIn: number | null; checkinOut: number | null }> {
+  const leg = async (reason: CheckinReason): Promise<number | null> => {
+    const [row] = await exec
+      .select({ delta: pointLedger.delta })
+      .from(pointLedger)
+      .where(
+        and(
+          eq(pointLedger.reasonCode, reason),
+          sql`${pointLedger.dedupeKey} like ${`${reason}:${registrationId}:v%`}`,
+          sql`not exists (select 1 from ${pointLedger} r where r.reversal_of_ledger_id = ${pointLedger.id} and r.reason_code = 'correction_reverse')`,
+        ),
+      )
+      .orderBy(desc(pointLedger.createdAt), desc(pointLedger.id))
+      .limit(1);
+    return row ? row.delta : null;
+  };
+  return { checkinIn: await leg("checkin_in"), checkinOut: await leg("checkin_out") };
 }
 
 // Outcome surfaced back to the scan response so the UI can show "+N".
