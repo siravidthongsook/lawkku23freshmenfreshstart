@@ -117,6 +117,10 @@ test.describe("walk-in register dialog", () => {
 
     await fillWalkinForm(page, { fullName, studentId, reason: "ลงทะเบียนล่วงหน้า e2e" });
 
+    // Source dropdown shows only on the admin desk — override the default Walk-in to ปกติ (normal).
+    await dialog.getByRole("combobox").click();
+    await page.getByRole("option", { name: "ปกติ" }).click();
+
     // Confirm screen states register-only (no check-in).
     await dialog.getByRole("button", { name: "ตรวจสอบ" }).click();
     await expect(dialog.getByText("ยืนยันข้อมูล")).toBeVisible();

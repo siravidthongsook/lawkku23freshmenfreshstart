@@ -83,6 +83,9 @@ export const walkinRegisterBody = z.object({
   nickname: z.string().trim().optional(),
   year: z.coerce.number().int().optional(),
   answers: z.record(z.string(), z.unknown()).default({}),
+  // Provenance of the registration. Admin desk can choose; staff gate always sends "walkin".
+  // Default "walkin" keeps existing callers/behavior unchanged.
+  source: z.enum(["normal", "walkin"]).default("walkin"),
   checkin_now: z.boolean().default(true), // also stamp check-in if the window is open
   reason: z.string().min(1), // audited on user_created + registration_created
   dry_run: z.boolean().default(false), // preview-only: full validation, NO mutation
@@ -1153,7 +1156,7 @@ router.post(
           registration: {
             eventId,
             status: wouldCheckIn ? "checked_in" : "registered",
-            registrationSource: "walkin",
+            registrationSource: body.source, // preview reflects the chosen source
           },
           qrToken: null,
           checkedIn: wouldCheckIn,
@@ -1218,7 +1221,7 @@ router.post(
       );
 
       const reg = await insertReg(tx, eventId, created.id, "registered", version.id, now, {
-        source: "walkin",
+        source: body.source, // desk can pick normal/walkin; gate sends walkin
       });
       await writeAnswers(tx, reg.id, version.id, values);
       const qrToken = await issueQrToken(tx, reg.id, actor.id);

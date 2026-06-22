@@ -22,6 +22,14 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { RegistrationSource } from "@/lib/types";
 // Backend Zod-inferred response shape — single source of truth (types only, erased at build).
 import type { WalkinRegisterResponse } from "@be/modules/registrations/routes";
 
@@ -52,7 +60,14 @@ const EMPTY: FormState = {
 };
 
 // Build the request body from the form. Empty optional strings are dropped (schema wants undefined, not "").
-function buildBody(f: FormState, reason: string, checkinNow: boolean, dryRun: boolean) {
+// source: staff gate (checkinNow=true) is always a walk-in; admin desk (checkinNow=false) can choose.
+function buildBody(
+  f: FormState,
+  reason: string,
+  checkinNow: boolean,
+  source: RegistrationSource,
+  dryRun: boolean,
+) {
   return {
     full_name: f.full_name.trim(),
     student_id: f.student_id.trim(),
@@ -62,6 +77,7 @@ function buildBody(f: FormState, reason: string, checkinNow: boolean, dryRun: bo
     phone: f.phone.trim() || undefined,
     nickname: f.nickname.trim() || undefined,
     reason: reason.trim(),
+    source: checkinNow ? "walkin" : source,
     checkin_now: checkinNow,
     dry_run: dryRun,
   };
@@ -83,6 +99,8 @@ export function WalkinDialog({
 }) {
   const [form, setForm] = useState<FormState>(EMPTY);
   const [reason, setReason] = useState("");
+  // Registration provenance — only editable on the admin desk; gate flow forces "walkin" in buildBody.
+  const [source, setSource] = useState<RegistrationSource>("walkin");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -100,6 +118,7 @@ export function WalkinDialog({
   function reset() {
     setForm(EMPTY);
     setReason("");
+    setSource("walkin");
     setError(null);
     setPreview(null);
     setResult(null);
@@ -129,7 +148,7 @@ export function WalkinDialog({
     try {
       const res = await apiPost<WalkinRegisterResponse>(
         `/events/${eventId}/walkin`,
-        buildBody(form, reason, checkinNow, true),
+        buildBody(form, reason, checkinNow, source, true),
       );
       setPreview(res);
     } catch (err) {
@@ -147,7 +166,7 @@ export function WalkinDialog({
     try {
       const res = await apiPost<WalkinRegisterResponse>(
         `/events/${eventId}/walkin`,
-        buildBody(form, reason, checkinNow, false),
+        buildBody(form, reason, checkinNow, source, false),
       );
       setResult(res);
       onDone();
@@ -226,6 +245,22 @@ export function WalkinDialog({
                   จำเป็น — บันทึกไว้ในบันทึกการตรวจสอบ (audit log)
                 </p>
               </div>
+
+              {/* Source is editable only at the admin desk; the staff gate is always a walk-in. */}
+              {!checkinNow ? (
+                <div className="space-y-1.5">
+                  <Label>ที่มาการลงทะเบียน</Label>
+                  <Select value={source} onValueChange={(v) => setSource(v as RegistrationSource)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="normal">ปกติ</SelectItem>
+                      <SelectItem value="walkin">Walk-in</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
 
               {error ? (
                 <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>

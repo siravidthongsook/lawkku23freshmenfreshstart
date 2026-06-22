@@ -141,6 +141,19 @@ describe("walk-in: happy path (new student + register + check-in + points)", () 
     expect(body.registration.registrationSource).toBe("walkin");
     expect(await balanceOf(body.user.id)).toBe(0);
   });
+
+  it("checkin_now=false, source=normal → admin desk can override provenance to normal", async () => {
+    const event = await makeWalkinEvent();
+    const admin = await loginAs("admin");
+
+    const res = await walkin(event.id, admin.cookie, walkinBody({ checkin_now: false, source: "normal" }));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      registration: { status: string; registrationSource: string };
+    };
+    expect(body.registration.status).toBe("registered");
+    expect(body.registration.registrationSource).toBe("normal");
+  });
 });
 
 describe("walk-in: dry_run previews without persisting anything", () => {
