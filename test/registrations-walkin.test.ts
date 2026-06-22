@@ -181,12 +181,22 @@ describe("walk-in: บรรพ (group_number) is staff-assignable", () => {
     expect(body.user.group_number).toBe(12);
   });
 
-  it("out-of-range group_number (>16) → 400, nothing created", async () => {
+  it("high group_number (>16) → accepted, persisted (no upper cap)", async () => {
+    const event = await makeWalkinEvent();
+    const staff = await loginAs("checkin_staff");
+
+    const res = await walkin(event.id, staff.cookie, walkinBody({ group_number: 99 }));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { user: { group_number: number | null } };
+    expect(body.user.group_number).toBe(99);
+  });
+
+  it("non-positive group_number (<1) → 400, nothing created", async () => {
     const event = await makeWalkinEvent();
     const staff = await loginAs("checkin_staff");
 
     const before = await userCount();
-    const res = await walkin(event.id, staff.cookie, walkinBody({ group_number: 99 }));
+    const res = await walkin(event.id, staff.cookie, walkinBody({ group_number: 0 }));
     expect(res.status).toBe(400);
     expect(await userCount()).toBe(before);
   });

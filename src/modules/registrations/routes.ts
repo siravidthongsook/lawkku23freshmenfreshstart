@@ -82,7 +82,7 @@ export const walkinRegisterBody = z.object({
   phone: z.string().trim().optional(),
   nickname: z.string().trim().optional(),
   year: z.coerce.number().int().optional(),
-  group_number: z.coerce.number().int().min(1).max(16).optional(), // บรรพ — group 1..16; claim 2nd factor
+  group_number: z.coerce.number().int().min(1).optional(), // บรรพ — any positive cohort #; staff-assigned label, not a claim factor (no upper cap)
   answers: z.record(z.string(), z.unknown()).default({}),
   // Provenance of the registration. Admin desk can choose; staff gate always sends "walkin".
   // Default "walkin" keeps existing callers/behavior unchanged.

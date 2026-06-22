@@ -232,7 +232,7 @@ export function WalkinDialog({
                 <Field label="เบอร์โทร" value={form.phone} onChange={(v) => set("phone", v)} />
               </div>
               <div className="grid grid-cols-2 gap-3">
-                {/* บรรพ = group 1..16; staff-assigned, used later as the account-claim 2nd factor. */}
+                {/* บรรพ = group 1..16; staff-assigned label only (not a claim factor — claim is by student_id). */}
                 <Field label="บรรพ" value={form.group_number} onChange={(v) => set("group_number", v)} type="number" />
                 <div />
               </div>

@@ -60,8 +60,8 @@ export const exportUsersQuery = z.object({
   role: roleEnum.optional(),
   status: statusEnum.optional(),
   claimed: z.enum(["yes", "no"]).optional(),
-  // group_number (บรรพ) 1..16.
-  group_number: z.coerce.number().int().min(1).max(16).optional(),
+  // group_number (บรรพ) — any positive cohort #, no upper cap.
+  group_number: z.coerce.number().int().min(1).optional(),
   created_from: bkkDate.optional(),
   created_to: bkkDate.optional(),
   // never_active=true filters users who have never been seen since launch (lastActiveAt NULL).

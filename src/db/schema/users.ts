@@ -14,7 +14,7 @@ export const users = pgTable("users", {
   year: integer("year"), // mentor study year
   mentorRole: text("mentor_role"), // mentor role free text (Thai)
   category: text("category"), // mentor raw category (group_mentor|staff); role is derived
-  groupNumber: integer("group_number"), // group 1..16; null for admins. claim 2nd factor
+  groupNumber: integer("group_number"), // บรรพ — any positive cohort #; null for admins. staff-assigned label, not a claim factor
   faculty: text("faculty"),
   department: text("department"),
   phone: text("phone"),
