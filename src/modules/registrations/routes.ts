@@ -517,8 +517,16 @@ router.get(
       .from(auditLogs)
       .where(eq(auditLogs.registrationId, reg.id))
       .orderBy(desc(auditLogs.createdAt));
+    // Resolve the check-in/out actor names so the admin state-override panel shows WHO stamped each
+    // (not a raw UUID). Null when no actor recorded (e.g. legacy or never-stamped).
+    const checkedInBy = reg.checkedInByUserId ? await getUserName(db, reg.checkedInByUserId) : null;
+    const checkedOutBy = reg.checkedOutByUserId ? await getUserName(db, reg.checkedOutByUserId) : null;
     return c.json({
-      registration: serializeRegistration(reg),
+      registration: {
+        ...serializeRegistration(reg),
+        checkedInBy, // staff/admin display name (state-override panel)
+        checkedOutBy,
+      },
       user, // { userId, studentId, fullName, email, faculty, department }
       answers,
       files, // [{ id, filename, mimeType }]
@@ -1004,6 +1012,12 @@ router.post(
 export default router;
 
 // ---- local helpers (kept below routes to keep handlers readable) ----
+
+// Resolve a user's display name by id (for check-in/out actor labels). Null when missing.
+async function getUserName(exec: typeof db | Tx, userId: string): Promise<string | null> {
+  const [u] = await exec.select({ fullName: users.fullName }).from(users).where(eq(users.id, userId)).limit(1);
+  return u?.fullName ?? null;
+}
 
 // Insert a fresh registration with the right status timestamp set.
 async function insertReg(

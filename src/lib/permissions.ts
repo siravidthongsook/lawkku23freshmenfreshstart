@@ -16,6 +16,9 @@ export const canViewAuditLogs = (u: AuthUser) => isAdmin(u);
 // Check-in capabilities — staff or admin.
 export const canScanCheckin = (u: AuthUser) => isStaff(u) || isAdmin(u);
 export const canManualCheckin = (u: AuthUser) => isStaff(u) || isAdmin(u);
+// Admin-grade direct edit of check-in/out stamps (set/clear/backdate, bypassing window/toggle/cutoff
+// gates). Admin ONLY — distinct authority from staff manual check-in; mirrors canManageEvents.
+export const canManageCheckinState = (u: AuthUser) => isAdmin(u);
 
 // Points/rewards — students only earn points & appear on the leaderboard (plan §6). Staff/admin have no balance.
 export const canEarnPoints = (u: AuthUser) => isStudent(u);

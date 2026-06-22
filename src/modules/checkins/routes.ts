@@ -10,7 +10,7 @@ import { auditLogs } from "../../db/schema/audit";
 import { registrationQrTokens } from "../../db/schema/qr";
 import { users } from "../../db/schema/users";
 import { requireAuth, requirePermission, requestMeta } from "../../lib/auth-middleware";
-import { canManualCheckin, canScanCheckin } from "../../lib/permissions";
+import { canManualCheckin, canScanCheckin, canManageCheckinState } from "../../lib/permissions";
 import { badRequest, notFound } from "../../lib/errors";
 import { writeAudit } from "../../lib/audit";
 import { checkinsTotal } from "../../lib/metrics";
@@ -850,6 +850,258 @@ router.post(
     });
 
     return c.json({ ok: true });
+  },
+);
+
+// =====================================================================
+// ADMIN CHECK-IN / CHECK-OUT STATE OVERRIDE  (admin-grade, bypasses window/toggle/cutoff gates)
+// =====================================================================
+
+// Per-axis discriminated action. "set" may backdate via `at` (ISO-UTC; frontend converts the naive
+// Bangkok datetime-local → UTC before POST) + opt out of points via awardPoints. Default = "unchanged".
+const axisSchema = z
+  .discriminatedUnion("action", [
+    z.object({
+      action: z.literal("set"),
+      at: z.string().datetime().optional(), // ISO-8601 UTC; omitted → now()
+      awardPoints: z.boolean().default(true),
+    }),
+    z.object({ action: z.literal("clear") }),
+    z.object({ action: z.literal("unchanged") }),
+  ])
+  .default({ action: "unchanged" });
+
+const checkinStateBody = z.object({
+  checkin: axisSchema,
+  checkout: axisSchema,
+  reason: z.string().min(1),
+});
+
+// Warning code surfaced when a stamp committed but points were NOT awarded (cutoff/toggle/role guard).
+type PointsSkipped = string;
+
+// POST /admin/registrations/:registrationId/checkin-state — admin direct set/clear/backdate of
+// check-in/check-out stamps. Bypasses window/toggle/cutoff for the STAMP (admin authority), but the
+// points award fns self-guard → when skipped we return a `points_skipped` warning (never silent).
+router.post(
+  "/admin/registrations/:registrationId/checkin-state",
+  requireAuth,
+  requirePermission(canManageCheckinState),
+  async (c) => {
+    const { registrationId } = regIdParam.parse(c.req.param());
+    const body = checkinStateBody.parse(await c.req.json());
+    const admin = c.get("user");
+    const meta = requestMeta(c);
+    const log = c.get("log");
+    log.set("action", "checkin.state_override"); // WHAT — 5WH action marker
+
+    // Both axes untouched → nothing to do (no empty audit row). [E14]
+    if (body.checkin.action === "unchanged" && body.checkout.action === "unchanged")
+      throw badRequest("no_changes", "No check-in/out changes requested");
+
+    const now = new Date();
+
+    type StateResult = {
+      checkedInAt: string | null;
+      checkedOutAt: string | null;
+      pointsSkipped: PointsSkipped[]; // award guards that fired so the UI can warn the admin
+    };
+
+    const result = await db.transaction(async (tx): Promise<StateResult> => {
+      // Lock the reg row ONLY (lock order reg-only vs scan's token→reg → no deadlock). [E10]
+      const [reg] = await tx
+        .select()
+        .from(registrations)
+        .where(eq(registrations.id, registrationId))
+        .for("update")
+        .limit(1);
+      if (!reg) throw notFound("Registration not found");
+
+      const [event] = await tx.select().from(events).where(eq(events.id, reg.eventId)).limit(1);
+      if (!event) throw notFound("Event not found");
+
+      // Registrant role decides point eligibility (only students earn) — same as the scan/manual paths.
+      const [u] = await tx
+        .select({ role: users.role })
+        .from(users)
+        .where(eq(users.id, reg.userId))
+        .limit(1);
+      const studentRole = u?.role ?? "student";
+
+      // Provenance captured BEFORE any mutation so the audit preserves the old stamps + method
+      // (e.g. overwriting a qr_scan check-in). [E13]
+      const oldCheckedInAt = reg.checkedInAt;
+      const oldCheckedOutAt = reg.checkedOutAt;
+      const oldCheckinMethod = reg.checkinMethod;
+      const oldStatus = reg.status;
+
+      // ---- Resolve & validate the requested `at` values up front (reject future). [E8] ----
+      let inAt: Date | null = null;
+      if (body.checkin.action === "set") {
+        inAt = body.checkin.at ? new Date(body.checkin.at) : now;
+        if (inAt > now) throw badRequest("at_in_future", "Check-in time cannot be in the future");
+      }
+      let outAt: Date | null = null;
+      if (body.checkout.action === "set") {
+        outAt = body.checkout.at ? new Date(body.checkout.at) : now;
+        if (outAt > now) throw badRequest("at_in_future", "Check-out time cannot be in the future");
+      }
+
+      // ---- Compute POST-OP effective state (what the stamps WILL be after this request). ----
+      // checkin axis
+      let effCheckedInAt: Date | null = oldCheckedInAt;
+      if (body.checkin.action === "set") effCheckedInAt = inAt;
+      else if (body.checkin.action === "clear") effCheckedInAt = null;
+      // checkout axis (clear-checkin cascades a checkout clear)
+      let effCheckedOutAt: Date | null = oldCheckedOutAt;
+      if (body.checkin.action === "clear") effCheckedOutAt = null; // [E3] cascade — can't be out without in
+      if (body.checkout.action === "set") effCheckedOutAt = outAt;
+      else if (body.checkout.action === "clear") effCheckedOutAt = null;
+
+      // ---- Invariants (§3) validated against POST-OP state. ----
+      // Set-checkin only valid from registered/checked_in — never resurrect cancelled/waitlisted. [E5]
+      if (body.checkin.action === "set" && oldStatus !== "registered" && oldStatus !== "checked_in")
+        throw badRequest("checkin_blocked_status", "Cannot set check-in on a cancelled/waitlisted registration");
+      // Checkout requires a check-in to exist after this request. [E6]
+      if (effCheckedOutAt && !effCheckedInAt)
+        throw badRequest("checkout_without_checkin", "Cannot check out without a check-in");
+      // checkedOutAt >= checkedInAt against post-op effective values. [E6]
+      if (effCheckedOutAt && effCheckedInAt && effCheckedOutAt < effCheckedInAt)
+        throw badRequest("checkout_before_checkin", "Check-out time cannot be before check-in time");
+
+      const pointsSkipped: PointsSkipped[] = [];
+
+      // ---- CLEAR CHECK-IN (cascades checkout clear; reverses BOTH legs via ONE call). [E3] ----
+      if (body.checkin.action === "clear") {
+        await tx
+          .update(registrations)
+          .set({
+            status: "registered",
+            checkedInAt: null,
+            checkedInByUserId: null,
+            checkinMethod: null, // [E12] no stale provenance
+            manualCheckinReason: body.reason, // record WHY this clear happened
+            checkedOutAt: null, // cascade — checkout depends on check-in
+            checkedOutByUserId: null,
+            updatedAt: now,
+          })
+          .where(eq(registrations.id, reg.id));
+        // ONE reverse call handles both checkin_in + checkin_out legs — never also call
+        // reverseCheckoutOnUndo here (would double-reverse the OUT leg). [E3]
+        await reverseCheckinOnUndo(tx, {
+          registrationId: reg.id,
+          studentUserId: reg.userId,
+          undoneByUserId: admin.id,
+          reason: body.reason,
+        });
+      }
+
+      // ---- SET CHECK-IN (new check-in or backdate of an existing one). ----
+      if (body.checkin.action === "set") {
+        await tx
+          .update(registrations)
+          .set({
+            status: "checked_in",
+            checkedInAt: inAt,
+            checkedInByUserId: admin.id,
+            checkinMethod: "admin_override",
+            manualCheckinReason: body.reason,
+            updatedAt: now,
+          })
+          .where(eq(registrations.id, reg.id));
+        if (body.checkin.awardPoints) {
+          // Stamp bypasses cutoff/toggle, but the award self-guards → surface a warning if it skips. [E1]
+          const award = await awardCheckinIn(tx, {
+            eventId: reg.eventId,
+            registrationId: reg.id,
+            studentUserId: reg.userId,
+            studentRole,
+            scannedByUserId: admin.id,
+            eventTitle: event.title,
+            scanMethod: "admin_override",
+          });
+          if ("skipped" in award) pointsSkipped.push(`checkin_in:${award.skipped}`);
+        }
+      }
+
+      // ---- CLEAR CHECK-OUT (only when checkin wasn't cleared — that cascade already wiped it). ----
+      if (body.checkout.action === "clear" && body.checkin.action !== "clear") {
+        await tx
+          .update(registrations)
+          .set({ checkedOutAt: null, checkedOutByUserId: null, updatedAt: now })
+          .where(eq(registrations.id, reg.id));
+        await reverseCheckoutOnUndo(tx, {
+          registrationId: reg.id,
+          studentUserId: reg.userId,
+          undoneByUserId: admin.id,
+          reason: body.reason,
+        });
+      }
+
+      // ---- SET CHECK-OUT (post-op checkin presence already validated above). ----
+      if (body.checkout.action === "set") {
+        await tx
+          .update(registrations)
+          .set({ checkedOutAt: outAt, checkedOutByUserId: admin.id, updatedAt: now })
+          .where(eq(registrations.id, reg.id));
+        if (body.checkout.awardPoints) {
+          const award = await awardCheckinOut(tx, {
+            eventId: reg.eventId,
+            registrationId: reg.id,
+            studentUserId: reg.userId,
+            studentRole,
+            scannedByUserId: admin.id,
+            eventTitle: event.title,
+            scanMethod: "admin_override",
+          });
+          if ("skipped" in award) pointsSkipped.push(`checkin_out:${award.skipped}`);
+        }
+      }
+
+      await writeAudit(
+        {
+          actorUserId: admin.id,
+          actorRole: admin.role,
+          action: "admin_checkin_state_edit",
+          entityType: "registration",
+          entityId: reg.id,
+          eventId: reg.eventId,
+          registrationId: reg.id,
+          targetUserId: reg.userId,
+          oldValue: {
+            status: oldStatus,
+            checkedInAt: oldCheckedInAt?.toISOString() ?? null,
+            checkedOutAt: oldCheckedOutAt?.toISOString() ?? null,
+            checkinMethod: oldCheckinMethod, // provenance preserved when overwriting a qr_scan [E13]
+          },
+          newValue: {
+            checkin: body.checkin.action,
+            checkout: body.checkout.action,
+            checkedInAt: effCheckedInAt?.toISOString() ?? null,
+            checkedOutAt: effCheckedOutAt?.toISOString() ?? null,
+            pointsSkipped,
+          },
+          reason: body.reason,
+          ...meta,
+        },
+        tx,
+      );
+
+      return {
+        checkedInAt: effCheckedInAt?.toISOString() ?? null,
+        checkedOutAt: effCheckedOutAt?.toISOString() ?? null,
+        pointsSkipped,
+      };
+    });
+
+    log.set("outcome", "checkin_state_edited");
+    // points_skipped: non-empty when a stamp committed but points were withheld (admin must know). [E1/E2]
+    return c.json({
+      ok: true,
+      checkedInAt: result.checkedInAt,
+      checkedOutAt: result.checkedOutAt,
+      points_skipped: result.pointsSkipped,
+    });
   },
 );
 

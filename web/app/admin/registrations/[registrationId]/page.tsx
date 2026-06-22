@@ -43,8 +43,11 @@ type RegistrationDetail = {
   registeredAt: string | null;
   waitlistedAt: string | null;
   checkedInAt: string | null;
+  checkedOutAt: string | null; // scan-out stamp (admin state-override panel)
   cancelledAt: string | null;
   checkinMethod: string | null;
+  checkedInBy: string | null; // display name of the staff/admin who checked in
+  checkedOutBy: string | null; // display name of the staff/admin who checked out
   createdAt: string;
   updatedAt: string;
 };
@@ -89,12 +92,21 @@ const STATUS_LABEL: Record<RegistrationStatus, string> = {
 };
 const STATUS_ORDER: RegistrationStatus[] = ["registered", "waitlisted", "checked_in", "cancelled"];
 
+// One axis (check-in or check-out) of the state-override panel. "unchanged" = leave as-is.
+type AxisAction = "unchanged" | "set" | "clear";
+// Axis payload sent to the backend; `at` is ISO-UTC (converted from the naive Bangkok picker).
+type AxisPayload =
+  | { action: "set"; at?: string; awardPoints: boolean }
+  | { action: "clear" }
+  | { action: "unchanged" };
+
 // Which reason-gated action the dialog is currently driving.
 type Action =
   | { kind: "set_status"; status: RegistrationStatus }
   | { kind: "qr_regenerate" }
   | { kind: "qr_revoke" }
-  | { kind: "edit_answers" };
+  | { kind: "edit_answers" }
+  | { kind: "checkin_state"; checkin: AxisPayload; checkout: AxisPayload }; // admin stamp override
 
 type ActionMeta = { title: string; description: string; confirm: string; destructive?: boolean };
 
@@ -118,7 +130,22 @@ const STATIC_ACTION_META: Record<
     description: "บันทึกคำตอบที่แก้ไขกับเวอร์ชันฟอร์มของการลงทะเบียนนั้นเอง",
     confirm: "บันทึกคำตอบ",
   },
+  checkin_state: {
+    title: "ปรับสถานะเช็คอิน/เช็คเอาท์",
+    description: "ตั้ง/ล้าง/ย้อนเวลาเช็คอินและเช็คเอาท์โดยตรง (ข้ามกรอบเวลาและการตั้งค่า) — บันทึกการตรวจสอบเสมอ",
+    confirm: "บันทึก",
+  },
 };
+
+// Convert a naive datetime-local value ("2026-06-20T14:30") — read as Asia/Bangkok wall time —
+// into a UTC ISO string for the wire. Empty → undefined (backend defaults to now()).
+function bangkokLocalToUtcIso(local: string): string | undefined {
+  if (!local) return undefined;
+  // datetime-local omits seconds/offset; pin it to +07:00 then normalize to UTC.
+  const d = new Date(`${local}:00+07:00`);
+  if (Number.isNaN(d.getTime())) return undefined;
+  return d.toISOString();
+}
 
 // Dialog copy for the current action — status change is dynamic (depends on the chosen target).
 function metaFor(action: Action): ActionMeta {
@@ -149,6 +176,14 @@ export default function RegistrationDetailPage({
   const [draftAnswers, setDraftAnswers] = useState<Record<string, unknown>>({});
   // Per-field client errors (e.g. invalid number) — block save when present.
   const [answerErrors, setAnswerErrors] = useState<Record<string, string>>({});
+
+  // ---- Check-in/out state-override panel (admin stamp control) ----
+  const [inAction, setInAction] = useState<AxisAction>("unchanged");
+  const [outAction, setOutAction] = useState<AxisAction>("unchanged");
+  const [inAt, setInAt] = useState(""); // naive datetime-local (Bangkok wall time); empty = now()
+  const [outAt, setOutAt] = useState("");
+  const [inAward, setInAward] = useState(true);
+  const [outAward, setOutAward] = useState(true);
 
   // Answers are dirty when the draft differs from what's stored — gates the save button + audit noise.
   const answersDirty = data
@@ -191,9 +226,31 @@ export default function RegistrationDetailPage({
         if (hasAnswerError) throw new ApiError("invalid_answers", "มีคำตอบที่ไม่ถูกต้อง", 400);
         await apiPatch(`${base}/answers`, { answers: draftAnswers, reason });
         break;
+      case "checkin_state": {
+        const res = await apiPost<{ points_skipped?: string[] }>(`${base}/checkin-state`, {
+          checkin: action.checkin,
+          checkout: action.checkout,
+          reason,
+        });
+        // Stamp committed but points withheld (cutoff/toggle/role) → warn the admin explicitly. [E1/E2]
+        if (res.points_skipped && res.points_skipped.length > 0) {
+          toast.warning(`บันทึกเวลาแล้ว แต่ไม่ได้ให้แต้ม: ${res.points_skipped.join(", ")}`);
+        } else {
+          toast.success("เสร็จสิ้น มีการบันทึกไว้ในบันทึกการตรวจสอบ");
+        }
+        await load();
+        return; // own toast above; skip the generic success
+      }
     }
     toast.success("เสร็จสิ้น มีการบันทึกไว้ในบันทึกการตรวจสอบ");
     await load();
+  }
+
+  // Build one axis payload from the panel controls (set carries at/awardPoints; clear/unchanged are bare).
+  function buildAxis(act: AxisAction, atLocal: string, award: boolean): AxisPayload {
+    if (act === "set") return { action: "set", at: bangkokLocalToUtcIso(atLocal), awardPoints: award };
+    if (act === "clear") return { action: "clear" };
+    return { action: "unchanged" };
   }
 
   if (error) return <ErrorState message={error} onRetry={load} />;
@@ -301,7 +358,63 @@ export default function RegistrationDetailPage({
           <Detail label="อยู่ในรายชื่อสำรอง" value={formatBangkok(reg.waitlistedAt) || "—"} />
           <Detail label="เช็คอินแล้ว" value={formatBangkok(reg.checkedInAt) || "—"} />
           <Detail label="วิธีการเช็คอิน" value={reg.checkinMethod ? checkinMethodLabel(reg.checkinMethod) : "—"} />
+          <Detail label="เช็คเอาท์แล้ว" value={formatBangkok(reg.checkedOutAt) || "—"} />
+          <Detail label="เช็คอินโดย" value={reg.checkedInBy ?? "—"} />
+          <Detail label="เช็คเอาท์โดย" value={reg.checkedOutBy ?? "—"} />
           <Detail label="ยกเลิกแล้ว" value={formatBangkok(reg.cancelledAt) || "—"} />
+        </CardContent>
+      </Card>
+
+      {/* Admin check-in/out state override: set/clear/backdate stamps directly (bypasses window/toggle/
+          cutoff for the stamp; points still self-guard). All changes are reason-gated + audited. */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">จัดการเช็คอิน/เช็คเอาท์</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm">
+          {/* Resurrecting a cancelled/waitlisted reg via set-checkin is blocked server-side; mirror it here. */}
+          {(status === "cancelled" || status === "waitlisted") ? (
+            <p className="text-xs text-amber-600">
+              ไม่สามารถตั้งเวลาเช็คอินได้ขณะสถานะเป็น “{STATUS_LABEL[status]}” — เปลี่ยนสถานะก่อน
+            </p>
+          ) : null}
+
+          {/* CHECK-IN axis */}
+          <AxisControl
+            label="เช็คอิน"
+            action={inAction}
+            onAction={setInAction}
+            at={inAt}
+            onAt={setInAt}
+            award={inAward}
+            onAward={setInAward}
+            disableSet={status === "cancelled" || status === "waitlisted"}
+          />
+          {/* CHECK-OUT axis */}
+          <AxisControl
+            label="เช็คเอาท์"
+            action={outAction}
+            onAction={setOutAction}
+            at={outAt}
+            onAt={setOutAt}
+            award={outAward}
+            onAward={setOutAward}
+            disableSet={false}
+          />
+
+          <Button
+            size="sm"
+            disabled={inAction === "unchanged" && outAction === "unchanged"}
+            onClick={() =>
+              setAction({
+                kind: "checkin_state",
+                checkin: buildAxis(inAction, inAt, inAward),
+                checkout: buildAxis(outAction, outAt, outAward),
+              })
+            }
+          >
+            บันทึกการเปลี่ยนแปลง
+          </Button>
         </CardContent>
       </Card>
 
@@ -428,6 +541,61 @@ export default function RegistrationDetailPage({
         destructive={action ? metaFor(action).destructive : false}
         onConfirm={runAction}
       />
+    </div>
+  );
+}
+
+// One axis (เช็คอิน / เช็คเอาท์) of the state-override panel: action select + optional datetime + award toggle.
+function AxisControl({
+  label,
+  action,
+  onAction,
+  at,
+  onAt,
+  award,
+  onAward,
+  disableSet,
+}: {
+  label: string;
+  action: AxisAction;
+  onAction: (a: AxisAction) => void;
+  at: string;
+  onAt: (v: string) => void;
+  award: boolean;
+  onAward: (v: boolean) => void;
+  disableSet: boolean; // block "set" (e.g. cancelled/waitlisted reg) — mirrors server reject [E5]
+}) {
+  return (
+    <div className="space-y-2 rounded-md border p-3">
+      <div className="flex items-center gap-2">
+        <span className="w-20 text-xs font-medium text-muted-foreground">{label}</span>
+        <Select value={action} onValueChange={(v) => onAction(v as AxisAction)}>
+          <SelectTrigger className="h-8 w-36" aria-label={`${label} action`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="unchanged">ไม่เปลี่ยน</SelectItem>
+            <SelectItem value="set" disabled={disableSet}>ตั้งเวลา</SelectItem>
+            <SelectItem value="clear">ล้าง</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      {action === "set" ? (
+        <div className="flex flex-wrap items-center gap-3 pl-22">
+          {/* Naive Bangkok wall time; empty = ตอนนี้ (server now()). Converted to UTC before POST. */}
+          <input
+            type="datetime-local"
+            className="rounded-md border border-input bg-transparent px-2 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            value={at}
+            onChange={(e) => onAt(e.target.value)}
+          />
+          <span className="text-xs text-muted-foreground">เว้นว่าง = ตอนนี้</span>
+          <label className="flex items-center gap-1.5 text-xs">
+            <input type="checkbox" checked={award} onChange={(e) => onAward(e.target.checked)} />
+            ให้แต้ม
+          </label>
+        </div>
+      ) : null}
     </div>
   );
 }
