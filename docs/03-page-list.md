@@ -50,7 +50,7 @@
 | Event Check-in List | `/staff/events` | all check-in-capable events (global): title, date, check-in window, status, counts |
 | Scanner Page | `/staff/events/:eventId/checkin` | QR scan-in/out, manual search, recent scan result, network error display |
 | Manual Search | (within scanner) | search within current event only by student_id/full_name/faculty/department; minimal info; manual check-in, undo check-in (reason) |
-| Walk-in (gate) | (within scanner) | register a person with no account on the spot — capture minimal data (full_name, student_id, email?…) + reason → create CLAIM-mode student + register + check in (one tx). Dup student_id/email → search + check in instead. `POST /events/:eventId/walkin` |
+| Walk-in (gate) | (within scanner) | register a person with no account on the spot — capture minimal data (full_name, student_id, email?…) + reason → create CLAIM-mode student + register + check in (one tx). As staff type a student_id, auto-detect an existing student (`GET .../walkin/lookup`) → register/check-in inline instead of re-search. `full_name` required only for new accounts. `POST /events/:eventId/walkin` |
 | Staff Points | `/staff/points` | own budget gauge; issue/revoke grant QR (plaintext shown once); manual give to a student; self-reverse a recent grant within window |
 
 Scan result UI: success (name/student_id/time), already checked-in (orig time + by), wrong event, cancelled/waitlisted (deny), invalid/revoked (suggest manual fallback), network error (retry, not success).

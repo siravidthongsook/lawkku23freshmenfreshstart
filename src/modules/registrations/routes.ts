@@ -74,7 +74,8 @@ const adminAnswersBody = answersBody.extend({ reason: z.string().min(1) });
 // Creates a brand-new no-account student (CLAIM mode: passwordHash=null, student claims later via student_id)
 // + registers them + optionally checks them in, all in one tx. Staff/admin only (canWalkinRegister).
 export const walkinRegisterBody = z.object({
-  full_name: z.string().trim().min(1),
+  // Optional: only REQUIRED when creating a brand-new account (guarded in handler). Ignored on the reuse path.
+  full_name: z.string().trim().min(1).optional(),
   student_id: z.string().trim().min(1),
   email: z.string().trim().toLowerCase().email().optional(), // normalize -> case-insensitive dup check
   faculty: z.string().trim().optional(),
@@ -87,7 +88,10 @@ export const walkinRegisterBody = z.object({
   // Provenance of the registration. Admin desk can choose; staff gate always sends "walkin".
   // Default "walkin" keeps existing callers/behavior unchanged.
   source: z.enum(["normal", "walkin"]).default("walkin"),
-  checkin_now: z.boolean().default(true), // also stamp check-in if the window is open
+  checkin_now: z.boolean().default(true), // stamp check-in now (even if the window is closed — gate override)
+  // Two-step confirm: a real run that REUSES an existing account requires confirm_reuse=true.
+  // Without it → 409 user_exists, forcing the dry_run preview round-trip first (guards against wrong-person).
+  confirm_reuse: z.boolean().default(false),
   reason: z.string().min(1), // audited on user_created + registration_created
   dry_run: z.boolean().default(false), // preview-only: full validation, NO mutation
 });
@@ -111,19 +115,56 @@ const walkinPublicUser = z.object({
   created_at: z.string(),
 });
 
-// Skip reason when checkin_now was requested but the window was closed (reg still created).
+// Legacy skip reason. Retained for back-compat only — the check-in stamp now always happens (even past a
+// closed window), so this is never set for the closed-window case anymore. See pastWindow instead.
 const walkinCheckinSkipped = z.enum(["checkin_not_open", "checkin_closed"]);
 
 export const walkinRegisterResponse = z.object({
   user: walkinPublicUser,
   registration: z.record(z.string(), z.unknown()), // serializeRegistration shape (incl. registrationSource)
-  qrToken: z.string().nullable(), // plaintext, returned ONCE (null on dry_run)
+  qrToken: z.string().nullable(), // plaintext, returned ONCE (null on dry_run AND on any reuse — stored hashed)
   checkedIn: z.boolean(),
-  checkinSkipped: walkinCheckinSkipped.optional(),
+  checkinSkipped: walkinCheckinSkipped.optional(), // back-compat only; no longer set for closed-window
   pointsAwarded: z.number(),
+  // Whether an existing account was matched + the state of its reg for this event (drives the confirm dialog).
+  // New-user path → { found:false, existingRegStatus:"none" }.
+  matchedExisting: z.object({
+    found: z.boolean(),
+    existingRegStatus: z.enum(["none", "registered", "checked_in", "cancelled", "waitlisted"]),
+  }),
+  pastWindow: z.boolean(), // true when the check-in stamp happened OUTSIDE the open window (gate override)
   dryRun: z.boolean(), // true = nothing was persisted (preview only)
 });
 export type WalkinRegisterResponse = z.infer<typeof walkinRegisterResponse>;
+
+// ---- Walk-in lookup (gate pre-check) — GET /events/:eventId/walkin/lookup ----
+// EXACT-match (student_id OR email) read-only probe so the gate can decide reuse-vs-create before committing.
+// EXACT only (no LIKE) to avoid user enumeration. No user id in the response — FE doesn't need it.
+const walkinLookupQuery = z.object({
+  student_id: z.string().trim().min(1),
+  email: z.string().trim().toLowerCase().email().optional(),
+});
+export const walkinLookupResponse = z.object({
+  found: z.boolean(),
+  eligible: z.boolean(), // found && role==="student" && status==="active"
+  ineligibleReason: z.enum(["not_student", "inactive"]).nullable(), // set when found && !eligible
+  user: z
+    .object({
+      full_name: z.string(),
+      student_id: z.string().nullable(),
+      email: z.string().nullable(),
+      faculty: z.string().nullable(),
+      department: z.string().nullable(),
+      nickname: z.string().nullable(),
+      year: z.number().nullable(),
+      group_number: z.number().nullable(),
+      role: z.string(),
+      status: z.string(),
+    })
+    .nullable(), // null when not found
+  existingRegStatus: z.enum(["none", "registered", "checked_in", "cancelled", "waitlisted"]),
+});
+export type WalkinLookupResponse = z.infer<typeof walkinLookupResponse>;
 
 // Admin registration-list query: server-side search/filter/pagination.
 const adminRegListQuery = z.object({
@@ -1074,6 +1115,71 @@ router.post(
 // WALK-IN REGISTER (gate flow — staff/admin)
 // =====================================================================
 
+// Pre-check probe: EXACT-match a user by student_id OR email (same condition as the walk-in dup-guard),
+// so the gate UI can decide reuse-vs-create + warn on ineligible/already-registered before committing.
+// Read-only — no writes, no tx. EXACT only (never partial) to avoid user enumeration.
+router.get(
+  "/events/:eventId/walkin/lookup",
+  requireAuth,
+  requirePermission(canWalkinRegister),
+  async (c) => {
+    const { eventId } = eventIdParam.parse(c.req.param());
+    const { student_id, email } = walkinLookupQuery.parse(c.req.query());
+
+    // Event must exist (minimal check — mirrors the POST's existence guard; unpublished not re-checked here).
+    const [event] = await db.select({ id: events.id }).from(events).where(eq(events.id, eventId)).limit(1);
+    if (!event) throw notFound("Event not found");
+
+    const conds = [eq(users.studentId, student_id)];
+    if (email) conds.push(eq(users.email, email));
+    const [u] = await db.select().from(users).where(or(...conds)).limit(1);
+
+    if (!u) {
+      const res: WalkinLookupResponse = {
+        found: false,
+        eligible: false,
+        ineligibleReason: null,
+        user: null,
+        existingRegStatus: "none",
+      };
+      return c.json(res);
+    }
+
+    // Eligibility for walk-in: only an ACTIVE student can be registered as a participant.
+    // not_student wins when both apply (it's the harder block — never silently walk-in a privileged account).
+    const ineligibleReason: WalkinLookupResponse["ineligibleReason"] =
+      u.role !== "student" ? "not_student" : u.status !== "active" ? "inactive" : null;
+    const eligible = ineligibleReason === null;
+
+    // Resolve any existing reg for this (event, user) so the UI can warn "already registered/checked in".
+    const [existingReg] = await db
+      .select({ status: registrations.status })
+      .from(registrations)
+      .where(and(eq(registrations.eventId, eventId), eq(registrations.userId, u.id)))
+      .limit(1);
+
+    const res: WalkinLookupResponse = {
+      found: true,
+      eligible,
+      ineligibleReason,
+      user: {
+        full_name: u.fullName,
+        student_id: u.studentId,
+        email: u.email,
+        faculty: u.faculty,
+        department: u.department,
+        nickname: u.nickname,
+        year: u.year,
+        group_number: u.groupNumber,
+        role: u.role,
+        status: u.status,
+      },
+      existingRegStatus: (existingReg?.status ?? "none") as WalkinLookupResponse["existingRegStatus"],
+    };
+    return c.json(res);
+  },
+);
+
 // Create a brand-new no-account student + register them + optionally check them in, in ONE tx.
 // CLAIM mode: passwordHash=null, passwordMustChange=false — student claims later via /auth/claim (student_id).
 // Form answers are FULLY RELAXED (allowMissingRequired). checkin_now with a CLOSED window does NOT fail the
@@ -1097,19 +1203,34 @@ router.post(
       if (event.status !== "published")
         throw badRequest("event_not_published", "Event is not published");
 
-      // Dup guard: a user already on file with this student_id (or email) → tell the gate to search + check-in instead.
+      // Resolve-or-create: a user already on file with this student_id (or email) is REUSED (no new account,
+      // no profile overwrite) instead of 409. Select the FULL row — we need role + profile for the preview.
       const dupConds = [eq(users.studentId, body.student_id)];
       if (body.email) dupConds.push(eq(users.email, body.email));
       const [dupUser] = await tx
-        .select({ id: users.id })
+        .select()
         .from(users)
         .where(or(...dupConds))
         .limit(1);
-      if (dupUser)
-        throw conflict(
-          "user_exists",
-          "A user with this student ID or email already exists — search for them and check them in instead",
-        );
+      if (dupUser) {
+        // Never walk-in a privileged account as a participant (data-about-the-target guard, not actor perm).
+        if (dupUser.role !== "student")
+          throw conflict("cannot_walkin_privileged", "Cannot walk-in a non-student (admin/staff) account");
+        if (dupUser.status !== "active")
+          throw conflict("user_inactive", "User account is not active — escalate to admin");
+        // Two-step confirm: a real reuse must carry confirm_reuse=true (set after the dry_run preview).
+        if (!body.dry_run && !body.confirm_reuse)
+          throw conflict(
+            "user_exists",
+            "A user with this student ID or email already exists — search for them and check them in instead",
+          );
+      }
+      const reuse = dupUser != null; // reuse existing account (no insert, no profile overwrite, no user_created audit)
+
+      // full_name is optional on the wire but REQUIRED to mint a new account (reuse never overwrites the profile,
+      // so it's ignored there). Fire on dry_run too so the preview surfaces the missing-name error up-front.
+      if (!reuse && !body.full_name)
+        throw badRequest("full_name_required", "ชื่อ-นามสกุลจำเป็นสำหรับบัญชีใหม่");
 
       const version = await getActiveFormVersion(tx, eventId);
       if (!version) throw badRequest("no_active_form", "Event has no active form version");
@@ -1120,145 +1241,130 @@ router.post(
       });
 
       const now = new Date();
-      // Compute the check-in window state up-front (same gates as the manual-checkin path) so dry_run can
-      // preview it and the real path can decide stamp-or-skip without re-reading.
+      // Compute the check-in window state up-front (for honesty/preview only — the stamp now ALWAYS happens
+      // when checkin_now is set, even past a closed window; windowOpen just flags whether it's an override).
       const checkinClose = effectiveCheckinClose(event.checkinCloseAt, event.eventEndAt);
-      let checkinSkipped: "checkin_not_open" | "checkin_closed" | undefined;
-      if (event.checkinOpenAt && now < event.checkinOpenAt) checkinSkipped = "checkin_not_open";
-      else if (checkinClose && now > checkinClose) checkinSkipped = "checkin_closed";
-      const windowOpen = checkinSkipped === undefined;
+      const windowOpen =
+        !(event.checkinOpenAt && now < event.checkinOpenAt) && !(checkinClose && now > checkinClose);
+      const pastWindow = body.checkin_now && !windowOpen; // stamp will happen outside the open window (gate override)
+
+      // Existing reg for (event, reused user) — an on-file account may already have a reg (unique(event,user)).
+      // Only meaningful when reusing; a brand-new user can't have one. (SELECT is safe inside the rolled-back dry_run tx.)
+      const existingReg = reuse
+        ? (
+            await tx
+              .select()
+              .from(registrations)
+              .where(and(eq(registrations.eventId, eventId), eq(registrations.userId, dupUser!.id)))
+              .limit(1)
+          )[0]
+        : undefined;
+      const existingRegStatus = (existingReg?.status ?? "none") as
+        | "none"
+        | "registered"
+        | "checked_in"
+        | "cancelled"
+        | "waitlisted";
 
       // Capacity is READ but never blocks (mirrors admin manual register — audit over-capacity, never reject).
       const count = await countActiveRegistrations(tx, eventId);
       const overCapacity =
         event.capacityEnabled && event.capacityLimit != null && count >= event.capacityLimit;
 
-      // Would-award preview: only matters when check-in would actually happen on the real run.
-      const wouldCheckIn = body.checkin_now && windowOpen;
-
-      // ----- dry_run: full validation + dup check + window state done above; preview WITHOUT mutating. -----
+      // ----- dry_run: full validation + resolve + window state done above; preview WITHOUT mutating. -----
       if (body.dry_run) {
+        // Reused account → show its REAL profile (we never overwrite). New account → echo the typed values.
+        const previewUser: WalkinRegisterResponse["user"] = reuse
+          ? serializeWalkinUser(dupUser!)
+          : {
+              id: "00000000-0000-0000-0000-000000000000", // placeholder — no row created on dry_run
+              email: body.email ?? null,
+              student_id: body.student_id,
+              role: "student",
+              full_name: body.full_name!, // guaranteed present on new-user path (full_name_required guard above)
+              faculty: body.faculty ?? null,
+              department: body.department ?? null,
+              phone: body.phone ?? null,
+              nickname: body.nickname ?? null,
+              year: body.year ?? null,
+              group_number: body.group_number ?? null,
+              status: "active",
+              claimed: false,
+              created_at: now.toISOString(),
+            };
         // Roll back so nothing is written (no user, no reg, no audit).
         throw new WalkinDryRunResult({
-          user: {
-            id: "00000000-0000-0000-0000-000000000000", // placeholder — no row created on dry_run
+          user: previewUser,
+          registration: {
+            eventId,
+            status: body.checkin_now ? "checked_in" : "registered", // stamp always happens now
+            registrationSource: existingReg?.registrationSource ?? body.source,
+          },
+          qrToken: null,
+          checkedIn: body.checkin_now,
+          pointsAwarded: 0, // preview can't compute the real award without writing; 0 is a safe hint
+          matchedExisting: { found: reuse, existingRegStatus },
+          pastWindow,
+          dryRun: true,
+        });
+      }
+
+      // ----- real run: resolve user (reuse-or-create CLAIM mode), resolve reg, optionally check in. -----
+      let target: typeof users.$inferSelect;
+      if (reuse) {
+        // Reuse the existing account verbatim — no profile overwrite, no user_created audit.
+        target = dupUser!;
+      } else {
+        // The pre-check above is a fast path; two concurrent same-student_id walk-ins can both pass it,
+        // so the second insert hits the users unique constraint (student_id/email). Catch 23505 and
+        // re-throw as a clean 409 user_exists instead of letting it scrub to a 500.
+        const created = await tx
+          .insert(users)
+          .values({
             email: body.email ?? null,
-            student_id: body.student_id,
+            studentId: body.student_id,
             role: "student",
-            full_name: body.full_name,
+            status: "active",
+            fullName: body.full_name!, // guaranteed present on new-user path (full_name_required guard above)
             faculty: body.faculty ?? null,
             department: body.department ?? null,
             phone: body.phone ?? null,
             nickname: body.nickname ?? null,
             year: body.year ?? null,
-            group_number: body.group_number ?? null,
-            status: "active",
-            claimed: false,
-            created_at: now.toISOString(),
-          },
-          registration: {
-            eventId,
-            status: wouldCheckIn ? "checked_in" : "registered",
-            registrationSource: body.source, // preview reflects the chosen source
-          },
-          qrToken: null,
-          checkedIn: wouldCheckIn,
-          checkinSkipped: body.checkin_now && !windowOpen ? checkinSkipped : undefined,
-          pointsAwarded: 0, // preview can't compute the real award without writing; 0 is a safe hint
-          dryRun: true,
-        });
-      }
+            groupNumber: body.group_number ?? null, // บรรพ — staff-assigned at walk-in
+            passwordHash: null, // CLAIM mode — student self-claims later via student_id
+            passwordMustChange: false,
+            createdByAdminId: actor.id,
+          })
+          .returning()
+          .then(([row]) => row)
+          .catch((e: unknown) => {
+            if (isUniqueViolation(e))
+              throw conflict(
+                "user_exists",
+                "A user with this student ID or email already exists — search for them and check them in instead",
+              );
+            throw e;
+          });
+        if (!created) throw new Error("walk-in user insert returned no row");
+        target = created;
 
-      // ----- real run: create user (CLAIM mode), register, optionally check in. -----
-      // The pre-check above is a fast path; two concurrent same-student_id walk-ins can both pass it,
-      // so the second insert hits the users unique constraint (student_id/email). Catch 23505 and
-      // re-throw as a clean 409 user_exists instead of letting it scrub to a 500.
-      const created = await tx
-        .insert(users)
-        .values({
-          email: body.email ?? null,
-          studentId: body.student_id,
-          role: "student",
-          status: "active",
-          fullName: body.full_name,
-          faculty: body.faculty ?? null,
-          department: body.department ?? null,
-          phone: body.phone ?? null,
-          nickname: body.nickname ?? null,
-          year: body.year ?? null,
-          groupNumber: body.group_number ?? null, // บรรพ — staff-assigned at walk-in
-          passwordHash: null, // CLAIM mode — student self-claims later via student_id
-          passwordMustChange: false,
-          createdByAdminId: actor.id,
-        })
-        .returning()
-        .then(([row]) => row)
-        .catch((e: unknown) => {
-          if (isUniqueViolation(e))
-            throw conflict(
-              "user_exists",
-              "A user with this student ID or email already exists — search for them and check them in instead",
-            );
-          throw e;
-        });
-      if (!created) throw new Error("walk-in user insert returned no row");
-
-      await writeAudit(
-        {
-          actorUserId: actor.id,
-          actorRole: actor.role,
-          action: "user_created",
-          entityType: "user",
-          entityId: created.id,
-          targetUserId: created.id,
-          newValue: {
-            email: created.email,
-            student_id: created.studentId,
-            role: created.role,
-            group_number: created.groupNumber,
-            provision_mode: "claim",
-            walkin: true,
-          },
-          reason: body.reason,
-          ...meta,
-        },
-        tx,
-      );
-
-      const reg = await insertReg(tx, eventId, created.id, "registered", version.id, now, {
-        source: body.source, // desk can pick normal/walkin; gate sends walkin
-      });
-      await writeAnswers(tx, reg.id, version.id, values);
-      const qrToken = await issueQrToken(tx, reg.id, actor.id);
-
-      await writeAudit(
-        {
-          actorUserId: actor.id,
-          actorRole: actor.role,
-          action: "registration_created",
-          entityType: "registration",
-          entityId: reg.id,
-          eventId,
-          registrationId: reg.id,
-          targetUserId: created.id,
-          newValue: { status: "registered", walkin: true },
-          reason: body.reason,
-          ...meta,
-        },
-        tx,
-      );
-      if (overCapacity) {
         await writeAudit(
           {
             actorUserId: actor.id,
             actorRole: actor.role,
-            action: "admin_register_over_capacity",
-            entityType: "registration",
-            entityId: reg.id,
-            eventId,
-            registrationId: reg.id,
+            action: "user_created",
+            entityType: "user",
+            entityId: created.id,
             targetUserId: created.id,
-            metadata: { count, limit: event.capacityLimit, walkin: true },
+            newValue: {
+              email: created.email,
+              student_id: created.studentId,
+              role: created.role,
+              group_number: created.groupNumber,
+              provision_mode: "claim",
+              walkin: true,
+            },
             reason: body.reason,
             ...meta,
           },
@@ -1266,65 +1372,147 @@ router.post(
         );
       }
 
-      // Optional check-in. Skip (don't fail) when the window is closed — gate still captured the walk-in.
+      // Resolve-or-create the registration. unique(event,user) → a reused account may already have a reg.
+      let reg: typeof registrations.$inferSelect;
+      let qrToken: string | null = null; // plaintext returned ONLY for a freshly issued token (existing QR is hashed)
+      if (!existingReg) {
+        // No reg yet → create fresh (answers + QR + audit) for both new and reused accounts.
+        reg = await insertReg(tx, eventId, target.id, "registered", version.id, now, {
+          source: body.source, // desk can pick normal/walkin; gate sends walkin
+        });
+        await writeAnswers(tx, reg.id, version.id, values);
+        qrToken = await issueQrToken(tx, reg.id, actor.id);
+
+        await writeAudit(
+          {
+            actorUserId: actor.id,
+            actorRole: actor.role,
+            action: "registration_created",
+            entityType: "registration",
+            entityId: reg.id,
+            eventId,
+            registrationId: reg.id,
+            targetUserId: target.id,
+            newValue: { status: "registered", walkin: true },
+            reason: body.reason,
+            ...meta,
+          },
+          tx,
+        );
+        if (overCapacity) {
+          await writeAudit(
+            {
+              actorUserId: actor.id,
+              actorRole: actor.role,
+              action: "admin_register_over_capacity",
+              entityType: "registration",
+              entityId: reg.id,
+              eventId,
+              registrationId: reg.id,
+              targetUserId: target.id,
+              metadata: { count, limit: event.capacityLimit, walkin: true },
+              reason: body.reason,
+              ...meta,
+            },
+            tx,
+          );
+        }
+      } else if (existingReg.status === "cancelled" || existingReg.status === "waitlisted") {
+        // Revive a cancelled/waitlisted reg → registered. Preserve answers/QR/source (don't rewrite).
+        reg = await reactivate(tx, existingReg.id, "registered", existingReg.formVersionId ?? version.id, now);
+        await writeAudit(
+          {
+            actorUserId: actor.id,
+            actorRole: actor.role,
+            action: "registration_status_changed",
+            entityType: "registration",
+            entityId: reg.id,
+            eventId,
+            registrationId: reg.id,
+            targetUserId: target.id,
+            oldValue: { status: existingReg.status },
+            newValue: { status: "registered" },
+            metadata: { walkin: true, revived: true },
+            reason: body.reason,
+            ...meta,
+          },
+          tx,
+        );
+      } else {
+        // Already registered/checked_in → reuse as-is (no answers rewrite, no new QR).
+        reg = existingReg;
+      }
+
+      // Optional check-in — stamps NOW regardless of window (gate override; pastWindow flags it). Idempotent.
       let checkedIn = false;
       let pointsAwarded = 0;
       let finalReg = reg;
-      if (body.checkin_now && windowOpen) {
-        const [stamped] = await tx
-          .update(registrations)
-          .set({
-            status: "checked_in",
-            checkedInAt: now,
-            checkedInByUserId: actor.id,
-            checkinMethod: "walkin",
-            manualCheckinReason: null,
-            updatedAt: now,
-          })
-          .where(eq(registrations.id, reg.id))
-          .returning();
-        if (stamped) finalReg = stamped;
-        checkedIn = true;
+      if (body.checkin_now) {
+        if (reg.checkedInAt) {
+          // Already checked in → idempotent: no re-stamp, no re-award (mirrors already_checked_in).
+          checkedIn = true;
+        } else {
+          const [stamped] = await tx
+            .update(registrations)
+            .set({
+              status: "checked_in",
+              checkedInAt: now,
+              checkedInByUserId: actor.id,
+              checkinMethod: "walkin",
+              manualCheckinReason: null,
+              updatedAt: now,
+            })
+            .where(eq(registrations.id, reg.id))
+            .returning();
+          if (stamped) finalReg = stamped;
+          checkedIn = true;
 
-        // Award checkin_in (student/toggle/cutoff self-guarded inside; idempotent). Walk-in student is always role=student.
-        const award = await awardCheckinIn(tx, {
-          eventId,
-          registrationId: reg.id,
-          studentUserId: created.id,
-          studentRole: created.role,
-          scannedByUserId: actor.id,
-          eventTitle: event.title,
-          scanMethod: "walkin", // honest provenance — gate walk-in, not a search/scan
-        });
-        pointsAwarded = award.pointsAwarded;
-
-        await writeAudit(
-          {
-            actorUserId: actor.id,
-            actorRole: actor.role,
-            action: "manual_checkin",
-            entityType: "registration",
-            entityId: reg.id,
+          // Award checkin_in (student/toggle/cutoff self-guarded inside; past cutoff → 0 pts but stamp stays).
+          const award = await awardCheckinIn(tx, {
             eventId,
             registrationId: reg.id,
-            targetUserId: created.id,
-            oldValue: { status: "registered" },
-            newValue: { status: "checked_in", method: "walkin", pointsAwarded: award.pointsAwarded },
-            reason: body.reason,
-            ...meta,
-          },
-          tx,
-        );
+            studentUserId: target.id,
+            studentRole: target.role,
+            scannedByUserId: actor.id,
+            eventTitle: event.title,
+            scanMethod: "walkin", // honest provenance — gate walk-in, not a search/scan
+          });
+          pointsAwarded = award.pointsAwarded;
+
+          await writeAudit(
+            {
+              actorUserId: actor.id,
+              actorRole: actor.role,
+              action: "manual_checkin",
+              entityType: "registration",
+              entityId: reg.id,
+              eventId,
+              registrationId: reg.id,
+              targetUserId: target.id,
+              oldValue: { status: reg.status },
+              newValue: {
+                status: "checked_in",
+                method: "walkin",
+                pointsAwarded: award.pointsAwarded,
+                past_window: pastWindow, // gate override audit trail
+              },
+              reason: body.reason,
+              ...meta,
+            },
+            tx,
+          );
+        }
       }
 
       return {
-        user: serializeWalkinUser(created),
+        user: serializeWalkinUser(target),
         registration: serializeRegistration(finalReg),
         qrToken,
         checkedIn,
-        // Only report a skip when check-in was actually requested but the window blocked it.
-        checkinSkipped: body.checkin_now && !checkedIn ? checkinSkipped : undefined,
+        checkinSkipped: undefined, // closed-window no longer skips — stamp always happens
         pointsAwarded,
+        matchedExisting: { found: reuse, existingRegStatus },
+        pastWindow,
         dryRun: false,
       };
     }).catch((e) => {

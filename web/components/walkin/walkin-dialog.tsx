@@ -7,9 +7,9 @@
 //
 // SAFETY: we NEVER synthesize success. Only a real 2xx WalkinRegisterResponse from the server is a success;
 // any ApiError (incl. 409 user_exists) is shown as a friendly message and nothing is treated as committed.
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, CheckCircle2, AlertTriangle, Info } from "lucide-react";
-import { apiPost, ApiError } from "@/lib/api";
+import { apiGet, apiPost, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,13 +30,29 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { RegistrationSource } from "@/lib/types";
-// Backend Zod-inferred response shape — single source of truth (types only, erased at build).
-import type { WalkinRegisterResponse } from "@be/modules/registrations/routes";
+// Backend Zod-inferred response shapes — single source of truth (types only, erased at build).
+import type { WalkinRegisterResponse, WalkinLookupResponse } from "@be/modules/registrations/routes";
 
-// Thai labels for the skip reason returned when checkin_now was asked but the window was closed.
-const SKIP_LABEL: Record<NonNullable<WalkinRegisterResponse["checkinSkipped"]>, string> = {
-  checkin_not_open: "ช่วงเวลาเช็คอินยังไม่เปิด",
-  checkin_closed: "ช่วงเวลาเช็คอินปิดแล้ว",
+// Thai labels for an existing account's prior registration state (drives the confirm-screen banner).
+const REG_STATUS_LABEL: Record<
+  WalkinRegisterResponse["matchedExisting"]["existingRegStatus"],
+  string
+> = {
+  none: "ยังไม่ลงทะเบียน",
+  registered: "ลงทะเบียนแล้ว",
+  checked_in: "เช็คอินแล้ว",
+  cancelled: "ยกเลิก",
+  waitlisted: "รอคิว",
+};
+
+// Inline-card reg-status line for the auto-detected existing account (early hint while typing).
+// cancelled/waitlisted carry a "(จะกู้คืน)" suffix built at render time.
+const LOOKUP_REG_STATUS_LABEL: Record<WalkinLookupResponse["existingRegStatus"], string> = {
+  none: "ยังไม่ลงทะเบียน",
+  registered: "ลงทะเบียนแล้ว",
+  checked_in: "เช็คอินแล้ว",
+  cancelled: "ยกเลิก",
+  waitlisted: "รอคิว",
 };
 
 type FormState = {
@@ -69,9 +85,11 @@ function buildBody(
   checkinNow: boolean,
   source: RegistrationSource,
   dryRun: boolean,
+  confirmReuse: boolean,
+  reuseExisting: boolean, // omit full_name when reusing — backend ignores it on reuse, keep body clean
 ) {
   return {
-    full_name: f.full_name.trim(),
+    full_name: reuseExisting ? undefined : f.full_name.trim(),
     student_id: f.student_id.trim(),
     email: f.email.trim() || undefined,
     faculty: f.faculty.trim() || undefined,
@@ -83,6 +101,8 @@ function buildBody(
     source: checkinNow ? "walkin" : source,
     checkin_now: checkinNow,
     dry_run: dryRun,
+    // Reuse an existing matched account on commit; preview never confirms (dry_run shows the identity first).
+    confirm_reuse: confirmReuse,
   };
 }
 
@@ -112,7 +132,65 @@ export function WalkinDialog({
   // Final committed result; while set we show the result screen.
   const [result, setResult] = useState<WalkinRegisterResponse | null>(null);
 
-  const valid = form.full_name.trim() !== "" && form.student_id.trim() !== "" && reason.trim() !== "";
+  // Auto-detect: debounced lookup by student_id. `lookup` is the resolved result (null = not yet resolved).
+  // Submit is gated on `!lookingUp` (wait for in-flight detect) — NOT on a successful lookup, so a flaky
+  // lookup GET can't hard-block the desk; on lookup error we degrade to the authoritative POST dry_run flow.
+  const [lookup, setLookup] = useState<WalkinLookupResponse | null>(null);
+  const [lookingUp, setLookingUp] = useState(false);
+  const [lookupError, setLookupError] = useState(false); // detect failed → degrade to manual entry + POST
+  // Bumped on every dialog reset so an in-flight debounce/fetch from a previous session is ignored.
+  const lookupSeq = useRef(0);
+
+  // Debounce the lookup ~400ms after student_id changes; ignore stale/out-of-order responses by
+  // comparing the response's query (sid) against the CURRENT student_id when it lands.
+  useEffect(() => {
+    const sid = form.student_id.trim();
+    const email = form.email.trim();
+    if (sid === "") {
+      // Idle / cleared — neutral, nothing resolved.
+      setLookup(null);
+      setLookingUp(false);
+      setLookupError(false);
+      return;
+    }
+    const seq = lookupSeq.current;
+    setLookingUp(true);
+    setLookupError(false);
+    const t = setTimeout(async () => {
+      const qs = new URLSearchParams({ student_id: sid });
+      if (email) qs.set("email", email);
+      // Stale guard: dialog reset, or student_id/email moved on while fetching → drop this result.
+      const stale = () => seq !== lookupSeq.current || sid !== form.student_id.trim() || email !== form.email.trim();
+      try {
+        const res = await apiGet<WalkinLookupResponse>(`/events/${eventId}/walkin/lookup?${qs.toString()}`);
+        if (stale()) return;
+        setLookup(res);
+      } catch {
+        // Best-effort hint — on error flag degrade (submit allowed via full_name + POST), don't crash.
+        if (stale()) return;
+        setLookup(null);
+        setLookupError(true);
+      } finally {
+        if (!stale()) setLookingUp(false);
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [form.student_id, form.email, eventId]);
+
+  // Detection-derived flags. `foundEligible` = reuse an existing student (lock the new-account inputs).
+  const foundEligible = lookup?.found === true && lookup.eligible === true;
+  const foundIneligible = lookup?.found === true && lookup.eligible === false;
+  const isNew = lookup?.found === false; // resolved + not found → creating a new account
+
+  // valid: id+reason present, no in-flight detect, not an ineligible match. full_name required unless an
+  // eligible existing student was matched. On lookup error (no match resolved) we fall back to requiring
+  // full_name and let the POST dry_run resolve authoritatively — never hard-block the desk on a flaky GET.
+  const valid =
+    form.student_id.trim() !== "" &&
+    reason.trim() !== "" &&
+    !lookingUp &&
+    !foundIneligible &&
+    (foundEligible || form.full_name.trim() !== "");
 
   function set<K extends keyof FormState>(key: K, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -126,6 +204,9 @@ export function WalkinDialog({
     setPreview(null);
     setResult(null);
     setSubmitting(false);
+    setLookup(null);
+    setLookingUp(false);
+    lookupSeq.current += 1; // invalidate any in-flight lookup from the closed session
   }
 
   // Map backend error codes to friendly Thai. user_exists is the important one — tell staff to use search.
@@ -135,6 +216,10 @@ export function WalkinDialog({
         return checkinNow
           ? "มีบัญชีอยู่แล้วสำหรับรหัส/อีเมลนี้ — ให้ใช้ \"ค้นหาด้วยตนเอง\" เพื่อเช็คอินแทน"
           : "มีบัญชีอยู่แล้วสำหรับรหัส/อีเมลนี้ — ให้ใช้ช่องเพิ่มผู้เข้าร่วมจากผู้ใช้ที่มีอยู่แทน";
+      // Matched account is privileged/inactive — walk-in-as-participant is blocked.
+      if (err.code === "cannot_walkin_privileged")
+        return "บัญชีนี้เป็นเจ้าหน้าที่/แอดมิน ไม่สามารถ walk-in เป็นผู้เข้าร่วมได้";
+      if (err.code === "user_inactive") return "บัญชีนี้ถูกระงับ — ติดต่อแอดมิน";
       if (err.code === "event_not_published") return "กิจกรรมนี้ยังไม่ได้เผยแพร่";
       if (err.code === "no_active_form") return "กิจกรรมนี้ยังไม่มีแบบฟอร์มที่ใช้งานอยู่";
       if (err.code === "invalid_form_answers") return "คำตอบแบบฟอร์มไม่ถูกต้อง";
@@ -151,7 +236,8 @@ export function WalkinDialog({
     try {
       const res = await apiPost<WalkinRegisterResponse>(
         `/events/${eventId}/walkin`,
-        buildBody(form, reason, checkinNow, source, true),
+        // dry_run never confirms reuse; omit full_name when detect already matched an eligible account.
+        buildBody(form, reason, checkinNow, source, true, false, foundEligible),
       );
       setPreview(res);
     } catch (err) {
@@ -169,7 +255,17 @@ export function WalkinDialog({
     try {
       const res = await apiPost<WalkinRegisterResponse>(
         `/events/${eventId}/walkin`,
-        buildBody(form, reason, checkinNow, source, false),
+        // Staff is on the confirm screen = they've vetted the matched identity → auto-send confirm_reuse.
+        // Reuse is authoritatively decided by the dry-run's matchedExisting (also drives full_name omission).
+        buildBody(
+          form,
+          reason,
+          checkinNow,
+          source,
+          false,
+          preview?.matchedExisting?.found ?? false,
+          preview?.matchedExisting?.found ?? false,
+        ),
       );
       setResult(res);
       onDone();
@@ -193,7 +289,7 @@ export function WalkinDialog({
       <DialogContent className="max-h-[85vh] overflow-y-auto">
         {/* THREE views: result (committed) > preview (confirm) > form (default). */}
         {result ? (
-          <ResultView result={result} checkinNow={checkinNow} onClose={() => handleOpenChange(false)} />
+          <ResultView result={result} onClose={() => handleOpenChange(false)} />
         ) : preview ? (
           <PreviewView
             preview={preview}
@@ -215,25 +311,121 @@ export function WalkinDialog({
             </DialogHeader>
 
             <div className="space-y-3">
-              <Field label="ชื่อ-นามสกุล" required value={form.full_name} onChange={(v) => set("full_name", v)} />
+              {/* Auto-detect is on: typing the รหัสนักศึกษา probes the system for an existing account. */}
+              <p className="flex items-start gap-2 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                <Info className="mt-0.5 size-4 shrink-0" />
+                <span>
+                  พิมพ์<strong>รหัสนักศึกษา</strong> ระบบจะตรวจสอบให้อัตโนมัติว่ามีบัญชีอยู่แล้วหรือไม่
+                </span>
+              </p>
+
+              {/* student_id is the FIRST + driving field; the lookup keys off it. */}
               <Field
                 label="รหัสนักศึกษา"
                 required
                 value={form.student_id}
                 onChange={(v) => set("student_id", v)}
               />
-              <Field label="อีเมล" value={form.email} onChange={(v) => set("email", v)} type="email" />
+
+              {/* Detection state: loading / existing-account card / ineligible block / new-account hint. */}
+              {lookingUp ? (
+                <p className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" /> กำลังตรวจสอบ…
+                </p>
+              ) : foundEligible && lookup?.user ? (
+                // Read-only card of the REAL account data so staff don't need a separate lookup UI.
+                <div className="space-y-1.5 rounded-md border border-blue-200 bg-blue-50/60 p-3 text-sm">
+                  <p className="flex items-center gap-2 font-medium text-blue-800">
+                    <CheckCircle2 className="size-4 shrink-0" /> ข้อมูลนักศึกษาที่มีอยู่ในระบบ
+                  </p>
+                  <Row label="ชื่อ-นามสกุล" value={lookup.user.full_name} />
+                  {lookup.user.group_number != null ? (
+                    <Row label="บรรพ" value={String(lookup.user.group_number)} />
+                  ) : null}
+                  {lookup.user.faculty ? <Row label="คณะ" value={lookup.user.faculty} /> : null}
+                  {lookup.user.department ? <Row label="สาขา" value={lookup.user.department} /> : null}
+                  {lookup.user.email ? <Row label="อีเมล" value={lookup.user.email} /> : null}
+                  <Row
+                    label="สถานะการลงทะเบียน"
+                    value={
+                      lookup.existingRegStatus === "cancelled" || lookup.existingRegStatus === "waitlisted"
+                        ? `${LOOKUP_REG_STATUS_LABEL[lookup.existingRegStatus]} (จะกู้คืน)`
+                        : LOOKUP_REG_STATUS_LABEL[lookup.existingRegStatus]
+                    }
+                  />
+                </div>
+              ) : foundIneligible ? (
+                <p className="flex items-start gap-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                  {lookup?.ineligibleReason === "not_student"
+                    ? "บัญชีนี้เป็นเจ้าหน้าที่/แอดมิน ไม่สามารถ walk-in เป็นผู้เข้าร่วมได้"
+                    : "บัญชีนี้ถูกระงับ — ติดต่อแอดมิน"}
+                </p>
+              ) : isNew ? (
+                <p className="flex items-start gap-2 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                  <Info className="mt-0.5 size-4 shrink-0" />
+                  ไม่พบในระบบ — จะสร้างบัญชีใหม่
+                </p>
+              ) : lookupError ? (
+                // Detect failed — don't block; let staff fill the form, the POST dry_run resolves authoritatively.
+                <p className="flex items-start gap-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                  ตรวจสอบอัตโนมัติไม่สำเร็จ — กรอกชื่อ-นามสกุลแล้วกด “ตรวจสอบ” เพื่อดำเนินการต่อได้
+                </p>
+              ) : null}
+
+              {/* New-account inputs: disabled when an eligible account was matched (reuse, don't overwrite).
+                  full_name lives HERE now — required only when creating a new account. */}
+              <p className="pt-1 text-xs font-medium text-muted-foreground">ข้อมูลสำหรับบัญชีใหม่</p>
+              <Field
+                label="ชื่อ-นามสกุล"
+                required={!foundEligible}
+                value={form.full_name}
+                onChange={(v) => set("full_name", v)}
+                disabled={foundEligible}
+              />
+              <Field
+                label="อีเมล"
+                value={form.email}
+                onChange={(v) => set("email", v)}
+                type="email"
+                disabled={foundEligible}
+              />
               <div className="grid grid-cols-2 gap-3">
-                <Field label="คณะ" value={form.faculty} onChange={(v) => set("faculty", v)} />
-                <Field label="สาขา" value={form.department} onChange={(v) => set("department", v)} />
+                <Field label="คณะ" value={form.faculty} onChange={(v) => set("faculty", v)} disabled={foundEligible} />
+                <Field
+                  label="สาขา"
+                  value={form.department}
+                  onChange={(v) => set("department", v)}
+                  disabled={foundEligible}
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <Field label="ชื่อเล่น" value={form.nickname} onChange={(v) => set("nickname", v)} />
-                <Field label="เบอร์โทร" value={form.phone} onChange={(v) => set("phone", v)} />
+                <Field
+                  label="ชื่อเล่น"
+                  value={form.nickname}
+                  onChange={(v) => set("nickname", v)}
+                  disabled={foundEligible}
+                />
+                <Field
+                  label="เบอร์โทร"
+                  value={form.phone}
+                  onChange={(v) => set("phone", v)}
+                  disabled={foundEligible}
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
-                {/* บรรพ = group 1..16; staff-assigned label only (not a claim factor — claim is by student_id). */}
-                <Field label="บรรพ" value={form.group_number} onChange={(v) => set("group_number", v)} type="number" />
+                {/* บรรพ = staff-assigned cohort label only (not a claim factor — claim is by student_id). */}
+                <div className="space-y-1.5">
+                  <Field
+                    label="บรรพ"
+                    value={form.group_number}
+                    onChange={(v) => set("group_number", v)}
+                    type="number"
+                    disabled={foundEligible}
+                  />
+                  <p className="text-xs text-muted-foreground">ใช้กับบัญชีใหม่เท่านั้น — บัญชีเดิมจะคงบรรพเดิมไว้</p>
+                </div>
                 <div />
               </div>
 
@@ -298,20 +490,27 @@ function Field({
   onChange,
   required,
   type,
+  disabled,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   required?: boolean;
   type?: string;
+  disabled?: boolean; // greyed/locked when reusing an existing account
 }) {
   return (
     <div className="space-y-1.5">
-      <Label>
+      <Label className={disabled ? "text-muted-foreground" : undefined}>
         {label}
         {required ? <span className="text-destructive"> *</span> : null}
       </Label>
-      <Input type={type} value={value} onChange={(e) => onChange(e.target.value)} />
+      <Input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+      />
     </div>
   );
 }
@@ -332,8 +531,10 @@ function PreviewView({
   onBack: () => void;
   onConfirm: () => void;
 }) {
-  // When staff asked to check in but the window is closed, the reg will still be created (no check-in).
-  const willCheckIn = checkinNow && !preview.checkinSkipped;
+  // Stamp always happens now when staff asked for it — closed window no longer skips (gate override).
+  const willCheckIn = checkinNow;
+  const matched = preview.matchedExisting;
+  const regLabel = REG_STATUS_LABEL[matched.existingRegStatus];
   return (
     <>
       <DialogHeader>
@@ -353,25 +554,51 @@ function PreviewView({
           ) : null}
         </dl>
 
-        {checkinNow ? (
-          willCheckIn ? (
-            <p className="flex items-start gap-2 rounded-md bg-green-50 px-3 py-2 text-sm text-green-800">
-              <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
-              จะลงทะเบียนและเช็คอินทันที
+        {/* Existing-account banners: the identity dl above is the REAL existing data when matched. */}
+        {matched.found ? (
+          matched.existingRegStatus === "none" ? (
+            <p className="flex items-start gap-2 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
+              <Info className="mt-0.5 size-4 shrink-0" />
+              พบบัญชีที่มีอยู่แล้ว — จะใช้บัญชีนี้ (ไม่สร้างใหม่)
             </p>
-          ) : (
+          ) : matched.existingRegStatus === "registered" ? (
+            <p className="flex items-start gap-2 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
+              <Info className="mt-0.5 size-4 shrink-0" />
+              พบบัญชีเดิม ลงทะเบียนไว้แล้ว — จะเช็คอินให้
+            </p>
+          ) : matched.existingRegStatus === "checked_in" ? (
             <p className="flex items-start gap-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-              {preview.checkinSkipped ? SKIP_LABEL[preview.checkinSkipped] : "ช่วงเวลาเช็คอินปิดอยู่"} —
-              จะลงทะเบียนแต่ <strong>ยังไม่เช็คอิน</strong> (เช็คอินภายหลังได้)
+              บัญชีนี้เช็คอินไปแล้ว — กดยืนยันจะไม่เพิ่มคะแนนซ้ำ
+            </p>
+          ) : (
+            // cancelled | waitlisted → revive then check in
+            <p className="flex items-start gap-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+              พบบัญชีเดิม (สถานะ {regLabel}) — จะกู้คืนการลงทะเบียนแล้วเช็คอิน
             </p>
           )
+        ) : null}
+
+        {checkinNow ? (
+          <p className="flex items-start gap-2 rounded-md bg-green-50 px-3 py-2 text-sm text-green-800">
+            <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
+            จะลงทะเบียนและเช็คอินทันที
+          </p>
         ) : (
           <p className="flex items-start gap-2 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
             <Info className="mt-0.5 size-4 shrink-0" />
             จะลงทะเบียนเท่านั้น (ยังไม่เช็คอิน)
           </p>
         )}
+
+        {/* Out-of-window stamp note — only relevant when a check-in will actually happen. */}
+        {willCheckIn && preview.pastWindow ? (
+          <p className="flex items-start gap-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            นอกช่วงเวลาเช็คอิน — จะเช็คอินให้ (override)
+          </p>
+        ) : null}
 
         {error ? <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
       </div>
@@ -389,14 +616,13 @@ function PreviewView({
   );
 }
 
-// Result screen after a successful commit. Surfaces points + the check-in-skipped warning + student_id.
+// Result screen after a successful commit. Surfaces points + check-in state + student_id.
+// (checkin state is read from the result now — no checkinNow prop needed.)
 function ResultView({
   result,
-  checkinNow,
   onClose,
 }: {
   result: WalkinRegisterResponse;
-  checkinNow: boolean;
   onClose: () => void;
 }) {
   return (
@@ -417,19 +643,21 @@ function ResultView({
         </div>
 
         {result.checkedIn ? (
-          <p className="flex items-center gap-2 rounded-md bg-green-50 px-3 py-2 text-green-800">
-            <CheckCircle2 className="size-4 shrink-0" />
-            เช็คอินแล้ว {result.pointsAwarded > 0 ? `(+${result.pointsAwarded} คะแนน)` : ""}
-          </p>
-        ) : checkinNow ? (
-          // IMPORTANT: registered but NOT checked in because the window was closed — make this loud.
-          <p className="flex items-start gap-2 rounded-md bg-amber-50 px-3 py-2 text-amber-800">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-            ลงทะเบียนแล้วแต่ <strong>ยังไม่เช็คอิน</strong> เพราะ
-            {result.checkinSkipped ? ` ${SKIP_LABEL[result.checkinSkipped]}` : "ช่วงเวลาเช็คอินปิดอยู่"} —
-            เช็คอินให้นักศึกษาภายหลังได้
-          </p>
+          // Matched account already checked in earlier → no duplicate points; call it out explicitly.
+          result.pointsAwarded === 0 && result.matchedExisting.existingRegStatus === "checked_in" ? (
+            <p className="flex items-center gap-2 rounded-md bg-green-50 px-3 py-2 text-green-800">
+              <CheckCircle2 className="size-4 shrink-0" />
+              เช็คอินอยู่แล้ว (ไม่เพิ่มคะแนนซ้ำ)
+            </p>
+          ) : (
+            <p className="flex items-center gap-2 rounded-md bg-green-50 px-3 py-2 text-green-800">
+              <CheckCircle2 className="size-4 shrink-0" />
+              เช็คอินแล้ว{result.pastWindow ? " (นอกเวลา)" : ""}
+              {result.pointsAwarded > 0 ? ` (+${result.pointsAwarded} คะแนน)` : ""}
+            </p>
+          )
         ) : (
+          // Admin desk (checkinNow=false): registered only, no check-in.
           <p className="flex items-center gap-2 rounded-md bg-blue-50 px-3 py-2 text-blue-800">
             <Info className="size-4 shrink-0" />
             ลงทะเบียนแล้ว (ยังไม่เช็คอิน)
