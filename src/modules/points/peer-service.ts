@@ -107,7 +107,27 @@ export type ConnectOutcome = {
   profile?: PeerProfile;
   connectionId?: string;
   retryAfterSec?: number; // set on connect_cooldown AND connected_success so the UI scan-next countdown arms
+  cooldownUntil?: string; // absolute ISO-8601 UTC end-of-cooldown so a page refresh re-derives the countdown
 };
+
+// Absolute end-of-cooldown for the scanner (ISO UTC) or null if not in cooldown. Refresh-safe:
+// the frontend computes remaining seconds from this against the real clock. Read-only (no tx mutation).
+export async function getConnectCooldownUntil(
+  scannerUserId: string,
+  tx: typeof db = db,
+): Promise<string | null> {
+  const settings = await getPointSettings(tx);
+  if (settings.peerCooldownSec <= 0) return null;
+  const [last] = await tx
+    .select({ createdAt: peerConnections.createdAt })
+    .from(peerConnections)
+    .where(eq(peerConnections.scannerUserId, scannerUserId))
+    .orderBy(desc(peerConnections.createdAt))
+    .limit(1);
+  if (!last) return null;
+  const until = new Date(last.createdAt.getTime() + settings.peerCooldownSec * 1000);
+  return until.getTime() > Date.now() ? until.toISOString() : null;
+}
 
 function toProfile(u: {
   id: string;
@@ -209,10 +229,14 @@ export async function connectPeer(args: {
         const elapsedSec = (now.getTime() - last.createdAt.getTime()) / 1000;
         if (elapsedSec < settings.peerCooldownSec) {
           // No connection recorded + no award on cooldown → withhold contact (no IG harvest via spam-scan).
+          // cooldownUntil = last.createdAt + cooldown — same source as retryAfterSec (no clock drift).
           return {
             result: "connect_cooldown",
             pointsAwarded: 0,
             retryAfterSec: Math.ceil(settings.peerCooldownSec - elapsedSec),
+            cooldownUntil: new Date(
+              last.createdAt.getTime() + settings.peerCooldownSec * 1000,
+            ).toISOString(),
           };
         }
       }
@@ -264,6 +288,11 @@ export async function connectPeer(args: {
       connectionId: conn.id,
       // Arm the UI scan-next countdown after a success too (0 = cooldown disabled).
       retryAfterSec: settings.peerCooldownSec > 0 ? settings.peerCooldownSec : undefined,
+      // Absolute end so a refresh restores the countdown; computed from the SAME now used above.
+      cooldownUntil:
+        settings.peerCooldownSec > 0
+          ? new Date(now.getTime() + settings.peerCooldownSec * 1000).toISOString()
+          : undefined,
     };
   });
 }

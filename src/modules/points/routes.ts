@@ -42,6 +42,7 @@ import {
 } from "./adjust-service";
 import {
   connectPeer,
+  getConnectCooldownUntil,
   getOrCreateConnectToken,
   listConnections,
   setFavorite,
@@ -669,8 +670,10 @@ router.get("/me/connect-qr", requireAuth, async (c) => {
   const user = c.get("user");
   const rotate = c.req.query("rotate") === "1" || c.req.query("rotate") === "true";
   const { token, plaintext } = await getOrCreateConnectToken(user.id, rotate);
+  // cooldownUntil lets a page refresh restore the scan-next countdown (null = not in cooldown).
+  const cooldownUntil = await getConnectCooldownUntil(user.id);
   // plaintext is the QR payload; only the hash is persisted (no-PII QR invariant).
-  return c.json({ token: plaintext, tokenId: token.id, status: token.status });
+  return c.json({ token: plaintext, tokenId: token.id, status: token.status, cooldownUntil });
 });
 
 const connectBody = z.object({ token: z.string().min(1) });

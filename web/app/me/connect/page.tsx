@@ -41,17 +41,8 @@ function igUrl(ig: string): string {
   return `https://instagram.com/${ig.replace(/^@/, "")}`;
 }
 
-// === My add-me QR ===
-function MyQr() {
-  const [token, setToken] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    getConnectQr()
-      .then((r) => setToken(r.token))
-      .catch((e) => setError(e instanceof ApiError ? e.message : "ไม่สามารถสร้าง QR ได้"));
-  }, []);
-
+// === My add-me QR (presentational) — token/error are fetched once in ConnectInner and passed down. ===
+function MyQr({ token, error }: { token: string | null; error: string | null }) {
   return (
     <Card>
       <CardHeader>
@@ -175,8 +166,15 @@ function ConnectionRowItem({
 
 function ConnectInner() {
   const [outcome, setOutcome] = useState<ConnectOutcome | null>(null);
-  const [cooldownLeft, setCooldownLeft] = useState(0);
+  // Absolute cooldown end (ms epoch) — clock-based so a refresh/sleep re-derives the real remaining time.
+  const [cooldownUntilMs, setCooldownUntilMs] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  const cooldownLeft = Math.max(0, Math.ceil((cooldownUntilMs - now) / 1000));
   const inFlightRef = useRef(false);
+
+  // My add-me QR — fetched once here (deduped: one GET /me/connect-qr feeds both the QR and the cooldown seed).
+  const [qrToken, setQrToken] = useState<string | null>(null);
+  const [qrError, setQrError] = useState<string | null>(null);
 
   // connections list state (with ⭐ filter)
   const [favOnly, setFavOnly] = useState(false);
@@ -200,12 +198,24 @@ function ConnectInner() {
     void loadConnections();
   }, [loadConnections, reloadKey]);
 
-  // Tick down the cooldown each second while the result dialog is open.
+  // On mount, fetch the add-me QR ONCE: set the token for display + seed the cooldown from the
+  // server's absolute end (so a refresh mid-cooldown restores the countdown). One shared response.
   useEffect(() => {
-    if (cooldownLeft <= 0) return;
-    const id = setInterval(() => setCooldownLeft((s) => Math.max(0, s - 1)), 1000);
+    getConnectQr()
+      .then((r) => {
+        setQrToken(r.token);
+        if (r.cooldownUntil) setCooldownUntilMs(Date.parse(r.cooldownUntil));
+      })
+      .catch((e) => setQrError(e instanceof ApiError ? e.message : "ไม่สามารถสร้าง QR ได้"));
+  }, []);
+
+  // Re-derive remaining seconds from the real clock each second (not a blind -1, so it survives sleep).
+  // Stop ticking once the cooldown has elapsed.
+  useEffect(() => {
+    if (cooldownUntilMs <= Date.now()) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [cooldownLeft]);
+  }, [cooldownUntilMs]);
 
   // Single choke-point for a connect scan. Trust ONLY the server result; offline → deny feedback (no fake success).
   const handleToken = useCallback(
@@ -215,14 +225,18 @@ function ConnectInner() {
       try {
         const res = await connectPeer(token);
         setOutcome(res);
+        // Prefer the server's absolute cooldownUntil; fall back to retryAfterSec for older backends.
+        const armCooldown = () => {
+          if (res.cooldownUntil) setCooldownUntilMs(Date.parse(res.cooldownUntil));
+          else if (res.retryAfterSec) setCooldownUntilMs(Date.now() + res.retryAfterSec * 1000);
+        };
         if (res.result === "connected_success") {
           feedbackSuccess();
-          // arm the local cooldown so the engagement gate locks the next scan
-          setCooldownLeft(res.retryAfterSec ?? 0);
+          armCooldown(); // arm so the engagement gate locks the next scan
           void loadConnections(); // reflect the new connection in the list
         } else if (res.result === "connect_cooldown") {
           feedbackWarn();
-          setCooldownLeft(res.retryAfterSec ?? 0);
+          armCooldown();
         } else {
           feedbackWarn();
         }
@@ -265,13 +279,19 @@ function ConnectInner() {
         </TabsList>
 
         <TabsContent value="qr" className="mt-4">
-          <MyQr />
+          <MyQr token={qrToken} error={qrError} />
         </TabsContent>
 
         <TabsContent value="scan" className="mt-4 space-y-3">
           <p className="text-sm text-muted-foreground">
             สแกน QR ของเพื่อนเพื่อรับ +5 แต้ม (สแกนคนเดิมซ้ำไม่ได้แต้มเพิ่ม)
           </p>
+          {/* Restored-after-refresh cooldown is visible even when the result dialog is closed. */}
+          {cooldownLeft > 0 && (
+            <p className="text-sm text-muted-foreground">
+              รอสักครู่ {cooldownLeft} วินาที ก่อนสแกนคนต่อไป
+            </p>
+          )}
           <QrScanner onToken={handleToken} />
         </TabsContent>
 

@@ -91,10 +91,17 @@ export type ConnectOutcome = {
   profile?: PeerProfile;
   connectionId?: string;
   retryAfterSec?: number; // set on connect_cooldown so the UI can count down
+  cooldownUntil?: string | null; // absolute ISO-8601 UTC cooldown end — refresh-safe countdown source
 };
 
 // GET /me/connect-qr — caller's personal add-me token (plaintext, for the QR).
-export type ConnectQrResponse = { token: string; tokenId: string; status: string };
+// cooldownUntil = absolute cooldown end (ISO UTC) or null → seeds a refresh-restored countdown.
+export type ConnectQrResponse = {
+  token: string;
+  tokenId: string;
+  status: string;
+  cooldownUntil?: string | null;
+};
 
 // GET /me/connections — scanned-people history (newest first), with the peer's contact.
 export type ConnectionRow = {

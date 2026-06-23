@@ -50,6 +50,26 @@ describe("peer connect-qr: lazy create + reuse", () => {
     const b2 = (await r2.json()) as { tokenId: string };
     expect(b2.tokenId).toBe(b1.tokenId); // reused, not a 2nd active token
   });
+
+  it("cooldownUntil is null with no recent connect, and non-null right after a connect (refresh-safe)", async () => {
+    await setSettings({ peerCooldownSec: 3600, peerEnabled: true, cutoffAt: null });
+    const a = await loginAs("student");
+    const b = await loginAs("student");
+
+    // No connect yet → no cooldown.
+    const before = (await (await request("/me/connect-qr", { cookie: a.cookie })).json()) as {
+      cooldownUntil: string | null;
+    };
+    expect(before.cooldownUntil).toBeNull();
+
+    // After a connect → connect-qr reports an absolute cooldown end in the future.
+    await request("/points/connect", { method: "POST", cookie: a.cookie, body: { token: await connectQr(b.cookie) } });
+    const after = (await (await request("/me/connect-qr", { cookie: a.cookie })).json()) as {
+      cooldownUntil: string | null;
+    };
+    expect(after.cooldownUntil).toBeTruthy();
+    expect(Date.parse(after.cooldownUntil!)).toBeGreaterThan(Date.now());
+  });
 });
 
 // =====================================================================
@@ -198,10 +218,38 @@ describe("peer connect: cooldown", () => {
       cookie: a.cookie,
       body: { token: cToken },
     });
-    const body = (await second.json()) as { result: string; retryAfterSec: number };
+    const body = (await second.json()) as {
+      result: string;
+      retryAfterSec: number;
+      cooldownUntil: string;
+    };
     expect(body.result).toBe("connect_cooldown");
     expect(body.retryAfterSec).toBeGreaterThan(0);
+    // cooldownUntil is an absolute ISO end in the future → refresh-safe countdown source.
+    expect(body.cooldownUntil).toBeTruthy();
+    expect(Date.parse(body.cooldownUntil)).toBeGreaterThan(Date.now());
+    // No drift: cooldownUntil and retryAfterSec share one base (≈ now + retryAfterSec, ±2000ms).
+    const drift = Math.abs(Date.parse(body.cooldownUntil) - (Date.now() + body.retryAfterSec * 1000));
+    expect(drift).toBeLessThan(2000);
     expect(await balanceOf(a.user.id)).toBe(5); // only the first connect awarded
+  });
+
+  it("connected_success (peer cooldown enabled, 60s) carries a truthy future cooldownUntil", async () => {
+    await setSettings({ peerCooldownSec: 60, peerEnabled: true, cutoffAt: null });
+    const a = await loginAs("student");
+    const b = await loginAs("student");
+    const bToken = await connectQr(b.cookie);
+
+    const res = await request("/points/connect", {
+      method: "POST",
+      cookie: a.cookie,
+      body: { token: bToken },
+    });
+    const body = (await res.json()) as { result: string; cooldownUntil: string | null };
+    expect(body.result).toBe("connected_success");
+    // A successful scan also arms the cooldown → an absolute ISO end in the future.
+    expect(body.cooldownUntil).toBeTruthy();
+    expect(Date.parse(body.cooldownUntil!)).toBeGreaterThan(Date.now());
   });
 
   it("with cooldown disabled (0), back-to-back connects to different people both award", async () => {
