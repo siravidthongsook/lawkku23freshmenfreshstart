@@ -3,6 +3,8 @@
 services:
   db:
     image: postgres:16-alpine
+    # Keep prod back online after host reboot or daemon restart.
+    restart: unless-stopped
     # Secrets come from a gitignored .env in this dir (see .env.prod.example). Never inline real values.
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
@@ -21,6 +23,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # Cloudflare tunnel depends on this origin staying available.
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
@@ -46,6 +50,8 @@ services:
       args:
         # baked into Next route manifest at build time (rewrites evaluated then)
         BACKEND_URL: http://api:3000
+    # Public site should recover automatically after server reboot.
+    restart: unless-stopped
     depends_on:
       - api
     environment:
